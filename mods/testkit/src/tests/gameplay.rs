@@ -358,6 +358,8 @@ async fn place_bed(t: &T) -> Result<[i32; 3], String> {
         }
         t.secs(0.1).await?;
     }
+    // The server has it first: a click before the client does hits the floor.
+    t.until("the bed on the client", Duration::from_secs(2), |t| t.c().block(foot).is_some_and(|s| s != 0)).await?;
     Ok(foot)
 }
 
@@ -501,11 +503,13 @@ pub async fn beds(t: T) -> R {
 pub async fn beds_far(t: T) -> R {
     t.world(3).await?;
     t.op("mode creative").await?;
-    t.c().fly(true);
     t.op("time 6000").await?;
     let home = t.state().pos;
     t.cmd("/tp ~1500 ~30 ~").await?;
     t.until("far away", Duration::from_secs(10), |t| (t.state().pos[0] - home[0]).abs() > 1000.0).await?;
+    // Only now: the news of the mode, on its way above, turns flying off.
+    t.secs(0.2).await?;
+    t.c().fly(true);
     t.loaded().await?;
     let foot = place_bed(&t).await?;
     t.look_at(foot);
@@ -569,6 +573,54 @@ pub async fn dust_rests_on_the_floor(t: T) -> R {
     let after = t.shot("after").await?.share(0.2, 0.2, 0.8, 0.8, dark);
     t.note(format!("dark share on the floor: {before} then {after}"));
     t.check(after > before + 0.003, format!("pieces on the floor: {before} then {after}"));
+    Ok(())
+}
+
+/// A hard landing throws the dust of the block under the feet out around them, seen looking down
+/// from a block of coal in a snow floor.
+pub async fn landing_dust_scatters(t: T) -> R {
+    t.flat().await?;
+    let f = t.feet();
+    t.fill(add(f, [-6, -1, -6]), add(f, [6, -1, 6]), "snow").await?;
+    t.set(add(f, [0, -1, 0]), "coal_block").await?;
+    // No hurt to tilt the view.
+    t.op("mode creative").await?;
+    t.cmd(&format!("/tp {}.5 {} {}.5", f[0], f[1] + 7, f[2])).await?;
+    t.c().look(0.0, -89.9);
+    t.until("landed", Duration::from_secs(4), |t| t.state().pos[1] < f[1] as f64 + 0.01).await?;
+    // Past the block's edges on the screen, whichever way they went, any time they fly.
+    let dark = |c: [u8; 3]| c.iter().all(|&v| v < 70);
+    let mut most = 0.0f32;
+    for i in 0..4 {
+        t.secs(0.1).await?;
+        if i == 0 {
+            let n = t.state().particles;
+            t.check(n >= 40, format!("{n} particles from a 7 block fall"));
+        }
+        let s = t.shot(&format!("after{i}")).await?;
+        let around = s.share(0.2, 0.3, 0.36, 0.7, dark) + s.share(0.64, 0.3, 0.8, 0.7, dark) + s.share(0.36, 0.05, 0.64, 0.26, dark);
+        most = most.max(around);
+    }
+    t.probe("pieces around the landing", most, most > 0.002);
+    Ok(())
+}
+
+/// Sprinting kicks up the dust of what is underfoot.
+pub async fn sprint_kicks_up_dust(t: T) -> R {
+    t.flat().await?;
+    let f = t.feet();
+    t.fill(add(f, [-4, -1, -40]), add(f, [4, -1, 2]), "snow").await?;
+    t.fill(add(f, [0, -1, -40]), add(f, [0, -1, 2]), "coal_block").await?;
+    t.cmd(&format!("/tp {}.5 {} {}.5", f[0], f[1], f[2])).await?;
+    t.c().look(0.0, -75.0);
+    t.secs(0.3).await?;
+    t.press("core:forward");
+    t.frames(3).await?;
+    t.hold("core:forward", 1.5);
+    t.secs(0.9).await?;
+    let n = t.state().particles;
+    t.shot("running").await?;
+    t.check(n >= 5, format!("{n} particles kicked up"));
     Ok(())
 }
 

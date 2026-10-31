@@ -4,7 +4,10 @@
 
 const THROUGH: u32 = 65536u;
 const ON_GROUND: u32 = 131072u;
-const HALF: f32 = 0.1;
+const STOPPED: u32 = 262144u;
+// Vanilla's box: 0.2 across and 0.2 up from where it is.
+const BOX_LOW: vec3<f32> = vec3<f32>(-0.1, 0.0, -0.1);
+const BOX_HIGH: vec3<f32> = vec3<f32>(0.1, 0.2, 0.1);
 
 // A block's word: light (a nibble each: sky, red, green, blue), then what is solid of it from
 // bottom to top in sixteenths. What is not in the window is nothing, under the open sky.
@@ -28,13 +31,13 @@ fn solid_span(word: u32) -> vec2<f32> {
 
 // Whether the box around `p` overlaps anything solid (`p` from the origin).
 fn overlaps(p: vec3<f32>) -> bool {
-    let lo = vec3<i32>(floor(p - vec3(HALF)));
-    let hi = vec3<i32>(floor(p + vec3(HALF)));
+    let lo = vec3<i32>(floor(p + BOX_LOW));
+    let hi = vec3<i32>(floor(p + BOX_HIGH));
     for (var z = lo.z; z <= hi.z; z++) {
         for (var y = lo.y; y <= hi.y; y++) {
             for (var x = lo.x; x <= hi.x; x++) {
                 let s = solid_span(cell_word(vec3(x, y, z) + args.origin.xyz));
-                if s.y > s.x && p.y + HALF > f32(y) + s.x && p.y - HALF < f32(y) + s.y {
+                if s.y > s.x && p.y + BOX_HIGH.y > f32(y) + s.x && p.y + BOX_LOW.y < f32(y) + s.y {
                     return true;
                 }
             }
@@ -47,8 +50,10 @@ fn overlaps(p: vec3<f32>) -> bool {
 fn sweep(p: vec3<f32>, axis: u32, d: f32) -> f32 {
     var to = p;
     to[axis] = p[axis] + d;
-    let lo = vec3<i32>(floor(min(p, to) - vec3(HALF)));
-    let hi = vec3<i32>(floor(max(p, to) + vec3(HALF)));
+    let lo = vec3<i32>(floor(min(p, to) + BOX_LOW));
+    let hi = vec3<i32>(floor(max(p, to) + BOX_HIGH));
+    let box_low = p + BOX_LOW;
+    let box_high = p + BOX_HIGH;
     var left = d;
     for (var z = lo.z; z <= hi.z; z++) {
         for (var y = lo.y; y <= hi.y; y++) {
@@ -62,17 +67,17 @@ fn sweep(p: vec3<f32>, axis: u32, d: f32) -> f32 {
                 // Beside it on the other two axes: never in its way.
                 var beside = false;
                 for (var i = 0u; i < 3u; i++) {
-                    if i != axis && (p[i] + HALF <= low[i] || p[i] - HALF >= high[i]) {
+                    if i != axis && (box_high[i] <= low[i] || box_low[i] >= high[i]) {
                         beside = true;
                     }
                 }
                 if beside {
                     continue;
                 }
-                if d > 0.0 && p[axis] + HALF <= low[axis] + 1e-4 {
-                    left = min(left, max(low[axis] - HALF - p[axis], 0.0));
-                } else if d < 0.0 && p[axis] - HALF >= high[axis] - 1e-4 {
-                    left = max(left, min(high[axis] + HALF - p[axis], 0.0));
+                if d > 0.0 && box_high[axis] <= low[axis] + 1e-4 {
+                    left = min(left, max(low[axis] - box_high[axis], 0.0));
+                } else if d < 0.0 && box_low[axis] >= high[axis] - 1e-4 {
+                    left = max(left, min(high[axis] - box_low[axis], 0.0));
                 }
             }
         }
@@ -119,7 +124,7 @@ fn simulate(@builtin(global_invocation_id) id: vec3<u32>) {
         if !overlaps(position) {
             flags &= ~THROUGH;
         }
-    } else if (kind.data.z & PARTICLE_FLAG_COLLIDE) != 0u {
+    } else if (kind.data.z & PARTICLE_FLAG_COLLIDE) != 0u && (flags & STOPPED) == 0u {
         let was_on_ground = (flags & ON_GROUND) != 0u;
         var hit = vec3<bool>(false);
         for (var n = 0u; n < 3u; n++) {
@@ -130,6 +135,10 @@ fn simulate(@builtin(global_invocation_id) id: vec3<u32>) {
             }
             let moved = sweep(position, axis, delta[axis]);
             position[axis] += moved;
+            // As in vanilla: one that can't go up or down any more stays where it is for good.
+            if axis == 1u && abs(delta.y) >= 1e-5 && abs(moved) < 1e-5 {
+                flags |= STOPPED;
+            }
             if moved != delta[axis] {
                 hit[axis] = true;
                 vel[axis] = 0.0;
@@ -144,7 +153,7 @@ fn simulate(@builtin(global_invocation_id) id: vec3<u32>) {
             vel.x *= kind.motion.z;
             vel.z *= kind.motion.z;
         }
-    } else {
+    } else if (kind.data.z & PARTICLE_FLAG_COLLIDE) == 0u {
         position += delta;
     }
     sim[i].pos_size = vec4(position, p.pos_size.w);
@@ -162,7 +171,8 @@ fn simulate(@builtin(global_invocation_id) id: vec3<u32>) {
     }
     var light = 0xFFFFFFFFu;
     if (kind.data.z & PARTICLE_FLAG_FULLBRIGHT) == 0u {
-        let w = cell_word(vec3<i32>(floor(position)) + args.origin.xyz);
+        // The middle of its box: on a floor, rounding must not put it in the floor's dark.
+        let w = cell_word(vec3<i32>(floor(position + vec3(0.0, 0.1, 0.0))) + args.origin.xyz);
         light = (w & 15u) | (((w >> 4u) & 15u) << 8u) | (((w >> 8u) & 15u) << 16u) | (((w >> 12u) & 15u) << 24u);
     }
     let color = mix_color(kind.data.x, kind.data.y, t);

@@ -327,6 +327,8 @@ pub struct Client {
     was_wet: bool,
     /// Blocks per tick it was falling at.
     was_falling: f32,
+    /// The highest it has been since it last stood.
+    fall_top: f64,
     /// Own walk distance and swing amplitude, for the third person model and view bobbing.
     self_walk: f32,
     self_swing: f32,
@@ -597,6 +599,7 @@ impl Client {
             was_on_ground: true,
             was_wet: false,
             was_falling: 0.0,
+            fall_top: f64::NEG_INFINITY,
             self_walk: 0.0,
             self_swing: 0.0,
             walk_dist: 0.0,
@@ -1254,15 +1257,23 @@ impl Client {
         let under = self.world.block_or_air((pos - DVec3::Y * 0.2).floor().as_ivec3()).unwrap_or(0);
         let (w, on_ground) = (self.player.size[0] as f32 / 2.0, self.player.on_ground);
         let fell = self.was_falling;
-        if on_ground && !self.was_on_ground && fell > 0.3 && under != 0 {
+        let drop = (self.fall_top - pos.y) as f32;
+        if on_ground && !self.was_on_ground && drop > 3.0 && under != 0 {
             if let Some(kind) = name(weft_abi::particle::BLOCK) {
-                let count = (fell * 25.0).clamp(4.0, 60.0) as u32;
-                self.particles.spawn(&weft_abi::ParticleBurst { kind, block: under, pos: pos.to_array(), count, spread: [w, 0.1, w], speed: 1.5, ..weft_abi::ParticleBurst::DEFAULT }, &self.world);
+                // Vanilla's `checkFallDamage`, and what its particles make of no speed of their own.
+                let count = (150.0 * (0.2 + (drop - 3.0).ceil() / 15.0).min(2.5)) as u32;
+                self.particles.spawn(&weft_abi::ParticleBurst { kind, block: under, pos: pos.to_array(), count, velocity: [0.0, 2.0, 0.0], speed: 3.6, outward: 1, ..weft_abi::ParticleBurst::DEFAULT }, &self.world);
             }
         }
         if on_ground && self.player.sprinting && under != 0 && self.chance() < dt * 20.0 {
             if let Some(kind) = name(weft_abi::particle::BLOCK) {
-                self.particles.spawn(&weft_abi::ParticleBurst { kind, block: under, pos: pos.to_array(), count: 1, spread: [w, 0.0, w], speed: 1.0, ..weft_abi::ParticleBurst::DEFAULT }, &self.world);
+                // Vanilla's `spawnSprintParticle`: back and up, in a particle's own speeds.
+                let mut noise = || self.rng.float() * 0.8 - 0.4;
+                let aim = glam::Vec3::new(-4.0 * self.player.vel.x as f32 + noise(), 1.5 + noise(), -4.0 * self.player.vel.z as f32 + noise());
+                let speed = (self.chance() + self.chance() + 1.0) / 3.0 * 3.6;
+                let velocity = (aim.normalize_or_zero() * speed + glam::Vec3::Y * 2.0).to_array();
+                let at = pos + DVec3::Y * 0.1;
+                self.particles.spawn(&weft_abi::ParticleBurst { kind, block: under, pos: at.to_array(), count: 1, spread: [w, 0.0, w], velocity, ..weft_abi::ParticleBurst::DEFAULT }, &self.world);
             }
         }
         if self.player.in_liquid && !self.was_wet && fell > 0.1 {
@@ -1281,6 +1292,7 @@ impl Client {
         self.was_on_ground = on_ground;
         self.was_wet = self.player.in_liquid;
         self.was_falling = (-self.player.vel.y as f32).max(0.0);
+        self.fall_top = if on_ground || self.player.in_liquid || self.player.flying { pos.y } else { self.fall_top.max(pos.y) };
     }
 
     /// What goes over the screen: the inside of a liquid, of a block, a fire.

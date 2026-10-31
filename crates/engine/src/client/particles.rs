@@ -30,9 +30,9 @@ pub const HOOK: Hook = Hook {
     fallback: "return p.albedo * p.color;",
 };
 
-/// Vanilla's particles collide as a 0.2 block box around their center.
+/// Vanilla's particles collide as a box 0.2 across and 0.2 up from where they are.
 fn particle_box(pos: DVec3) -> crate::physics::Aabb {
-    crate::physics::Aabb::around(pos - DVec3::Y * 0.1, 0.1, 0.2)
+    crate::physics::Aabb::around(pos, 0.1, 0.2)
 }
 
 /// A particle on its way to the GPU.
@@ -369,7 +369,7 @@ impl Particles {
         let origin = self.origin;
         let mut shift = Vec3::ZERO;
         let here = cam.pos.floor().as_ivec3();
-        if (here - origin).abs().max_element() > 1024 {
+        if (here - origin).abs().max_element() > 256 {
             shift = (origin - here).as_vec3();
             self.origin = here;
         }
