@@ -191,8 +191,8 @@ impl Hud {
     /// Reads the player's arrangement. An automated run keeps its own beside it, so that what a
     /// test sees never depends on it.
     pub fn load_layout(&mut self, run_dir: &std::path::Path) {
-        let dir = if crate::config::automated() { "test-config" } else { "config" };
-        self.file = run_dir.join(dir).join("hud.txt");
+        let dir = if crate::config::automated() { run_dir.join("test-config") } else { crate::paths::config(run_dir) };
+        self.file = dir.join("hud.txt");
         self.layout.clear();
         let src = std::fs::read_to_string(&self.file).unwrap_or_default();
         for (_, name, v) in crate::kv::pairs(&src) {

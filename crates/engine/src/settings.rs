@@ -125,7 +125,8 @@ impl Settings {
 
 /// The old `config/settings.txt` joins `config/core.txt` once (lists were one line per entry).
 pub fn migrate(run_dir: &Path) {
-    let (old, new) = (run_dir.join("config").join("settings.txt"), run_dir.join("config").join("core.txt"));
+    let config = crate::paths::config(run_dir);
+    let (old, new) = (config.join("settings.txt"), config.join("core.txt"));
     let Ok(src) = std::fs::read_to_string(&old) else { return };
     let mut out = std::fs::read_to_string(&new).unwrap_or_default();
     let (mut packs, mut relays) = (Vec::new(), Vec::new());

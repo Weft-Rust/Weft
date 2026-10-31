@@ -67,7 +67,7 @@ fn init(r: &mut Registry) {
 }
 ```
 
-Build with `cargo build --release`, then make a folder in `run/mods/` and copy the library from `target/release/` into it:
+Build with `cargo build --release`, then make a folder in the mods folder and copy the library from `target/release/` into it. That's `run/mods/` when you run the game from the repo; a released game keeps it in your user folders (see the README), and the Mods screen has a button that opens it.
 
 ```
 run/mods/mymod/
@@ -398,7 +398,7 @@ Also:
 F3 shows your mod's time per tick. `/gizmo` draws debug shapes, your own groups included (`r.gizmo_group(&PIPES)`).
 
 A panic in your callback disables that callback and names your mod in the log instead of taking the game down.\
-Native crashes write a report into `run/crash-reports/` with the mod that was running.
+Native crashes write a report into `crash-reports/` of the game folder (`run/` from the repo) with the mod that was running.
 
 F3+T reloads textures, lang, shaders and UI without restarting.
 

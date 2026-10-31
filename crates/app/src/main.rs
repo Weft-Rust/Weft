@@ -1,6 +1,7 @@
 use std::path::PathBuf;
 
 use weft_engine::Options;
+use weft_engine::paths::{self, Dirs};
 use weft_render::{Backend, BackendDesc, Error};
 
 #[global_allocator]
@@ -26,8 +27,9 @@ fn game_root() -> PathBuf {
 fn main() {
     let root = game_root();
     let mut opts = Options {
-        run_dir: root.join("run"),
-        // Mod sources of the game itself; players' mods go into `run/mods`, added below.
+        run_dir: PathBuf::new(),
+        cache_dir: PathBuf::new(),
+        // Mod sources of the game itself; players' mods go into `<run dir>/mods`, added below.
         mod_dirs: vec![root.join("mods")],
         gpu_debug: false,
         world: None,
@@ -39,6 +41,7 @@ fn main() {
         no_vsync: false,
         view: None,
     };
+    let mut chosen_run: Option<PathBuf> = None;
     let mut verbose = false;
     let mut log_spec = String::new();
     let mut server = false;
@@ -50,7 +53,7 @@ fn main() {
     while let Some(a) = args.next() {
         let mut value = || args.next().unwrap_or_default();
         match a.as_str() {
-            "--run-dir" => opts.run_dir = PathBuf::from(value()),
+            "--run-dir" => chosen_run = Some(PathBuf::from(value())),
             "--mods" => opts.mod_dirs.push(PathBuf::from(value())),
             "--gpu-debug" => opts.gpu_debug = true,
             "--verbose" => verbose = true,
@@ -80,6 +83,9 @@ fn main() {
             },
         }
     }
+    let dirs = chosen_run.map_or_else(|| paths::of_install(&root), |run| Dirs::under(&run));
+    (opts.run_dir, opts.cache_dir) = (dirs.data, dirs.cache);
+    paths::set_config(dirs.config);
     opts.automated = extra.iter().any(|(k, _)| k == "script" || k == "test");
     if let Some(code) = test_jobs(&extra, &opts.run_dir) {
         std::process::exit(code);
@@ -102,6 +108,7 @@ fn main() {
     }
     weft_engine::log::init(Some(&opts.run_dir.join("logs").join("latest.log")), verbose, &log_spec);
     weft_engine::diag::install_crash_handler(&opts.run_dir);
+    log::info!("game folder {}, cache {}", opts.run_dir.display(), opts.cache_dir.display());
     // Release builds load the game's own mods the way players get them: each packed into one
     // file in `run/mods` (again only when it changed).
     if !cfg!(debug_assertions) && root.join("mods").is_dir() {
@@ -115,7 +122,13 @@ fn main() {
         let sources = root.join("mods");
         opts.mod_dirs.retain(|d| *d != sources);
     }
+    // What came with a shipped game stays with it, and a player's copy of a mod comes first.
+    let shipped = root.join("run").join("mods");
+    let separate = shipped != player_mods;
     opts.mod_dirs.push(player_mods);
+    if separate {
+        opts.mod_dirs.push(shipped);
+    }
     weft_engine::init_workers();
     if server {
         if let Err(e) = weft_engine::dedicated::run(opts) {
@@ -150,6 +163,8 @@ fn test_jobs(extra: &[(String, String)], run_dir: &std::path::Path) -> Option<i3
     let mut dirs: Vec<PathBuf> = (0..jobs).map(|i| run_dir.join("test-jobs").join(i.to_string())).collect();
     let spawn = |shard: &str, dir: &PathBuf| {
         let _ = std::fs::create_dir_all(dir);
+        // Or a process that dies at once passes by the last run's.
+        let _ = std::fs::remove_file(dir.join("test-reports").join("report.txt"));
         let log = std::fs::File::create(dir.join("output.log")).ok()?;
         let mut c = std::process::Command::new(&exe);
         c.args(["--test", test, "--test-shard", shard, "--run-dir"]).arg(dir).stdout(log).stderr(std::process::Stdio::null());

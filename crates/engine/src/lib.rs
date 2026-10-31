@@ -26,6 +26,7 @@ pub mod model;
 pub mod modloader;
 pub mod net;
 pub mod packs;
+pub mod paths;
 pub mod physics;
 pub mod post;
 pub mod refs;

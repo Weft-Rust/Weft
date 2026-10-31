@@ -58,7 +58,7 @@ jobs:
           path: pack
           merge-multiple: true
 
-      # The zip is named like the mod, which is what the game looks for. Players put it in `run/mods`.
+      # The zip is named like the mod, which is what the game looks for. Players put it in their mods folder.
       - name: Pack and publish
         run: |
           mod=$(grep -m1 '^name' Cargo.toml | cut -d'"' -f2)

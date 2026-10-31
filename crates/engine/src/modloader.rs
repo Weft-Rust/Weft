@@ -34,19 +34,26 @@ pub fn discover(mod_dirs: &[PathBuf], cache: &Path) -> Vec<(String, PathBuf, Pat
         let mut entries: Vec<PathBuf> = entries.flatten().map(|e| e.path()).collect();
         entries.sort();
         for path in entries {
-            let (name, root) = if path.is_dir() {
-                (path.file_name().unwrap_or_default().to_string_lossy().into_owned(), path)
-            } else if path.extension().is_some_and(|e| e.eq_ignore_ascii_case("zip")) {
-                let name = path.file_stem().unwrap_or_default().to_string_lossy().into_owned();
+            let zipped = path.extension().is_some_and(|e| e.eq_ignore_ascii_case("zip"));
+            if !path.is_dir() && !zipped {
+                continue;
+            }
+            let name = if zipped { path.file_stem() } else { path.file_name() }.unwrap_or_default().to_string_lossy().into_owned();
+            // For a name found twice, the first dir's copy stays. Before unpacking: another
+            // version unpacked takes away the one before it.
+            if found.iter().any(|f: &(String, PathBuf, PathBuf)| f.0 == name) {
+                continue;
+            }
+            let root = if zipped {
                 match unpack(&path, &cache.join("unpacked"), &name) {
-                    Ok(root) => (name, root),
+                    Ok(root) => root,
                     Err(e) => {
                         log::error!("mod {}: {e}", path.display());
                         continue;
                     }
                 }
             } else {
-                continue;
+                path
             };
             let file = libloading::library_filename(&name);
             let lib = [Some(root.join(&file)), exe_dir.as_ref().map(|d| d.join(&file))].into_iter().flatten().find(|p| p.exists());
@@ -57,9 +64,7 @@ pub fn discover(mod_dirs: &[PathBuf], cache: &Path) -> Vec<(String, PathBuf, Pat
             }
         }
     }
-    // Stable: for a name found twice, the first dir's copy stays.
     found.sort_by(|a, b| a.0.cmp(&b.0));
-    found.dedup_by(|a, b| a.0 == b.0);
     found
 }
 
@@ -163,7 +168,8 @@ fn collect(dir: &Path, out: &mut Vec<PathBuf>) {
 /// Loads every library, then calls all `init`s in parallel and freezes the registries.
 /// Where the mods turned off are listed, ids one a line. Automated runs keep theirs apart.
 pub fn off_file(run_dir: &Path, automated: bool) -> PathBuf {
-    run_dir.join(if automated { "test-config" } else { "config" }).join("disabled_mods.txt")
+    let dir = if automated { run_dir.join("test-config") } else { crate::paths::config(run_dir) };
+    dir.join("disabled_mods.txt")
 }
 
 /// What turning mods on and off has come to, and what this run started with.
@@ -344,6 +350,24 @@ mod tests {
         assert!(runs("top", &off(&[]), &deps));
         assert!(!runs("top", &off(&["base"]), &deps), "all the way down");
         assert!(runs("base", &off(&["top"]), &deps), "not the other way");
+    }
+
+    /// A player's copy of a mod that also came with the game: theirs is the one, still unpacked.
+    #[test]
+    fn a_mod_in_two_folders_is_the_first_ones() {
+        let tmp = std::env::temp_dir().join(format!("weft-twice-{}", std::process::id()));
+        let lib = libloading::library_filename("mymod");
+        let mut zips = Vec::new();
+        for (dir, text) in [("mine", "mine"), ("shipped", "shipped, a longer one")] {
+            let src = tmp.join(dir).join("mymod");
+            std::fs::create_dir_all(&src).unwrap();
+            std::fs::write(src.join(&lib), text).unwrap();
+            zips.push(pack(&src, &tmp.join(format!("{dir}-mods"))).unwrap().parent().unwrap().to_path_buf());
+        }
+        let found = discover(&zips, &tmp.join("cache"));
+        assert_eq!(found.len(), 1);
+        assert_eq!(std::fs::read_to_string(&found[0].2).unwrap(), "mine");
+        std::fs::remove_dir_all(&tmp).unwrap();
     }
 
     /// One zip carries a library per system, and each system finds its own in it.

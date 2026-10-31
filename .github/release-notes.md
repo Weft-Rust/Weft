@@ -8,7 +8,7 @@
 
 **Multiplayer:** pause menu > Multiplayer > Open to Friends gives a ticket; your friend pastes it into Multiplayer > Join. It also works by address, with the port forwarded, and `weft --server` runs a world with no window (see the README).
 
-**Mods:** put a mod's `.zip` into `run/mods/`. Mods are native libraries and have to be built for your system and the same engine version, see the [modding cheat sheet](https://github.com/Weft-Rust/Weft/blob/master/docs/modding.md).
+**Mods:** put a mod's `.zip` into the mods folder: the Mods screen has a button that opens it. Mods are native libraries and have to be built for your system and the same engine version, see the [modding cheat sheet](https://github.com/Weft-Rust/Weft/blob/master/docs/modding.md).
 
 The mod interface and the save format can still change between versions.
 

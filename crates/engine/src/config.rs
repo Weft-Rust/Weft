@@ -240,7 +240,7 @@ pub fn load(run_dir: &Path) {
     let mut namespaces: Vec<&str> = c.game.configs.iter().filter_map(|d| d.name.split_once(':').map(|x| x.0)).collect();
     namespaces.dedup();
     for ns in namespaces {
-        let Ok(src) = std::fs::read_to_string(file(run_dir, "config", ns)) else { continue };
+        let Ok(src) = std::fs::read_to_string(file(run_dir, false, ns)) else { continue };
         for (_, k, v) in crate::kv::pairs(&src) {
             let name = format!("{ns}:{k}");
             match by_name(&name).filter(|&id| c.game.configs[id as usize].scope != scope::WORLD) {
@@ -259,8 +259,9 @@ pub fn load(run_dir: &Path) {
     }
 }
 
-fn file(run_dir: &Path, dir: &str, ns: &str) -> std::path::PathBuf {
-    run_dir.join(dir).join(format!("{ns}.txt"))
+fn file(run_dir: &Path, automated: bool, ns: &str) -> std::path::PathBuf {
+    let dir = if automated { run_dir.join("test-config") } else { crate::paths::config(run_dir) };
+    dir.join(format!("{ns}.txt"))
 }
 
 /// Writes a namespace's settings, every one of them so players see what exists.
@@ -274,7 +275,7 @@ pub fn save(run_dir: &Path, ns: &str) {
         let value = kept(&overrides, kept(&server, shown(id as u32)));
         out.push_str(&format!("{key} = {value}\n"));
     }
-    let path = file(run_dir, if AUTOMATED.load(Ordering::Relaxed) { "test-config" } else { "config" }, ns);
+    let path = file(run_dir, AUTOMATED.load(Ordering::Relaxed), ns);
     let _ = std::fs::create_dir_all(path.parent().unwrap());
     if let Err(e) = std::fs::write(&path, out) {
         log::error!("saving {}: {e}", path.display());
