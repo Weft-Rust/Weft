@@ -118,7 +118,7 @@ pub fn build(c: &Content, n: &Neighborhood, ctm: &super::ctm::Ctm) -> Mesh {
                     }
                     Model::Cross => {
                         let l = light16(n.light[i]);
-                        let t = textures[0];
+                        let t = ctm.resolve(c, n, x, y, z, 0, textures[0] & face::TEX_MASK);
                         let b = [x as f32, y as f32, z as f32];
                         let e = 0.15;
                         let (a0, a1) = ([b[0] + e, b[1], b[2] + e], [b[0] + 1.0 - e, b[1] + 1.0, b[2] + 1.0 - e]);
@@ -162,7 +162,8 @@ pub fn build(c: &Content, n: &Neighborhood, ctm: &super::ctm::Ctm) -> Mesh {
                                     r if r[0] >= 0.0 => r.map(|v| v.round().clamp(0.0, 31.0) as u32),
                                     _ => box_uv(dir, bx.min, bx.max),
                                 };
-                                mesh.quads[info.layer as usize].push(quad(corners, uv, bx.textures[dir], biome, info.tint, [fl; 4]));
+                                let tex = ctm.resolve(c, n, x, y, z, dir, bx.textures[dir] & face::TEX_MASK);
+                                mesh.quads[info.layer as usize].push(quad(corners, uv, tex, biome, info.tint, [fl; 4]));
                             }
                         }
                     }

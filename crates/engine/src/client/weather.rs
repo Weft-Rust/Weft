@@ -163,11 +163,12 @@ impl Weather {
             let random = (c.seed & 255) as f64 / 255.0;
             let rel = DVec3::new(c.x as f64 + 0.5, 0.0, c.z as f64 + 0.5) - DVec3::new(cam.pos.x, 0.0, cam.pos.z);
             let dist = (rel.length() as f32 / RADIUS as f32).min(1.0);
-            // Rain falls quickly, each column a little differently; snow drifts down.
+            // Rain falls quickly, three times vanilla's speed, each column a little differently; snow
+            // drifts down.
             let (slide, drop) = if c.cold {
                 ((ticks * 0.01 * (random - 0.5)).rem_euclid(1.0) as f32, scroll(1.0 / 512.0 + random / 2048.0))
             } else {
-                (0.0, scroll((3.0 + random) / 32.0))
+                (0.0, scroll((3.0 + random) * 3.0 / 32.0))
             };
             let alpha = ((1.0 - dist * dist) * 0.5 + 0.5) * level;
             let (bottom, top) = ((c.bottom as f64 - cam.pos.y) as f32, (c.top as f64 - cam.pos.y) as f32);

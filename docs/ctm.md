@@ -7,7 +7,8 @@ those port with little more than renaming files.
 
 ## Note
 CTM is created without code and works from both mods and resource packs, a pack's file overrides the mod's one.\
-It works on cube faces only, so no CTM on items, entities or block models (`model_box` or a model file).\
+It works on blocks only, so no CTM on items or entities.\
+Plants and block models (`model_box` or a model file) take `random` and `fixed`: every other method needs neighbors on a cube's face, and a rule like that on a texture they show logs an error and stops the game. Keep it off them with `blocks =`. A plant counts as a side for [faces](#faces).\
 Examples to copy from are in `mods/base/assets/textures/block/`: `glass.ctm`, `log_oak.ctm`, `stone.ctm`.
 
 Check [textures guide](textures.md) for more texturing options like overlays, glow and animation.
@@ -29,7 +30,7 @@ assets/textures/block/
     ...
 ```
 
-The rules apply to every cube face that shows this texture on any block.\
+The rules apply to every face that shows this texture on any block.\
 For example if a block uses glass texture as one of the faces, it will get the same CTM as glass block for that face.
 
 A mod can only add `.ctm` files for its own textures.\

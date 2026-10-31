@@ -615,6 +615,29 @@ pub async fn block_dust_scatters(t: T) -> R {
     Ok(())
 }
 
+/// A random `.ctm` varies plants and box models too: red and blue tiles of a green texture, each
+/// row in front of a white wall.
+pub async fn ctm_off_the_cube(t: T) -> R {
+    t.flat().await?;
+    let f = t.feet();
+    t.fill(add(f, [-9, 0, -7]), add(f, [9, 5, -7]), "snow").await?;
+    for x in -5..=5 {
+        t.set(add(f, [x, 0, -5]), "testkit:varied_plant").await?;
+        t.set(add(f, [x, 3, -5]), "testkit:varied_box").await?;
+    }
+    t.look_at(add(f, [0, 1, -5]));
+    t.secs(0.5).await?;
+    let s = t.shot("rows").await?;
+    let row = |p: [f64; 3]| t.on_screen(p).map_or(0.5, |at| at.1);
+    let (plants, boxes) = (row([f[0] as f64, f[1] as f64 + 0.5, f[2] as f64 - 4.5]), row([f[0] as f64, f[1] as f64 + 3.5, f[2] as f64 - 4.5]));
+    let colors = |y: f32| [s.share(0.1, y - 0.03, 0.9, y + 0.03, probe::red), s.share(0.1, y - 0.03, 0.9, y + 0.03, probe::blue)];
+    let (p, b) = (colors(plants), colors(boxes));
+    t.note(format!("red and blue, plants {p:?}, boxes {b:?}"));
+    t.check(p[0] > 0.01 && p[1] > 0.01, format!("plants of both tiles: {p:?}"));
+    t.check(b[0] > 0.01 && b[1] > 0.01, format!("boxes of both tiles: {b:?}"));
+    Ok(())
+}
+
 /// From high above, where the view's cubes don't reach the ground, it is land all the way under
 /// the camera, not a hole of sky.
 pub async fn distant_terrain_from_above(t: T) -> R {

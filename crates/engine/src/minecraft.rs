@@ -99,9 +99,10 @@ pub fn ensure_pack(run_dir: &Path, mods: &[(String, PathBuf)]) -> bool {
             continue;
         };
         let mut key = format!("{}|{:?}", jar.display(), stamp);
-        for (ns, _, m) in &maps {
+        for (ns, dir, m) in &maps {
             key.push_str(ns);
             key.push_str(m);
+            own_files(&dir.join("minecraft"), &mut key);
         }
         let key = format!("{:016x}", fnv(&key));
         let cfg = std::fs::read_to_string(out.join("pack.cfg")).unwrap_or_default();
@@ -120,6 +121,20 @@ pub fn ensure_pack(run_dir: &Path, mods: &[(String, PathBuf)]) -> bool {
         }
     }
     false
+}
+
+/// A mod's own files for the pack, for the pack to be made again when they change.
+fn own_files(dir: &Path, key: &mut String) {
+    let mut entries: Vec<PathBuf> = std::fs::read_dir(dir).into_iter().flatten().flatten().map(|e| e.path()).collect();
+    entries.sort();
+    for path in entries {
+        key.push_str(&path.file_name().unwrap_or_default().to_string_lossy());
+        if path.is_dir() {
+            own_files(&path, key);
+        } else if let Ok(bytes) = std::fs::read(&path) {
+            key.push_str(&String::from_utf8_lossy(&bytes));
+        }
+    }
 }
 
 fn build(

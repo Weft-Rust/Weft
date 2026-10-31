@@ -157,6 +157,7 @@ pub fn all() -> Vec<TestDef> {
         looks::distant_terrain_from_above,
         looks::third_person_shakes,
         looks::block_dust_scatters,
+        looks::ctm_off_the_cube,
         looks::attack_indicator,
         looks::shaders_and_glow,
         looks::texture_seams,

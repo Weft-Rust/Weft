@@ -47,6 +47,11 @@ fn count(i: usize, n: usize) {
 }
 
 pub fn register(r: &mut Registry) {
+    // A random `.ctm` with tiles of two colors, on what isn't a cube.
+    static VARIED_PLANT: Block = Block::named("varied_plant");
+    static VARIED_BOX: Block = Block::named("varied_box");
+    r.block(&VARIED_PLANT).texture("varied").plant().no_item();
+    r.block(&VARIED_BOX).texture("varied").model_box([2.0, 0.0, 2.0], [14.0, 16.0, 14.0]).no_item();
     r.entity_component(&MARK, 0, component_flags::SYNC_WATCHERS);
     r.attach(&PIG, &MARK);
     r.config(&COUNT_MARKS).bool(false).world();

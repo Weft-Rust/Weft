@@ -24,6 +24,9 @@
 //!
 //! Resolving is a texture id swap at mesh time, so records and shaders are unchanged. Compact sets
 //! are expanded to all 47 tiles when the block textures are listed.
+//!
+//! Plants and box models take `random` and `fixed` only (a plant counts as face 0, a side): the
+//! rest goes by neighbors in a face's plane, which they don't have. Such a rule stops the game.
 
 use std::sync::{Arc, RwLock};
 
@@ -187,6 +190,15 @@ fn tile_names(v: &str, texture: &str) -> Vec<Option<String>> {
 }
 
 /// Reads the `.ctm` files of all block textures. Tile textures get ids after the content's.
+/// Whether a block of this model shows `tex` other than on a cube's face, on a face in `faces`.
+fn off_cube<'a>(model: weft_abi::Model, textures: &[u32; 6], mut boxes: impl Iterator<Item = &'a [u32; 6]>, tex: u32, faces: u8) -> bool {
+    match model {
+        weft_abi::Model::Cross => faces & 1 != 0 && textures[0] == tex,
+        weft_abi::Model::Boxes => boxes.any(|b| (0..6).any(|d| faces & (1 << d) != 0 && b[d] == tex)),
+        _ => false,
+    }
+}
+
 pub fn load(assets: &Assets, c: &Content) -> (Ctm, Extra) {
     let base = c.textures.len() as u32;
     let mut extra = Extra::default();
@@ -252,6 +264,7 @@ pub fn load(assets: &Assets, c: &Content) -> (Ctm, Extra) {
                 log::warn!("{name}.ctm: {:?} needs {needed} tiles, has {}", method, tiles.len());
                 continue;
             }
+            let (rule_faces, rule_blocks) = (kv.get("faces").map_or(0b111111, |v| faces(v)), kv.get("blocks").is_some());
             let rule_index = ctm.rules.len();
             if is_compact {
                 compact.push((rule_index, tiles[..5].to_vec()));
@@ -318,6 +331,16 @@ pub fn load(assets: &Assets, c: &Content) -> (Ctm, Extra) {
                     kv.get("height").and_then(|v| v.parse().ok()).unwrap_or(1).max(1),
                 ),
             });
+            if !matches!(method, Method::Random | Method::Fixed) {
+                let blocks = &ctm.rules[rule_index].blocks;
+                let on = c.states.iter().find(|s| (!rule_blocks || blocks.contains(&s.block)) && off_cube(s.model, &s.textures, s.boxes.iter().map(|b| &b.textures), tex as u32, rule_faces));
+                if let Some(s) = on {
+                    let block = c.block_names.iter().find(|n| *n.1 == s.block).map_or("?", |n| n.0.as_str());
+                    let why = format!("{name}.ctm: {method:?} needs a cube's face, and {block} shows this texture without one: only random and fixed work there (or leave it out with blocks =)");
+                    log::error!("{why}");
+                    panic!("{why}");
+                }
+            }
         }
         ctm.by_texture[tex] = (start, ctm.rules.len() as u32 - start);
     }
@@ -456,6 +479,19 @@ impl Ctm {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn only_what_shows_a_texture_off_a_cube_counts() {
+        use weft_abi::Model;
+        let none: [&[u32; 6]; 0] = [];
+        let (t, sides_only) = ([7; 6], 0b110011);
+        assert!(off_cube(Model::Cross, &t, none.into_iter(), 7, 0b111111));
+        assert!(!off_cube(Model::Cross, &t, none.into_iter(), 8, 0b111111));
+        assert!(!off_cube(Model::Cube, &t, none.into_iter(), 7, 0b111111));
+        let top = [0, 0, 0, 7, 0, 0];
+        assert!(off_cube(Model::Boxes, &[0; 6], [&top].into_iter(), 7, 0b111111));
+        assert!(!off_cube(Model::Boxes, &[0; 6], [&top].into_iter(), 7, sides_only), "not on the faces the rule is for");
+    }
 
     #[test]
     fn axes_match_mesher_corners() {
