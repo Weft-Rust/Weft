@@ -599,6 +599,27 @@ thread_local! {
     static ACTIVE: RefCell<Option<T>> = const { RefCell::new(None) };
 }
 
+/// The broad set that runs quickly: one test per main system, for the loop while you work.
+/// It is not the gate. `--test all` before a pull request is.
+const QUICK: &[&str] = &[
+    "scene",
+    "mining_and_wear",
+    "crafting_table_tags",
+    "armor",
+    "food",
+    "bucket",
+    "mod_liquid_bucket",
+    "persistence",
+    "worldgen",
+    "plants_on_cube_tops",
+    "particles",
+    "liquid_layers",
+];
+
+pub fn quick(all: Vec<TestDef>) -> Vec<TestDef> {
+    all.into_iter().filter(|t| QUICK.contains(&t.name.as_str())).collect()
+}
+
 pub fn start(queue: Vec<TestDef>) {
     weft_sdk::info!("testkit: running {} test(s): {}", queue.len(), queue.iter().map(|t| t.name.as_str()).collect::<Vec<_>>().join(", "));
     RUNNER.with(|r| *r.borrow_mut() = Some(Runner { queue, current: None, done: Vec::new(), started: Instant::now(), finished: false, warmup: 3 }));

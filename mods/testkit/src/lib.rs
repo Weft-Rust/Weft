@@ -1,10 +1,12 @@
 //! Automated tests and scripted runs, written on the public client and server mod API.
 //!
 //! `weft --test all` runs every test (`--test furnace,armor` some, `--test list` names them,
-//! `--test bench` the benchmarks), each in a fresh throwaway world, then writes
+//! `--test bench` the benchmarks, `--test quick` one per main system for the loop while you
+//! work), each in a fresh throwaway world, then writes
 //! `run/test-reports/report.txt` and exits with the number of failed tests. Screenshots of the
 //! run go to `run/test-shots/` for looking at; checks never compare pictures with references.
 //! `--test all` runs several at once, `--jobs 1` one by one, `--jobs N` for a number; see the game's `main`.
+//! Where the clients share one GPU, `--jobs 1` is usually faster than the default.
 //! `--test-keep` keeps the test worlds. `weft --world w --script file.txt` runs a line script (see `script.rs`).
 //! Without those options the mod only registers its message channels.
 
@@ -114,6 +116,7 @@ fn start(c: &Client) {
     // Benchmarks run by name too, or all of them with `bench`.
     let all = match want {
         "bench" => tests::bench(),
+        "quick" => runner::quick(tests::all()),
         "all" | "list" => tests::all(),
         _ => tests::all().into_iter().chain(tests::bench()).collect(),
     };
@@ -124,7 +127,7 @@ fn start(c: &Client) {
         c.quit(0);
         return;
     }
-    let queue: Vec<runner::TestDef> = if want == "all" || want == "bench" {
+    let queue: Vec<runner::TestDef> = if want == "all" || want == "bench" || want == "quick" {
         all
     } else {
         let names: Vec<&str> = want.split(',').map(str::trim).collect();
