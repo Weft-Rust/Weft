@@ -703,7 +703,7 @@ impl Client {
         self.send_move(dt);
         self.animate_entities(dt);
         self.chip_block(dt);
-        self.particles.update(dt as f32, &self.world);
+        self.particles.update(dt as f32);
         self.creature_sounds(dt as f32, moved);
         self.hurt_flash = (self.hurt_flash - dt as f32).max(0.0);
         self.dead_for = self.dead.then(|| self.dead_for.unwrap_or(0.0) + dt as f32);
@@ -1776,7 +1776,7 @@ impl Client {
         let mut cracks: Vec<(IVec3, f32, DVec3)> = self.others_mining.iter().map(|&(_, p, v)| (p, v, DVec3::ZERO)).collect();
         cracks.extend(self.breaking.map(|(f, p, v)| (p, v, self.frame_origin(f))));
         self.entity_render.draw(gpu, list, frame, &cam, &self.entities, me.as_ref(), hand, textures, &light, &scene, scene_buf, self.target.filter(|_| !self.hide_gui).map(|h| (h, self.frame_origin(h.frame))), &cracks, &self.gizmo_lines, &self.gizmo_fills, &mut hand_late);
-        self.particles.draw(gpu, list, &mut late, frame, &cam, textures, scene_buf);
+        self.particles.draw(list, &mut late, scene_buf);
         let ticks = self.smooth_time();
         self.weather_render.draw(gpu, &mut late, frame, &cam, scene_buf, &self.world, self.rain, ticks, self.frame_dt);
         self.sky.draw_overlay(&mut hand_late, scene_buf);

@@ -1930,6 +1930,8 @@ fn record_passes(r: &mut Running, info: &weft_render::FrameInfo, scale: f32) {
     let world_target = if post { Target::Texture(r.post.scene_target(&mut *r.gpu, info.width, info.height)) } else { Target::Surface };
     if let Some(g) = &mut r.game {
         g.client.gpu_terrain.frame(&mut *r.gpu, &mut r.list, info.slot);
+        let cam = g.client.render_camera();
+        g.client.particles.simulate(&mut *r.gpu, &mut r.list, info.slot, &r.textures, &g.client.world, &cam);
     }
     r.list.push(Cmd::BeginPass { color: Some((world_target, Some(clear))), depth: Some((r.depth.0, Some(0.0))) });
     if let Some(g) = &mut r.game {

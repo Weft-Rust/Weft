@@ -27,7 +27,7 @@ pub async fn particles(t: T) -> R {
     Ok(())
 }
 
-/// Huge counts stay cheap: simulated in parallel, drawn in one instanced draw.
+/// Huge counts stay cheap: moved by a compute shader, drawn in one instanced draw.
 pub async fn particle_crowd(t: T) -> R {
     t.flat().await?;
     let f = t.feet();

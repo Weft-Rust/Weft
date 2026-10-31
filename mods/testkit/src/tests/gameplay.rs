@@ -544,6 +544,34 @@ pub async fn beds_far(t: T) -> R {
     Ok(())
 }
 
+/// Pieces of a broken block fall and stay on what is under them, seen as dark on a white floor:
+/// they would be gone under it if the GPU that moves them didn't know of it.
+pub async fn dust_rests_on_the_floor(t: T) -> R {
+    t.flat().await?;
+    let f = t.feet();
+    t.fill(add(f, [-4, -1, -6]), add(f, [4, -1, 2]), "snow").await?;
+    let b = add(f, [0, 0, -3]);
+    t.set(b, "coal_block").await?;
+    t.look_at(add(f, [0, -1, -3]));
+    // For the snow and the block to get to the part of the GPU that knows of them.
+    t.secs(0.6).await?;
+    t.set(b, "air").await?;
+    t.until("the floor bare on the client", Duration::from_secs(2), |t| t.c().block(b) == Some(0)).await?;
+    t.secs(0.1).await?;
+    let dark = |c: [u8; 3]| c.iter().all(|&v| v < 70);
+    let before = t.shot("before").await?.share(0.2, 0.2, 0.8, 0.8, dark);
+    t.set(b, "coal_block").await?;
+    t.secs(0.3).await?;
+    t.op(&format!("break {} {} {}", b[0], b[1], b[2])).await?;
+    // Long enough to have gone under it if nothing stopped them, not to be gone: they live up
+    // to a second.
+    t.secs(0.7).await?;
+    let after = t.shot("after").await?.share(0.2, 0.2, 0.8, 0.8, dark);
+    t.note(format!("dark share on the floor: {before} then {after}"));
+    t.check(after > before + 0.003, format!("pieces on the floor: {before} then {after}"));
+    Ok(())
+}
+
 /// A mob in the way is all that is aimed at: nothing happens to the block behind it.
 pub async fn mob_in_the_way(t: T) -> R {
     t.flat().await?;

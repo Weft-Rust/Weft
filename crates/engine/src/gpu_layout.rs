@@ -517,6 +517,50 @@ gpu_struct! {
 }
 
 gpu_struct! {
+    /// A particle as `particle_sim.wgsl` keeps it.
+    pub struct GpuSimParticle as "SimParticle" {
+        /// Position from the simulation's origin, and edge length in blocks.
+        pub pos_size: [f32; 4],
+        /// Velocity in blocks a second, and seconds it has lived.
+        pub vel_age: [f32; 4],
+        /// x how long it lives.
+        pub life: [f32; 4],
+        /// x kind (16 bits) and flags (`particle_sim.wgsl`), y tint 0xRRGGBB, z bindless texture
+        /// of block dust, w its uv rectangle as `GpuParticle`.
+        pub data: [u32; 4],
+    }
+}
+
+gpu_struct! {
+    /// What `particle_sim.wgsl` needs of a kind, for this frame's step.
+    pub struct GpuParticleKind as "ParticleKind" {
+        /// x gravity, y speed kept this step, z speed kept on the ground this step.
+        pub motion: [f32; 4],
+        /// x color, y color at the end, z `abi::particle_flags`, w shader slot.
+        pub data: [u32; 4],
+        /// x first in `frames`, y how many, none for block dust.
+        pub frames: [u32; 4],
+    }
+}
+
+/// `particle_sim.wgsl`'s push constants.
+#[repr(C)]
+#[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
+pub struct ParticleSimArgs {
+    pub first: u32,
+    pub count: u32,
+    pub dt: f32,
+    pub pad: f32,
+    /// Added to positions when the origin moved.
+    pub shift: [f32; 4],
+    /// From the origin to where drawing wants it: minus the camera.
+    pub rel: [f32; 4],
+    pub origin: [i32; 4],
+    /// The cube in the middle of `cells`.
+    pub center: [i32; 4],
+}
+
+gpu_struct! {
     pub struct GpuWeather as "WeatherColumn" {
         /// The column's middle relative to the camera in x and z, its strip's bottom and top in y.
         /// As x, bottom, z, top.
@@ -657,6 +701,13 @@ bindings! {
         PARTICLES "particles": "array<Particle>",
         SCENE "scene": "Scene",
     }
+    particle_sim "particle_sim.wgsl" {
+        SIM "sim": "array<SimParticle>",
+        DST "dst": "array<Particle>",
+        KINDS "kinds": "array<ParticleKind>",
+        FRAMES "frames": "array<u32>",
+        CELLS "cells": "array<u32>",
+    }
     weather "weather.wgsl" {
         COLUMNS "columns": "array<WeatherColumn>",
         SCENE "scene": "Scene",
@@ -695,7 +746,7 @@ fn solid_at(p: vec3<i32>) -> bool {
 
 /// Every GPU struct as WGSL.
 fn structs() -> String {
-    [Scene::wgsl(), Globals::wgsl(), GpuBox::wgsl(), Instance::wgsl(), GpuCuboid::wgsl(), GpuCorner::wgsl(), GpuBone::wgsl(), GpuParticle::wgsl(), GpuWeather::wgsl(), GpuSky::wgsl(), Quad::wgsl(), Screen::wgsl(), Pass::wgsl()].concat()
+    [Scene::wgsl(), Globals::wgsl(), GpuBox::wgsl(), Instance::wgsl(), GpuCuboid::wgsl(), GpuCorner::wgsl(), GpuBone::wgsl(), GpuParticle::wgsl(), GpuSimParticle::wgsl(), GpuParticleKind::wgsl(), GpuWeather::wgsl(), GpuSky::wgsl(), Quad::wgsl(), Screen::wgsl(), Pass::wgsl()].concat()
 }
 
 /// What goes in front of an engine shader (or a pack's replacement of it): the constants, every
@@ -713,6 +764,22 @@ pub fn prelude(shader: &str, common: &str) -> String {
     }
     s.push_str(common);
     s.push('\n');
+    s
+}
+
+/// What goes in front of `particle_sim.wgsl`: the constants, the structs, what it reads and writes.
+pub fn particle_sim_prelude(window_reach: i32) -> String {
+    let mut s = wgsl();
+    s.push_str(&structs());
+    for (i, (name, ty)) in bindings("particle_sim.wgsl").iter().enumerate() {
+        let access = if matches!(*name, "sim" | "dst") { "read_write" } else { "read" };
+        s.push_str(&format!("@group(1) @binding({i}) var<storage, {access}> {name}: {ty};\n"));
+    }
+    use weft_abi::particle_flags as pf;
+    s.push_str(&format!(
+        "struct SimArgs {{\n    first: u32,\n    count: u32,\n    dt: f32,\n    pad: f32,\n    shift: vec4<f32>,\n    rel: vec4<f32>,\n    origin: vec4<i32>,\n    center: vec4<i32>,\n}}\nvar<immediate> args: SimArgs;\nconst WINDOW_REACH: i32 = {window_reach};\nconst PARTICLE_FLAG_COLLIDE: u32 = {}u;\nconst PARTICLE_FLAG_FULLBRIGHT: u32 = {}u;\nconst PARTICLE_FLAG_SHRINK: u32 = {}u;\nconst PARTICLE_FLAG_DIES_ON_LAND: u32 = {}u;\n",
+        pf::COLLIDE, pf::FULLBRIGHT, pf::SHRINK, pf::DIES_ON_LAND
+    ));
     s
 }
 
