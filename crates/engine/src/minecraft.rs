@@ -163,6 +163,8 @@ fn build(
                 Some("dyed") => ("dyed", words.next().unwrap_or("")),
                 // Turned by a model there, one picture for every way it faces.
                 Some("turned") => ("turned", words.next().unwrap_or("")),
+                // One picture cut up and put together in another's layout.
+                Some("pieces") => ("pieces", words.next().unwrap_or("")),
                 Some(s) => ("copy", s),
                 None => continue,
             };
@@ -171,6 +173,7 @@ fn build(
             let overlay = (mode == "dyed").then_some(next).flatten();
             let color = words.clone().next().and_then(|w| u32::from_str_radix(w, 16).ok()).filter(|_| mode == "dyed");
             let turned = (mode == "turned").then_some(next).flatten().and_then(|w| w.parse::<u32>().ok());
+            let numbers: Vec<u32> = if mode == "pieces" { next.into_iter().chain(words.clone()).filter_map(|w| w.parse().ok()).collect() } else { Vec::new() };
             let crop: Vec<u32> = match next {
                 Some("crop") => words.filter_map(|w| w.parse().ok()).collect(),
                 _ if turned.is_some() && words.clone().next() == Some("crop") => words.skip(1).filter_map(|w| w.parse().ok()).collect(),
@@ -199,6 +202,10 @@ fn build(
                 let mut px = img.rgba;
                 dye(&mut px, &above.rgba, color);
                 crate::assets::encode_png(&dst, img.width, img.height, &px).map_err(|e| e.to_string())?;
+            } else if mode == "pieces" {
+                let img = crate::assets::decode_png(&png).ok_or(format!("{src}: not a png"))?;
+                let Some((w, h, px)) = put_together(&img, &numbers) else { continue };
+                crate::assets::encode_png(&dst, w, h, &px).map_err(|e| e.to_string())?;
             } else if let Some(degrees) = turned {
                 let img = crate::assets::decode_png(&png).ok_or(format!("{src}: not a png"))?;
                 let (w, h, px) = cropped(&img, &crop);
@@ -300,6 +307,34 @@ fn cropped(img: &crate::assets::Image, crop: &[u32]) -> (u32, u32, Vec<u8>) {
     (w, h, px)
 }
 
+/// `w h`, then per piece `x y w h quarters flip to_x to_y`: a part of a picture, flipped left to
+/// right, turned clockwise, put at a place of an empty picture of that size.
+fn put_together(img: &crate::assets::Image, numbers: &[u32]) -> Option<(u32, u32, Vec<u8>)> {
+    let (&[w, h], pieces) = numbers.split_first_chunk::<2>()?;
+    let mut out = vec![0u8; (w * h * 4) as usize];
+    for p in pieces.chunks_exact(8) {
+        let (x0, y0, pw, ph) = (p[0], p[1], p[2], p[3]);
+        for y in 0..ph {
+            for x in 0..pw {
+                let at = ((y0 + y) * img.width + x0 + x) as usize * 4;
+                let px = img.rgba.get(at..at + 4)?;
+                let (mut dx, mut dy) = (if p[5] != 0 { pw - 1 - x } else { x }, y);
+                let (mut cw, mut ch) = (pw, ph);
+                for _ in 0..p[4] % 4 {
+                    (dx, dy) = (ch - 1 - dy, dx);
+                    (cw, ch) = (ch, cw);
+                }
+                let (tx, ty) = (p[6] + dx, p[7] + dy);
+                if tx < w && ty < h {
+                    let to = (ty * w + tx) as usize * 4;
+                    out[to..to + 4].copy_from_slice(px);
+                }
+            }
+        }
+    }
+    Some((w, h, out))
+}
+
 /// A square picture turned clockwise `quarters` times.
 fn turn(px: &[u8], size: u32, quarters: u32) -> Vec<u8> {
     let mut out = px.to_vec();
@@ -336,7 +371,7 @@ fn fnv(s: &str) -> u64 {
 
 #[cfg(test)]
 mod tests {
-    use super::{dye, light_to_alpha, turn};
+    use super::{dye, light_to_alpha, put_together, turn};
 
     /// Builds the real pack from the Minecraft on this computer into `run`, as a normal start does:
     /// automated runs don't, and this needs no window. `cargo test --release -p weft_engine real_pack -- --ignored`
@@ -361,6 +396,18 @@ mod tests {
         assert_eq!(px[4..8], [255, 230, 100, 255], "the brightest stay as they are");
         assert_eq!(px[8..12], [255, 255, 127, 40], "a dim halo is its color, barely covering");
         assert_eq!(px[12..16], [255, 255, 127, 20], "alpha it already had counts");
+    }
+
+    #[test]
+    fn pieces_turn_and_flip_into_place() {
+        // 2 x 1: red, green.
+        let img = crate::assets::Image { width: 2, height: 1, rgba: vec![9, 0, 0, 255, 0, 9, 0, 255] };
+        let (w, h, px) = put_together(&img, &[2, 2, 0, 0, 2, 1, 1, 0, 0, 0]).unwrap();
+        assert_eq!((w, h), (2, 2));
+        assert_eq!(px[..4], [9, 0, 0, 255], "turned clockwise, the left end is on top");
+        assert_eq!(px[8..12], [0, 9, 0, 255], "and the right one under it");
+        let (_, _, px) = put_together(&img, &[2, 1, 0, 0, 2, 1, 0, 1, 0, 0]).unwrap();
+        assert_eq!(px[..4], [0, 9, 0, 255], "flipped");
     }
 
     #[test]

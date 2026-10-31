@@ -17,6 +17,7 @@ pub fn posed(pose: crate::world::Pose, height: f64, eye: f64) -> (f64, f64) {
         Pose::Stand => (height, eye),
         Pose::Crouch => (r(height * 1.5 / 1.8), r(eye * 1.27 / 1.62)),
         Pose::Swim | Pose::Crawl => (r(height * 0.6 / 1.8), r(eye * 0.4 / 1.62)),
+        Pose::Sleep => (r(height * 0.2 / 1.8), r(eye * 0.45 / 1.62)),
     }
 }
 

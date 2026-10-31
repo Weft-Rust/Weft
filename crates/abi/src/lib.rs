@@ -942,6 +942,7 @@ pub mod pose {
     pub const CROUCH: u32 = 1;
     pub const SWIM: u32 = 2;
     pub const CRAWL: u32 = 3;
+    pub const SLEEP: u32 = 4;
 }
 
 #[repr(C)]
@@ -1023,6 +1024,8 @@ defaults!(AreaFillDesc { center: [0.0; 3], radius: 0.0, state: 0, flags: 0 });
 pub mod area_flags {
     /// Unbreakable blocks (negative hardness) stay.
     pub const KEEP_UNBREAKABLE: u32 = 1;
+    /// Liquids stay.
+    pub const KEEP_LIQUIDS: u32 = 2;
 }
 
 pub mod component_flags {
@@ -3023,6 +3026,8 @@ pub mod control_mask {
     pub const FLYING: u32 = 8;
     pub const FLY_SPEED: u32 = 16;
     pub const SELECTED: u32 = 32;
+    /// Lying down with its feet toward `yaw`, or `NaN` to get up.
+    pub const LYING: u32 = 64;
 }
 
 #[repr(C)]
@@ -3037,8 +3042,10 @@ pub struct PlayerControl {
     /// Spectator/creative flight speed multiplier.
     pub fly_speed: f32,
     pub selected: u32,
+    /// With `LYING`.
+    pub lying: f32,
 }
-defaults!(PlayerControl { mask: 0, pos: [0.0; 3], vel: [0.0; 3], yaw: 0.0, pitch: 0.0, flying: 0, fly_speed: 1.0, selected: 0 });
+defaults!(PlayerControl { lying: 0.0, mask: 0, pos: [0.0; 3], vel: [0.0; 3], yaw: 0.0, pitch: 0.0, flying: 0, fly_speed: 1.0, selected: 0 });
 
 /// `Host::client_command` operations.
 pub mod client_op {

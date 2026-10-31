@@ -47,6 +47,12 @@ impl World {
         unsafe { (host().area_fill)(self.raw, &desc) }
     }
 
+    /// `fill_sphere` choosing what stays (`abi::area_flags`).
+    pub fn fill_sphere_keeping(&self, center: [f64; 3], radius: f64, state: u32, flags: u32) {
+        let desc = abi::AreaFillDesc { center, radius, state, flags };
+        unsafe { (host().area_fill)(self.raw, &desc) }
+    }
+
     /// A block of moving structure `entity` (in its own coordinates; block (0, 0, 0) is centered
     /// on the entity); `None` if the entity is not one.
     pub fn structure_block(&self, entity: u64, pos: [i32; 3]) -> Option<u32> {

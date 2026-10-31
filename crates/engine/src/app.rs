@@ -1616,6 +1616,7 @@ fn reload_assets(r: &mut Running, opts: &Options) {
         g.client.render.set_textures(&mut *r.gpu, &r.textures);
         g.client.entity_render.reload(&mut *r.gpu, &r.assets);
         g.client.particles.reload(&mut *r.gpu, &r.assets);
+        g.client.weather_render.reload(&mut *r.gpu, &r.assets);
         g.client.sky.reload(&mut *r.gpu, &r.assets);
         g.client.world.remesh_all();
     }

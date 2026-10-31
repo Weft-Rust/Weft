@@ -428,6 +428,11 @@ pub async fn beds(t: T) -> R {
     t.frames(2).await?;
     t.press("core:use");
     t.screen("base:sleeping").await?;
+    // Lying down on the bed, as the others see it too: the server says so.
+    t.secs(0.3).await?;
+    t.check_eq(t.op("pose").await?.trim().to_string(), abi::pose::SLEEP.to_string(), "lying down");
+    let p = t.state().pos;
+    t.check((p[2] - foot[2] as f64).abs() < 0.1, format!("over the middle of the bed: {p:?}, foot {foot:?}"));
     t.secs(2.5).await?;
     t.shot("sleeping").await?;
     t.until("morning", Duration::from_secs(15), |t| t.c().screen() != "base:sleeping").await?;
@@ -536,6 +541,57 @@ pub async fn beds_far(t: T) -> R {
     t.secs(1.0).await?;
     t.check_eq(t.state().dim, dim, "stays in the bed's dimension");
     t.check(bed_spawn(&t) == Some(foot), "the respawn point stays there too");
+    Ok(())
+}
+
+/// A mob in the way is all that is aimed at: nothing happens to the block behind it.
+pub async fn mob_in_the_way(t: T) -> R {
+    t.flat().await?;
+    let f = t.feet();
+    let wall = add(f, [0, 0, -4]);
+    t.fill(wall, add(wall, [0, 1, 0]), "stone").await?;
+    t.op("put me 0 dirt 4").await?;
+    t.c().select(0);
+    t.look_at(wall);
+    t.frames(2).await?;
+    let pig = t.op(&format!("spawn pig {}", at(add(f, [0, 0, -3])))).await?;
+    t.until("the pig on the client", Duration::from_secs(3), |t| pig.trim().parse().is_ok_and(|id| t.c().entity(id).is_some())).await?;
+    t.frames(3).await?;
+    t.press("core:use");
+    t.secs(0.4).await?;
+    t.check_eq(t.block(add(wall, [0, 0, 1])).await?, "core:air".into(), "no block placed on the wall through the pig");
+    t.op(&format!("remove {}", pig.trim())).await?;
+    t.frames(5).await?;
+    t.press("core:use");
+    t.until("placed with the pig gone", Duration::from_secs(2), |t| t.c().block(add(wall, [0, 0, 1])).is_some_and(|s| s != 0)).await
+}
+
+/// A creeper going off under water breaks nothing and the water stays. A crater in a lake is
+/// filled again by the water around it.
+pub async fn explosions_and_water(t: T) -> R {
+    t.flat().await?;
+    t.cmd("/rule testkit:no_hurt 1").await?;
+    let f = t.feet();
+    t.fill(add(f, [-6, -1, -6]), add(f, [6, -1, 6]), "stone").await?;
+    t.fill(add(f, [-6, 0, -6]), add(f, [6, 2, 6]), "water").await?;
+    t.secs(0.3).await?;
+    let spot = add(f, [2, 0, 0]);
+    let creeper = t.op(&format!("spawn base:creeper {}", at(spot))).await?;
+    let id: u64 = creeper.trim().parse().map_err(|_| format!("spawn creeper: {creeper}"))?;
+    t.until("the creeper going off", Duration::from_secs(6), |t| t.c().entity(id).is_none()).await?;
+    t.secs(0.3).await?;
+    t.check(t.block(spot).await?.contains("water"), format!("the water stays: {}", t.block(spot).await?));
+    t.check_eq(t.block(add(spot, [0, -1, 0])).await?, "base:stone".into(), "the floor under it stays");
+    // The same place, a hole in the water that the water must fill.
+    t.op("mode creative").await?;
+    t.c().fly(true);
+    t.c().teleport([f[0] as f64 + 0.5, f[1] as f64 + 1.0, f[2] as f64 + 0.5]);
+    t.secs(0.2).await?;
+    t.op("crater_fast 3").await?;
+    let hole = add(f, [0, 1, 2]);
+    t.until("the hole", Duration::from_secs(2), |t| t.c().block(hole) == Some(0)).await?;
+    t.until("water flowing back in", Duration::from_secs(6), |t| t.c().block(hole).is_some_and(|s| s != 0)).await?;
+    t.cmd("/rule testkit:no_hurt 0").await?;
     Ok(())
 }
 

@@ -22,6 +22,8 @@ pub enum Pose {
     Swim,
     /// Where nothing higher fits: lying flat, with the same low box.
     Crawl,
+    /// In bed, on its back.
+    Sleep,
 }
 
 impl Pose {
@@ -30,6 +32,7 @@ impl Pose {
             1 => Pose::Crouch,
             2 => Pose::Swim,
             3 => Pose::Crawl,
+            4 => Pose::Sleep,
             _ => Pose::Stand,
         }
     }

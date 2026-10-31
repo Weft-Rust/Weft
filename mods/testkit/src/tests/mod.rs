@@ -90,6 +90,8 @@ pub fn all() -> Vec<TestDef> {
         gameplay::burning,
         gameplay::entity_fields,
         gameplay::fall_damage,
+        gameplay::mob_in_the_way,
+        gameplay::explosions_and_water,
         gameplay::sneak_edge,
         gameplay::movement_attributes,
         gameplay::mob_physics,

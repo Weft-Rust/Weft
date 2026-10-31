@@ -517,6 +517,19 @@ gpu_struct! {
 }
 
 gpu_struct! {
+    pub struct GpuWeather as "WeatherColumn" {
+        /// The column's middle relative to the camera in x and z, its strip's bottom and top in y.
+        /// As x, bottom, z, top.
+        pub place: [f32; 4],
+        /// x its left in the picture, y its top, z how much of the picture high, w alpha.
+        pub uv: [f32; 4],
+        /// x texture index, y light of the column (as `GpuParticle`), z a number of its own, w how
+        /// much of the picture shows (0..255).
+        pub data: [u32; 4],
+    }
+}
+
+gpu_struct! {
     pub struct GpuParticle as "Particle" {
         /// Center relative to the camera, and edge length in blocks.
         pub pos_size: [f32; 4],
@@ -644,6 +657,10 @@ bindings! {
         PARTICLES "particles": "array<Particle>",
         SCENE "scene": "Scene",
     }
+    weather "weather.wgsl" {
+        COLUMNS "columns": "array<WeatherColumn>",
+        SCENE "scene": "Scene",
+    }
     sky "sky.wgsl" {
         OBJECTS "sky": "array<Sky>",
         SCENE "scene": "Scene",
@@ -678,7 +695,7 @@ fn solid_at(p: vec3<i32>) -> bool {
 
 /// Every GPU struct as WGSL.
 fn structs() -> String {
-    [Scene::wgsl(), Globals::wgsl(), GpuBox::wgsl(), Instance::wgsl(), GpuCuboid::wgsl(), GpuCorner::wgsl(), GpuBone::wgsl(), GpuParticle::wgsl(), GpuSky::wgsl(), Quad::wgsl(), Screen::wgsl(), Pass::wgsl()].concat()
+    [Scene::wgsl(), Globals::wgsl(), GpuBox::wgsl(), Instance::wgsl(), GpuCuboid::wgsl(), GpuCorner::wgsl(), GpuBone::wgsl(), GpuParticle::wgsl(), GpuWeather::wgsl(), GpuSky::wgsl(), Quad::wgsl(), Screen::wgsl(), Pass::wgsl()].concat()
 }
 
 /// What goes in front of an engine shader (or a pack's replacement of it): the constants, every

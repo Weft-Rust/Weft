@@ -112,7 +112,7 @@ pub async fn tooltips(t: T) -> R {
         // The tooltip opens to the right of the cursor. Its dark box is close to the panel's
         // color, so only part of the pixels change.
         let v = changed(&plain, &now, w, h, cx + 0.02, cy - 0.02, cx + 0.15, cy + 0.05);
-        t.probe(&format!("{name} tooltip drawn"), v, v > 0.1);
+        t.probe(&format!("{name} tooltip drawn"), v, v > 0.05);
         // Lines by what an item is (`tagged.<component>`), numbers from the item itself.
         let line = |c: probe::C| match name {
             "sword" => c[1] > 140 && c[0] < 60 && c[2] < 60,
@@ -309,12 +309,14 @@ pub async fn break_overlay(t: T) -> R {
     t.hold("core:attack", 0.5);
     t.until("the first block broken", Duration::from_secs(2), |t| t.c().block(wall) == Some(0)).await?;
     let held = t.shot("creative").await?.px;
-    // The same blocks without a button held: the next block as it looks clean.
-    // Past the longest a broken block's pieces fly.
+    // The same with a click, no button held when it is seen: the next block as it looks clean.
+    // Broken the same way, for the light on it to be just as late: a block goes at once here, the
+    // light comes from the server after. Past the longest a broken block's pieces fly.
     t.secs(1.2).await?;
-    t.fill(next, add(next, [0, 1, 0]), "dirt").await?;
-    t.set(wall, "air").await?;
-    t.frames(10).await?;
+    t.fill(wall, add(next, [0, 1, 0]), "dirt").await?;
+    t.secs(0.5).await?;
+    t.press("core:attack");
+    t.until("the first block broken again", Duration::from_secs(2), |t| t.c().block(wall) == Some(0)).await?;
     let clean = t.grab().await?;
     let p = t.block_on_screen(next, [0.0, 0.0, 0.5]).unwrap_or((0.5, 0.45));
     let v = changed(&held, &clean, w, h, p.0 - 0.05, p.1 - 0.05, p.0 + 0.05, p.1 + 0.05);

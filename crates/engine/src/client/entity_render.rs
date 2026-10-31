@@ -665,15 +665,19 @@ impl EntityRenderer {
             let lying = match e.pose {
                 crate::world::Pose::Swim => Some(e.pitch - std::f32::consts::FRAC_PI_2),
                 crate::world::Pose::Crawl => Some(-std::f32::consts::FRAC_PI_2),
+                // On its back, the head toward its back's side.
+                crate::world::Pose::Sleep => Some(std::f32::consts::FRAC_PI_2),
                 _ => None,
             };
+            let sleeping = e.pose == crate::world::Pose::Sleep;
+            let body_yaw = if sleeping { e.yaw } else { e.body_yaw };
             let swim = lying.map_or(Mat4::IDENTITY, |a| Mat4::from_translation(Vec3::new(0.0, 0.3, 0.0)) * Mat4::from_rotation_x(a) * Mat4::from_translation(Vec3::new(0.0, -0.9, 0.0)));
-            let root = Mat4::from_translation(base) * Mat4::from_rotation_y(e.body_yaw) * Mat4::from_rotation_z(roll) * swim * Mat4::from_scale(Vec3::splat(1.0 / 16.0));
+            let root = Mat4::from_translation(base) * Mat4::from_rotation_y(body_yaw) * Mat4::from_rotation_z(roll) * swim * Mat4::from_scale(Vec3::splat(1.0 / 16.0));
             // Its head up to look ahead, and limbs by the swimming stroke.
-            let swim_limbs = lying.map(|_| e.walk * 4.0);
-            let (pitch, head_yaw) = if lying.is_some() { (std::f32::consts::FRAC_PI_4, 0.0) } else { (e.pitch, e.yaw - e.body_yaw) };
-            posed.push(Posed { kind, root, pitch, head_yaw, swing, crouch: e.pose == crate::world::Pose::Crouch, swim: swim_limbs, attack: e.arm_swing.unwrap_or(0.0), holding: e.held != 0, anims, anim_count, layers, layer_count });
-            if e.held != 0 {
+            let swim_limbs = lying.filter(|_| !sleeping).map(|_| e.walk * 4.0);
+            let (pitch, head_yaw) = if sleeping { (0.0, 0.0) } else if lying.is_some() { (std::f32::consts::FRAC_PI_4, 0.0) } else { (e.pitch, e.yaw - e.body_yaw) };
+            posed.push(Posed { kind, root, pitch, head_yaw, swing, crouch: e.pose == crate::world::Pose::Crouch, swim: swim_limbs, attack: e.arm_swing.unwrap_or(0.0), holding: e.held != 0 && !sleeping, anims, anim_count, layers, layer_count });
+            if e.held != 0 && !sleeping {
                 holders.push((posed.len() - 1, e.held, lit));
             }
         }

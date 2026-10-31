@@ -322,6 +322,12 @@ pub unsafe extern "C" fn client_set_player(c: *mut abi::ClientCtx, control: *con
         if ctl.mask & m::FLYING != 0 {
             p.flying = ctl.flying != 0;
         }
+        if ctl.mask & m::LYING != 0 {
+            p.lying = (!ctl.lying.is_nan()).then_some(ctl.lying);
+            if p.lying.is_none() {
+                p.pose = crate::world::Pose::Stand;
+            }
+        }
         if ctl.mask & m::FLY_SPEED != 0 {
             p.fly_speed = ctl.fly_speed.max(0.0);
         }

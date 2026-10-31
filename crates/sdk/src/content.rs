@@ -448,7 +448,7 @@ struct StateDef {
     layer: Layer,
     model: Model,
     textures: [String; 6],
-    boxes: Vec<([f32; 3], [f32; 3], [String; 6])>,
+    boxes: Vec<([f32; 3], [f32; 3], [String; 6], [[f32; 4]; 6])>,
     collision: Vec<[f32; 6]>,
     selection: Vec<[f32; 6]>,
     components: Vec<Pending>,
@@ -650,7 +650,22 @@ macro_rules! state_setters {
                 s.flags &= !bf::OPAQUE;
                 s.opacity = 0;
                 s.layer = Layer::Cutout;
-                s.boxes.push((min, max, Default::default()));
+                s.boxes.push((min, max, Default::default(), [[-1.0; 4]; 6]));
+            });
+            self
+        }
+        /// `model_box` with its own textures and texel rectangles (u0, v0, u1, v1, 0..16) per face
+        /// in -X, +X, -Y, +Y, -Z, +Z order, as a model file's element has.
+        pub fn model_box_faces(mut self, min: [f32; 3], max: [f32; 3], faces: [(&str, [f32; 4]); 6]) -> Self {
+            self.each(|s, ns| {
+                if s.model != Model::Boxes {
+                    s.boxes.clear();
+                }
+                s.model = Model::Boxes;
+                s.flags &= !bf::OPAQUE;
+                s.opacity = 0;
+                s.layer = Layer::Cutout;
+                s.boxes.push((min, max, std::array::from_fn(|i| block_tex(ns, faces[i].0)), faces.map(|f| f.1)));
             });
             self
         }
@@ -1062,7 +1077,7 @@ impl Drop for BlockBuilder<'_> {
         let boxes: Vec<Vec<abi::ModelBox>> = self
             .states
             .iter()
-            .map(|s| s.boxes.iter().map(|(min, max, t)| abi::ModelBox { min: *min, max: *max, textures: std::array::from_fn(|i| Str::new(&t[i])), ..abi::ModelBox::DEFAULT }).collect())
+            .map(|s| s.boxes.iter().map(|(min, max, t, uv)| abi::ModelBox { min: *min, max: *max, textures: std::array::from_fn(|i| Str::new(&t[i])), uv: *uv }).collect())
             .collect();
         let mut scratch: Vec<Vec<Vec<u8>>> = vec![Vec::new(); self.states.len()];
         let state_values: Vec<Vec<abi::CompValue>> = self.states.iter().zip(scratch.iter_mut()).map(|(s, sc)| raw_values(&s.components, sc)).collect();

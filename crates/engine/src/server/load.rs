@@ -296,8 +296,8 @@ impl Server {
         let views: Vec<View> = self.players.iter().filter(|p| p.joined && p.dim == dim).map(|p| self.view(p)).collect();
         let def = &c.dims[dim as usize];
         let in_view = |cp: IVec3| views.iter().any(|v| v.contains_in(def, cp));
-        // Unbreakable blocks it keeps may be anywhere in terrain: such cubes are generated.
-        let keeps = fill.keep_unbreakable && c.states.iter().any(|s| s.hardness < 0.0 && s.liquid.is_none());
+        // Unbreakable blocks or liquids it keeps may be anywhere in terrain: such cubes are generated.
+        let keeps = fill.keep_liquids || fill.keep_unbreakable && c.states.iter().any(|s| s.hardness < 0.0 && s.liquid.is_none());
         let d = &self.dims[dim as usize];
         let reach = (fill.radius / 16.0).ceil() as i32 + 2;
         let mid = (fill.center / 16.0).floor().as_ivec3();

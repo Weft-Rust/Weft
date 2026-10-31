@@ -49,7 +49,8 @@ struct Nights {
 }
 static NIGHTS: Mutex<BTreeMap<u32, Nights>> = Mutex::new(BTreeMap::new());
 
-/// Server to client: a message (`MESSAGES`), and lying down (1) or getting up (0).
+/// Server to client: a message (`MESSAGES`), and lying down (1 + quarter turns of its yaw) or
+/// getting up (0).
 static MESSAGE: Channel<u32> = Channel::named("bed_message");
 static LYING: Channel<u32> = Channel::named("bed_lying");
 /// Client to server: the player got up (left the sleep screen).
@@ -75,9 +76,86 @@ fn foot_of(pos: [i32; 3], state: u32) -> [i32; 3] {
     if state_prop(state, "part") == Some("head") { other_half(pos, state) } else { pos }
 }
 
+/// Where a player lying on the bed is: over the middle of it, the body's middle on the mattress.
+fn lying_on_bed(foot: [i32; 3], state: u32) -> [f64; 3] {
+    let head = other_half(foot, state);
+    [(foot[0] + head[0]) as f64 / 2.0 + 0.5, foot[1] as f64 + 0.39, (foot[2] + head[2]) as f64 / 2.0 + 0.5]
+}
+
+/// The yaw looking from the head of the bed to its foot, as quarter turns (`LYING`).
+fn lying_quarters(state: u32) -> u32 {
+    match state_prop(state, "facing").and_then(Dir::from_name) {
+        Some(Dir::West) => 1,
+        Some(Dir::South) => 2,
+        Some(Dir::East) => 3,
+        _ => 0,
+    }
+}
+
 /// Where a player stands on the bed with its foot at `foot`.
 fn on_bed(foot: [i32; 3]) -> [f64; 3] {
     [foot[0] as f64 + 0.5, foot[1] as f64 + 0.5625, foot[2] as f64 + 0.5]
+}
+
+/// No face: transparent pixels of a side picture, where the part of a box meets another.
+const NONE: (&str, [f32; 4]) = ("bed_foot_east", [0.0, 0.0, 1.0, 1.0]);
+const BODY_UV: [f32; 4] = [0.0, 7.0, 16.0, 13.0];
+const BOTTOM: (&str, [f32; 4]) = ("planks_oak", [0.0, 0.0, 16.0, 16.0]);
+/// Replaced by the state's picture of the top, turned to where it faces.
+const UP: (&str, [f32; 4]) = ("", [0.0, 0.0, 16.0, 16.0]);
+
+/// A box of a bed facing north: from, to, faces in -X, +X, -Y, +Y, -Z, +Z order. The texels are
+/// vanilla's layout, so that a pack's pictures fit: mattress in the middle of a side, legs below.
+type BedBox = ([f32; 3], [f32; 3], [(&'static str, [f32; 4]); 6]);
+const FOOT_BOXES: &[BedBox] = &[
+    (
+        [0.0, 3.0, 0.0],
+        [16.0, 9.0, 16.0],
+        [("bed_foot_west", BODY_UV), ("bed_foot_east", BODY_UV), BOTTOM, UP, NONE, ("bed_foot_south", BODY_UV)],
+    ),
+    (
+        [0.0, 0.0, 13.0],
+        [3.0, 3.0, 16.0],
+        [("bed_foot_west", [13.0, 13.0, 16.0, 16.0]), ("bed_foot_south", [3.0, 13.0, 6.0, 16.0]), ("bed_foot_west", [7.0, 13.0, 10.0, 16.0]), NONE, ("bed_foot_west", [10.0, 13.0, 13.0, 16.0]), ("bed_foot_south", [0.0, 13.0, 3.0, 16.0])],
+    ),
+    (
+        [13.0, 0.0, 13.0],
+        [16.0, 3.0, 16.0],
+        [("bed_foot_south", [10.0, 13.0, 13.0, 16.0]), ("bed_foot_east", [0.0, 13.0, 3.0, 16.0]), ("bed_foot_east", [6.0, 13.0, 9.0, 16.0]), NONE, ("bed_foot_east", [3.0, 13.0, 6.0, 16.0]), ("bed_foot_south", [13.0, 13.0, 16.0, 16.0])],
+    ),
+];
+const HEAD_BOXES: &[BedBox] = &[
+    (
+        [0.0, 3.0, 0.0],
+        [16.0, 9.0, 16.0],
+        [("bed_head_west", BODY_UV), ("bed_head_east", BODY_UV), BOTTOM, UP, ("bed_head_north", BODY_UV), NONE],
+    ),
+    (
+        [0.0, 0.0, 0.0],
+        [3.0, 3.0, 3.0],
+        [("bed_head_west", [0.0, 13.0, 3.0, 16.0]), ("bed_head_north", [10.0, 13.0, 13.0, 16.0]), ("bed_head_west", [6.0, 13.0, 9.0, 16.0]), NONE, ("bed_head_north", [13.0, 13.0, 16.0, 16.0]), ("bed_head_west", [3.0, 13.0, 6.0, 16.0])],
+    ),
+    (
+        [13.0, 0.0, 0.0],
+        [16.0, 3.0, 3.0],
+        [("bed_head_north", [3.0, 13.0, 6.0, 16.0]), ("bed_head_east", [13.0, 13.0, 16.0, 16.0]), ("bed_head_east", [7.0, 13.0, 10.0, 16.0]), NONE, ("bed_head_north", [0.0, 13.0, 3.0, 16.0]), ("bed_head_east", [10.0, 13.0, 13.0, 16.0])],
+    ),
+];
+/// The picture of the top of the foot and the head, per quarter turn.
+const TOP: [[&str; 4]; 2] = [["bed_top_foot", "bed_top_foot_90", "bed_top_foot_180", "bed_top_foot_270"], ["bed_top_head_0", "bed_top_head_90", "bed_top_head_180", "bed_top_head_270"]];
+
+/// A box turned clockwise from above: its corners, and each side's face moved to the next side
+/// (north to east ...). A turn doesn't change how a side reads from outside; tops are other pictures.
+fn turned(b: &BedBox, quarters: usize, top: &'static str) -> ([f32; 3], [f32; 3], [(&'static str, [f32; 4]); 6]) {
+    let (mut min, mut max, mut f) = (b.0, b.1, b.2);
+    f[3].0 = top;
+    for _ in 0..quarters {
+        let (a, c) = ([16.0 - max[2], min[1], min[0]], [16.0 - min[2], max[1], max[0]]);
+        (min, max) = (a, c);
+        // West takes south's, east north's, north west's, south east's.
+        f = [f[5], f[4], f[2], f[3], f[0], f[1]];
+    }
+    (min, max, f)
 }
 
 pub fn register(r: &mut Registry) {
@@ -87,20 +165,20 @@ pub fn register(r: &mut Registry) {
         .prop("part", ["foot", "head"])
         .states(|p, s| {
             let head = p.is("part", "head");
-            let mut f = ["bed_side"; 6];
-            f[2] = "planks_oak";
-            // The pillow at the head's far end; the texture shows it up at 0 degrees.
-            f[3] = if head {
-                match p.facing() {
-                    Dir::South => "bed_top_head_0",
-                    Dir::West => "bed_top_head_90",
-                    Dir::North => "bed_top_head_180",
-                    _ => "bed_top_head_270",
-                }
-            } else {
-                "bed_top_foot"
+            // What the model file of a bed says for one facing north, turned to this one.
+            let quarters = match p.facing() {
+                Dir::South => 0,
+                Dir::West => 1,
+                Dir::North => 2,
+                _ => 3,
             };
-            s.faces(f).cutout().model_box([0.0, 0.0, 0.0], [16.0, 9.0, 16.0])
+            let mut s = s.cutout().selection([0.0, 0.0, 0.0], [16.0, 9.0, 16.0]);
+            for b in if head { HEAD_BOXES } else { FOOT_BOXES } {
+                let top = TOP[head as usize][quarters];
+                let (min, max, faces) = turned(b, quarters, top);
+                s = s.model_box_faces(min, max, faces);
+            }
+            s
         })
         .hardness(0.2)
         .mineable("axe")
@@ -204,8 +282,9 @@ fn use_bed(u: &mut Use) -> bool {
     } else if let Some(s) = w.component_mut(player, &SLEEP) {
         let night = NIGHTS.lock().unwrap().get(&dim).map_or(0, |n| n.skipped);
         *s = Sleep { bed: foot, since: w.time(), night, asleep: 1 };
-        w.teleport(player, None, on_bed(foot));
-        w.send(player, &LYING, &1);
+        let state = w.get(foot);
+        w.teleport(player, None, lying_on_bed(foot, state));
+        w.send(player, &LYING, &(1 + lying_quarters(state)));
     }
     true
 }
@@ -237,6 +316,9 @@ fn get_up(w: &World, player: u64) {
     if let Some(s) = w.component_mut(player, &SLEEP).filter(|s| s.asleep != 0) {
         s.asleep = 0;
         w.send(player, &LYING, &0);
+        if BED.is(w.get(s.bed)) {
+            w.teleport(player, None, on_bed(s.bed));
+        }
     }
 }
 
@@ -296,8 +378,10 @@ fn client(r: &mut Registry) {
     r.client_packet(&LYING, |c, lying| {
         if lying != 0 {
             *LYING_SINCE.lock().unwrap() = Some(Instant::now());
+            c.lie_down(Some((lying - 1) as f32 * std::f32::consts::FRAC_PI_2));
             c.open_screen(&SLEEP_SCREEN);
         } else if LYING_SINCE.lock().unwrap().take().is_some() {
+            c.lie_down(None);
             c.post_effect(SLEEP_EFFECT, 0.0);
             if c.screen() == SLEEP_SCREEN.name() {
                 c.close_screen();
@@ -307,6 +391,7 @@ fn client(r: &mut Registry) {
     // Leaving the screen (Escape, the button) gets the player up.
     r.client_screen(|c, screen| {
         if screen != SLEEP_SCREEN.name() && LYING_SINCE.lock().unwrap().take().is_some() {
+            c.lie_down(None);
             c.post_effect(SLEEP_EFFECT, 0.0);
             c.send(&GET_UP, &());
         }

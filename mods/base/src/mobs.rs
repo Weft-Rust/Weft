@@ -289,7 +289,11 @@ fn blast(w: &World, id: u64, at: [f64; 3], radius: f64) {
         let damage = (impact * impact + impact) / 2.0 * 7.0 * radius * 2.0 + 1.0;
         w.damage(other, damage as f32, id, damage::EXPLOSION);
     }
-    w.fill_sphere(at, radius, 0, true);
+    // Vanilla's: one going off in a liquid breaks nothing, and liquids don't break at all.
+    let p = [at[0].floor() as i32, at[1].floor() as i32, at[2].floor() as i32];
+    if w.flags(p) & abi::block_flags::LIQUID == 0 {
+        w.fill_sphere_keeping(at, radius, 0, abi::area_flags::KEEP_UNBREAKABLE | abi::area_flags::KEEP_LIQUIDS);
+    }
     w.spawn_particles(&Particle::named("core:poof"), at).count(40).spread(radius as f32 * 0.5).speed(2.0);
     w.remove(id);
 }

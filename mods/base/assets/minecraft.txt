@@ -1,19 +1,38 @@
 # Textures of a pack made from the player's own Minecraft (see the engine's minecraft.rs):
 # ours = theirs, both under textures/ without .png. `crop x y w h` cuts a part, `glow` makes an
-# emission mask of the warm bright texels.
+# emission mask of the warm bright texels, `pieces src w h x y w h quarters flip to_x to_y ...` puts
+# parts of a picture together in another's layout.
 
 block/bedrock = block/bedrock
 block/bed_top_foot = block/red_bed_foot_up
+block/bed_top_foot_90 = turned block/red_bed_foot_up 90
+block/bed_top_foot_180 = turned block/red_bed_foot_up 180
+block/bed_top_foot_270 = turned block/red_bed_foot_up 270
 block/bed_top_head_0 = block/red_bed_head_up
 block/bed_top_head_90 = turned block/red_bed_head_up 90
 block/bed_top_head_180 = turned block/red_bed_head_up 180
 block/bed_top_head_270 = turned block/red_bed_head_up 270
+block/bed_foot_east = block/red_bed_foot_east
+block/bed_foot_west = block/red_bed_foot_west
+block/bed_foot_south = block/red_bed_foot_south
+block/bed_head_east = block/red_bed_head_east
+block/bed_head_west = block/red_bed_head_west
+block/bed_head_north = block/bed_head_north
 # Before 26.2 one picture for a model made in code; a line for what this version lacks does nothing.
 block/bed_top_foot = turned entity/bed/red 0 crop 6 28 16 16
+block/bed_top_foot_90 = turned entity/bed/red 90 crop 6 28 16 16
+block/bed_top_foot_180 = turned entity/bed/red 180 crop 6 28 16 16
+block/bed_top_foot_270 = turned entity/bed/red 270 crop 6 28 16 16
 block/bed_top_head_0 = turned entity/bed/red 0 crop 6 6 16 16
 block/bed_top_head_90 = turned entity/bed/red 90 crop 6 6 16 16
 block/bed_top_head_180 = turned entity/bed/red 180 crop 6 6 16 16
 block/bed_top_head_270 = turned entity/bed/red 270 crop 6 6 16 16
+block/bed_foot_east = pieces entity/bed/red 16 16 22 28 6 16 1 0 0 7 53 3 3 3 0 0 0 13 56 3 3 3 0 0 3 13 53 3 3 3 0 0 6 13 56 3 3 3 0 0 9 13 53 3 3 3 0 0 12 13 56 3 1 3 0 0 15 13
+block/bed_foot_west = pieces entity/bed/red 16 16 0 28 6 16 3 0 0 7 53 3 3 3 0 0 0 13 56 3 3 3 0 0 3 13 53 3 3 3 0 0 6 13 56 3 3 3 0 0 9 13 53 3 3 3 0 0 12 13 56 3 1 3 0 0 15 13
+block/bed_foot_south = pieces entity/bed/red 16 16 22 22 16 6 2 1 0 7 53 3 3 3 0 0 0 13 56 3 3 3 0 0 3 13 53 3 3 3 0 0 6 13 56 3 3 3 0 0 9 13 53 3 3 3 0 0 12 13 56 3 1 3 0 0 15 13
+block/bed_head_east = pieces entity/bed/red 16 16 22 6 6 16 1 0 0 7 53 3 3 3 0 0 0 13 56 3 3 3 0 0 3 13 53 3 3 3 0 0 6 13 56 3 3 3 0 0 9 13 53 3 3 3 0 0 12 13 56 3 1 3 0 0 15 13
+block/bed_head_west = pieces entity/bed/red 16 16 0 6 6 16 3 0 0 7 53 3 3 3 0 0 0 13 56 3 3 3 0 0 3 13 53 3 3 3 0 0 6 13 56 3 3 3 0 0 9 13 53 3 3 3 0 0 12 13 56 3 1 3 0 0 15 13
+block/bed_head_north = pieces entity/bed/red 16 16 6 0 16 6 2 0 0 7 53 3 3 3 0 0 0 13 56 3 3 3 0 0 3 13 53 3 3 3 0 0 6 13 56 3 3 3 0 0 9 13 53 3 3 3 0 0 12 13 56 3 1 3 0 0 15 13
 block/bricks = block/bricks
 block/cactus_side = block/cactus_side
 block/cactus_top = block/cactus_top

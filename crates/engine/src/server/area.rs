@@ -16,7 +16,7 @@ use crate::world::cube::{Cube, VOLUME};
 use crate::world::light::Lighter;
 
 /// A ball of one block: every block whose middle is within `radius` of `center` becomes
-/// `state` (unbreakable ones stay with `keep_unbreakable`).
+/// `state` (unbreakable ones stay with `keep_unbreakable`, liquids with `keep_liquids`).
 #[derive(Clone, Copy, Debug)]
 pub struct AreaFill {
     /// Order of the dimension's edits, from 1; cubes remember the last one they got.
@@ -25,6 +25,7 @@ pub struct AreaFill {
     pub radius: f64,
     pub state: u32,
     pub keep_unbreakable: bool,
+    pub keep_liquids: bool,
 }
 
 /// Light work for one cube of an area edit.
@@ -93,21 +94,23 @@ pub struct FillStats {
 }
 
 impl AreaFill {
-    /// As saved in `world.txt`: `id x y z radius block keep`.
+    /// As saved in `world.txt`: `id x y z radius block keep`, keep 1 unbreakable + 2 liquids.
     pub fn spec(&self, c: &Content) -> String {
         let p = self.center;
-        format!("{} {} {} {} {} {} {}", self.id, p.x, p.y, p.z, self.radius, c.state_name(self.state), self.keep_unbreakable as u8)
+        format!("{} {} {} {} {} {} {}", self.id, p.x, p.y, p.z, self.radius, c.state_name(self.state), self.keep_unbreakable as u8 + self.keep_liquids as u8 * 2)
     }
 
     pub fn parse(c: &Content, spec: &str) -> Option<AreaFill> {
         let w: Vec<&str> = spec.split_whitespace().collect();
         let [id, x, y, z, r, block, keep] = w[..] else { return None };
+        let keep: u8 = keep.parse().ok()?;
         Some(AreaFill {
             id: id.parse().ok()?,
             center: DVec3::new(x.parse().ok()?, y.parse().ok()?, z.parse().ok()?),
             radius: r.parse().ok()?,
             state: c.state_by_name(block)?,
-            keep_unbreakable: keep == "1",
+            keep_unbreakable: keep & 1 != 0,
+            keep_liquids: keep & 2 != 0,
         })
     }
 
@@ -136,8 +139,12 @@ impl AreaFill {
     /// The cube with the fill applied, if that changes it, and the blocks outside next to a
     /// changed one (they get a neighbor update: sand on the rim falls).
     pub fn apply(&self, c: &Content, cp: IVec3, cube: &Cube) -> Option<(Cube, Vec<IVec3>)> {
-        // Liquids count as unbreakable for mining, not here: a crater takes the lake too.
-        let keep = |s: u32| self.keep_unbreakable && c.states[s as usize].hardness < 0.0 && c.states[s as usize].liquid.is_none();
+        // Liquids count as unbreakable for mining, not here: a crater takes the lake too, unless
+        // it is told otherwise.
+        let keep = |s: u32| {
+            let st = &c.states[s as usize];
+            if st.liquid.is_some() { self.keep_liquids } else { self.keep_unbreakable && st.hardness < 0.0 }
+        };
         let (_, far) = self.reach(cp);
         let mut out = if far <= self.radius * self.radius && !cube.palette().iter().any(|&s| keep(s)) {
             if cube.palette() == [self.state] {

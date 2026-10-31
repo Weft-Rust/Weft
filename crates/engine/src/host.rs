@@ -805,7 +805,7 @@ unsafe extern "C" fn area_fill(w: *mut abi::WorldCtx, desc: *const abi::AreaFill
         if d.framed || !a.radius.is_finite() || a.radius <= 0.0 || a.state as usize >= crate::content::content().states.len() {
             return;
         }
-        let fill = crate::server::area::AreaFill { id: 0, center: DVec3::from_array(a.center), radius: a.radius, state: a.state, keep_unbreakable: a.flags & abi::area_flags::KEEP_UNBREAKABLE != 0 };
+        let fill = crate::server::area::AreaFill { id: 0, center: DVec3::from_array(a.center), radius: a.radius, state: a.state, keep_unbreakable: a.flags & abi::area_flags::KEEP_UNBREAKABLE != 0, keep_liquids: a.flags & abi::area_flags::KEEP_LIQUIDS != 0 };
         d.events.push(crate::server::DimEvent::AreaFill { dim: d.id, fill });
     }
 }
