@@ -9,6 +9,7 @@ use weft_abi::{ItemStack, block_flags as bf};
 
 use super::dim::Dim;
 use crate::content::{AIR, Content, LiquidDef};
+use crate::physics::Cells;
 use crate::world::DIRS;
 
 /// North, east, south, west: vanilla's horizontal order, which decides ties.
@@ -36,18 +37,39 @@ fn encode(def: &LiquidDef, amount: u32, falling: bool) -> u32 {
 
 impl Dim {
     fn fluid(&self, c: &Content, p: IVec3) -> Option<Fluid> {
-        self.get(p).and_then(|s| decode(c, s))
+        self.space.liquid(c, p).and_then(|s| decode(c, s))
+    }
+
+    /// The liquid at `p` reaching over to the cell in direction `d` of it: not past a solid part
+    /// in between, as a bottom slab is under the water in it.
+    fn fluid_towards(&self, c: &Content, p: IVec3, d: IVec3) -> Option<Fluid> {
+        self.fluid(c, p).filter(|_| !self.sealed(c, p, d))
+    }
+
+    /// Whether what shares the cell at `p` with a liquid closes all of its side towards `d`.
+    fn sealed(&self, c: &Content, p: IVec3, d: IVec3) -> bool {
+        if self.space.extras(p).is_empty() {
+            return false;
+        }
+        let axis = if d.x != 0 { 0 } else if d.y != 0 { 1 } else { 2 };
+        let up = d[axis] > 0;
+        self.parts(p).into_iter().any(|s| {
+            c.states[s as usize].collision.iter().any(|b| {
+                let at_side = if up { b[axis + 3] >= 1.0 } else { b[axis] <= 0.0 };
+                at_side && (0..3).filter(|&a| a != axis).all(|a| b[a] <= 0.0 && b[a + 3] >= 1.0)
+            })
+        })
     }
 
     /// Room for liquid: neither solid nor a ladder (unloaded counts as solid).
     fn holds_liquid(&self, c: &Content, p: IVec3) -> bool {
-        self.get(p)
-            .is_some_and(|s| c.states[s as usize].flags & (bf::SOLID | bf::CLIMBABLE) == 0)
+        let room = |s: u32| c.states[s as usize].flags & (bf::SOLID | bf::CLIMBABLE) == 0;
+        self.get(p).is_some_and(room) && self.space.extras(p).iter().all(|&s| room(s))
     }
 
     fn solid(&self, c: &Content, p: IVec3) -> bool {
-        self.get(p)
-            .is_none_or(|s| c.states[s as usize].flags & bf::SOLID != 0)
+        let solid = |s: u32| c.states[s as usize].flags & bf::SOLID != 0;
+        self.get(p).is_none_or(solid) || self.space.extras(p).iter().any(|&s| solid(s))
     }
 
     /// What liquid `l` would make of `p` from its neighbors: a state, or `None` for nothing.
@@ -55,7 +77,7 @@ impl Dim {
         let def = &c.liquids[l as usize];
         let (mut max, mut sources) = (0, 0);
         for d in HORIZONTAL {
-            if let Some(f) = self.fluid(c, p + d).filter(|f| f.id == l) {
+            if let Some(f) = self.fluid_towards(c, p + d, -d).filter(|f| f.id == l) {
                 sources += f.source as u32;
                 max = max.max(f.amount);
             }
@@ -66,7 +88,7 @@ impl Dim {
                 return Some(def.first_state);
             }
         }
-        if self.fluid(c, p - down).is_some_and(|f| f.id == l) {
+        if self.fluid_towards(c, p - down, down).is_some_and(|f| f.id == l) {
             return Some(encode(def, 8, true));
         }
         let k = max as i32 - def.drop_off as i32;
@@ -92,7 +114,7 @@ impl Dim {
     }
 
     fn falls_into(&self, c: &Content, l: u16, p: IVec3) -> Option<u32> {
-        let state = self.get(p)?;
+        let state = self.space.liquid(c, p)?;
         let mine = c.liquids[l as usize].first_state;
         c.reactions
             .iter()
@@ -101,18 +123,18 @@ impl Dim {
     }
 
     fn spread_to(&mut self, c: &'static Content, p: IVec3, state: u32, falling_in: bool, l: u16) {
-        let Some(old) = self.get(p) else { return };
-        if c.states[old as usize].liquid.is_some() {
-            if falling_in {
+        if self.fluid(c, p).is_some() {
+            if falling_in && self.space.extras(p).is_empty() {
                 if let Some(b) = self.falls_into(c, l, p) {
                     self.set(c, p, b);
                 }
             }
             return;
         }
+        let was = self.parts(p);
         self.set(c, p, state);
-        if old != AIR {
-            // Plants and torches wash away with their drops, like vanilla.
+        // Plants and torches wash away with their drops, like vanilla.
+        for old in was {
             self.drop_block_loot(c, p, old, ItemStack::EMPTY, false, None);
         }
     }
@@ -165,7 +187,7 @@ impl Dim {
             return;
         }
         for (d, state) in self.spread_dirs(c, p, f.id, down) {
-            if self.can_spread_to(c, p + d, f.id, false) {
+            if !self.sealed(c, p, d) && self.can_spread_to(c, p + d, f.id, false) {
                 self.spread_to(c, p + d, state, false, f.id);
             }
         }
@@ -179,18 +201,18 @@ impl Dim {
         if !f.source {
             match self.new_liquid(c, p, f.id, down) {
                 None => {
-                    self.set(c, p, AIR);
+                    self.replace_part(c, p, state, AIR);
                     return;
                 }
                 Some(s) if s != state => {
-                    self.set(c, p, s);
+                    self.replace_part(c, p, state, s);
                     f = decode(c, s).unwrap_or(f);
                 }
                 _ => {}
             }
         }
         let below = p + down;
-        if self.can_spread_to(c, below, f.id, true) {
+        if !self.sealed(c, p, down) && self.can_spread_to(c, below, f.id, true) {
             let state = self
                 .new_liquid(c, below, f.id, down)
                 .unwrap_or(encode(def, 8, true));
@@ -226,7 +248,12 @@ impl Dim {
                 .iter()
                 .find(|r| c.matches(&r.liquid, state) && c.matches(&r.touching, n));
             if let Some(b) = hit.and_then(|r| if f.source { r.source } else { r.flowing }) {
-                self.set(c, p, b);
+                // In with a block it just goes: what it would turn into has no room.
+                if self.space.extras(p).is_empty() && self.get(p) == Some(state) {
+                    self.set(c, p, b);
+                } else {
+                    self.replace_part(c, p, state, AIR);
+                }
                 return;
             }
         }
@@ -248,10 +275,22 @@ impl Dim {
             let hit = self
                 .look_ray(c, player, reach, false)
                 .filter(|h| h.frame == 0)?;
+            let source = c.liquids[l as usize].first_state;
+            // Into what holds liquid, with the same say as placing a block.
+            if c.states[hit.state as usize].flags & bf::HOLDS_LIQUID != 0
+                && self.fluid(c, hit.block).is_none()
+                && self.can_hold_liquid(c, hit.block)
+            {
+                let mut q =
+                    weft_abi::Query { entity: player, pos: hit.block.to_array(), state: source, item: held.item, ..weft_abi::Query::DEFAULT };
+                if !self.ask(c, weft_abi::question::PLACE_BLOCK, &mut q) || !self.add_part(c, hit.block, source) {
+                    return None;
+                }
+                return Some(if creative || empty == 0 { held } else { ItemStack::new(empty, 1) });
+            }
             let replaceable = |s: u32| c.states[s as usize].flags & bf::REPLACEABLE != 0;
             let target = if replaceable(hit.state) { hit.block } else { hit.block + DIRS[hit.face as usize] };
             let old = self.get(target).filter(|&s| replaceable(s))?;
-            let source = c.liquids[l as usize].first_state;
             // Only into what would become a source, and with the same say as placing a block.
             if old == source {
                 return None;
@@ -279,7 +318,7 @@ impl Dim {
         if !self.ask(c, weft_abi::question::BREAK_BLOCK, &mut q) {
             return None;
         }
-        self.set(c, hit.block, AIR);
+        self.replace_part(c, hit.block, hit.state, AIR);
         if creative {
             return Some(held);
         }
@@ -314,9 +353,9 @@ impl Dim {
             .collect();
         // Asked from a body's blocks, it looks along those.
         if self.frame != 0 {
-            return crate::physics::pick(c, &|p| self.get(p), &[], self.place.to_local(eye), dir, max, liquids);
+            return crate::physics::pick(c, &*self.space, &[], self.place.to_local(eye), dir, max, liquids);
         }
-        crate::physics::pick(c, &|p| self.get(p), &structures, eye, dir, max, liquids)
+        crate::physics::pick(c, &*self.space, &structures, eye, dir, max, liquids)
     }
 }
 

@@ -439,6 +439,8 @@ pub struct Client {
     pub gizmo_labels: Vec<gizmo::Label>,
     /// The block being broken (frame, block as in `Hit`) and how far.
     pub breaking: Option<(u64, IVec3, f32)>,
+    /// Which of what is in that cell.
+    breaking_part: u32,
     /// Hotbar contents last frame, so the HUD knows when to redraw.
     pub hotbar: Vec<u32>,
 }
@@ -683,6 +685,7 @@ impl Client {
             gizmo_fills: Vec::new(),
             gizmo_labels: Vec::new(),
             breaking: None,
+            breaking_part: 0,
             hotbar: vec![0; 9],
         })
     }
@@ -937,15 +940,15 @@ impl Client {
     fn step_physics(&mut self, input: &Input, dt: f64) {
         let c = content();
         let world = &self.world;
-        let block = |p: IVec3| world.block_or_air(p);
+        let block = world::SeenCells { world, air_if_missing: false };
         // Walking waits for the ground under the player to arrive; flying goes on, taking cubes
         // that are not here yet for air (the next ones are usually on their way).
         let flying = self.player.flying || self.player.noclip;
-        let ready = self.joined && !self.dead && (flying || block(self.player.pos.floor().as_ivec3()).is_some());
+        let ready = self.joined && !self.dead && (flying || world.block_or_air(self.player.pos.floor().as_ivec3()).is_some());
         // The clock bodies are predicted by runs on while the player waits, or they would stop.
         let mut ambient_steps = 0;
         if self.joined {
-            let air_if_missing = |p: IVec3| block(p).or(Some(crate::content::AIR));
+            let air_if_missing = world::SeenCells { world, air_if_missing: true };
             self.accum += dt.min(0.25);
             while self.accum >= STEP {
                 self.accum -= STEP;
@@ -1019,7 +1022,7 @@ impl Client {
                         target: "physics",
                         "pos {:.4} {:.4} {:.4} vel {:.4} {:.4} {:.4} ground {} liquid {} crouch {} fly {} below {}",
                         p.pos.x, p.pos.y, p.pos.z, p.vel.x, p.vel.y, p.vel.z, p.on_ground, p.in_liquid, p.pose == Pose::Crouch, p.flying,
-                        block(feet).map_or("unloaded".to_string(), |s| c.state_name(s))
+                        world.block_or_air(feet).map_or("unloaded".to_string(), |s| c.state_name(s))
                     );
                 }
             }
@@ -1136,20 +1139,21 @@ impl Client {
                 );
                 let time = if self.mode == GameMode::Creative { 0.0 } else { time };
                 let done = match self.breaking {
-                    Some((f, p, v)) if (f, p) == (hit.frame, hit.block) => v,
+                    Some((f, p, v)) if (f, p) == (hit.frame, hit.block) && self.breaking_part == hit.state => v,
                     _ => 0.0,
                 };
+                self.breaking_part = hit.state;
                 let progress = if time <= 0.0 { 1.0 } else { done + dt as f32 / time };
                 if progress >= 1.0 && (input.pressed("core:attack") || self.break_delay <= 0.0) {
                     send_look.send(&mut self.conn);
                     self.conn
-                        .send(ToServer::Break { pos: hit.block, face: hit.face, frame: hit.frame });
+                        .send(ToServer::Break { pos: hit.block, part: hit.state, face: hit.face, frame: hit.frame });
                     let after = crate::wire::after_break(content(), hit.state, hit.face);
                     match hit.frame {
-                        0 => self.world.set_block(hit.block, after),
+                        0 => self.world.replace_part(hit.block, hit.state, after),
                         f => {
                             if let Some(s) = self.entities.get_mut(&f).and_then(|e| e.structure.as_mut()) {
-                                s.set_block(hit.block, after);
+                                s.replace_part(hit.block, hit.state, after);
                             }
                         }
                     }
@@ -1195,8 +1199,10 @@ impl Client {
                 self.conn.send(ToServer::Interact(id));
             } else if let Some(hit) = self.target {
                 let sneak = self.player.sneak;
+                let at = self.frame_place(hit.frame).to_local(self.camera().pos + self.camera().forward().as_dvec3() * hit.dist);
+                let at = (at - hit.block.as_dvec3()).as_vec3().to_array();
                 self.conn
-                    .send(ToServer::Use { pos: hit.block, face: hit.face, look: look.as_vec3().to_array(), sneak, frame: hit.frame });
+                    .send(ToServer::Use { pos: hit.block, part: hit.state, face: hit.face, look: look.as_vec3().to_array(), hit: at, sneak, frame: hit.frame });
             } else {
                 self.conn.send(ToServer::UseItem { target: None });
             }
@@ -1729,9 +1735,7 @@ impl Client {
         let c = content();
         let cam = self.camera();
         let eye = cam.pos.floor().as_ivec3();
-        let liquid = self
-            .world
-            .block_or_air(eye)
+        let liquid = physics::Cells::liquid(&world::SeenCells { world: &self.world, air_if_missing: false }, c, eye)
             .and_then(|s| c.states[s as usize].liquid)
             .map(|l| c.liquids[l as usize].temperature);
         crate::audio::Listener {
@@ -1864,7 +1868,7 @@ impl Client {
                     .map(|s| (id, physics::Transform::of(e.pose(now)), s as &dyn physics::Blocks))
             })
             .collect();
-        physics::pick(content(), &|p| world.block_or_air(p), &structures, eye, look, reach, false)
+        physics::pick(content(), &world::SeenCells { world, air_if_missing: false }, &structures, eye, look, reach, false)
     }
 
     /// Server tick (fractional) bodies are shown at when the client clock reads `clock`.
@@ -1904,7 +1908,7 @@ impl Client {
     /// The liquid the eyes are in.
     fn eye_liquid(&self) -> Option<u16> {
         let world = &self.world;
-        physics::liquid_at(content(), &|p| world.block_or_air(p), self.smooth_pos() + DVec3::Y * self.player.eye)
+        physics::liquid_at(content(), &world::SeenCells { world, air_if_missing: false }, self.smooth_pos() + DVec3::Y * self.player.eye)
     }
 
     /// The camera with view bobbing, for drawing (aiming uses the steady one).
@@ -2253,7 +2257,7 @@ fn angle_diff(a: f32, b: f32) -> f32 {
 /// One 20 Hz tick of player movement with vanilla's numbers (blocks per tick): acceleration
 /// scaled by ground slipperiness, 0.91 air drag, 0.98 vertical drag, 0.08 gravity, 0.42 jump,
 /// so jumps, sprint-jumps and parkur distances match.
-fn step_player(p: &mut LocalPlayer, input: &Input, block: &impl Fn(IVec3) -> Option<u32>, gravity: f64, bodies: &[physics::Body]) {
+fn step_player(p: &mut LocalPlayer, input: &Input, block: &impl physics::Cells, gravity: f64, bodies: &[physics::Body]) {
     let c = content();
     if let Some(yaw) = p.lying {
         (p.yaw, p.pitch, p.vel, p.pose) = (yaw, 0.0, DVec3::ZERO, Pose::Sleep);

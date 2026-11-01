@@ -23,6 +23,8 @@ static GLOW_MOSS: Block = Block::named("glow_moss");
 static GLOW_LOG: Block = Block::named("glow_log");
 static GLOW_LEAVES: Block = Block::named("glow_leaves");
 static GLOW_FLOWER: Block = Block::named("glow_flower");
+/// A thin layer that can lie over a plant: a cell holds them both.
+static SNOW_LAYER: Block = Block::named("snow_layer");
 static GLOW_CRYSTAL: Block = Block::named("glow_crystal");
 static GLOW: TintKind = TintKind::named("glow");
 static SPIRITS: EntityCategory = EntityCategory::named("spirits");
@@ -100,6 +102,13 @@ pub fn register(r: &mut Registry) {
         .hardness(0.2)
         .tag("leaves")
         .mineable("shears");
+    r.block(&SNOW_LAYER)
+        .texture("base:snow")
+        .model_box([0.0, 0.0, 0.0], [16.0, 2.0, 16.0])
+        .not_solid()
+        .needs_below("")
+        .shares_cell_with("#plantable")
+        .hardness(0.1);
     r.block(&GLOW_FLOWER)
         .plant()
         .needs_below("#plant_soil")

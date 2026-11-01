@@ -379,6 +379,10 @@ const OPS: &[(&str, &str, Run)] = &[
         if missed > 0 { Err(format!("{missed} blocks not loaded")) } else { Ok(volume.to_string()) }
     }),
     ("get", "<pos:pos>", |w, cmd, _, _| Ok(block_name(w.get(pos(cmd, "pos")?)).to_string())),
+    ("parts", "<pos:pos>", |w, cmd, _, _| {
+        Ok(w.parts(pos(cmd, "pos")?).into_iter().map(block_name).collect::<Vec<_>>().join(" "))
+    }),
+    ("addpart", "<pos:pos> <block:block>", |w, cmd, _, _| Ok((w.add_part(pos(cmd, "pos")?, id(cmd, "block")?) as u32).to_string())),
     ("crater", "<r:int>", |w, cmd, _, me| {
         // Every loaded block within `r` of the player turned to air, one `w.set` each, the
         // way a mod would do it today: changed, already air, not loaded, milliseconds.
@@ -431,6 +435,18 @@ const OPS: &[(&str, &str, Run)] = &[
         }
     }),
     ("light", "<pos:pos>", |w, cmd, _, _| Ok(w.light(pos(cmd, "pos")?).to_string())),
+    // What a grid `w` by `h` of these crafts into.
+    ("craft", "<w:int> <h:int> <items:text>", |_, cmd, _, _| {
+        let (width, height): (u32, u32) = (int(cmd, "w")?, int(cmd, "h")?);
+        let grid: Vec<ItemStack> = cmd
+            .text("items")
+            .unwrap_or("")
+            .split_whitespace()
+            .map(|n| if n == "air" { ItemStack::EMPTY } else { ItemStack::new(Item::lookup(n).unwrap_or(0), 1) })
+            .collect();
+        let made = recipe_match(&base_api::CRAFTING, &grid, width, height);
+        Ok(format!("{} {}", name_of(abi::entry_kind::ITEM, made.item), made.count))
+    }),
     ("seed", "<pos:pos>", |w, cmd, _, _| {
         let p = pos(cmd, "pos")?;
         Ok(format!("{} {} {}", w.seed(), w.position_seed(p), w.cube_seed(p)))

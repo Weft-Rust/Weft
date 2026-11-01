@@ -117,12 +117,18 @@ fn plant(r: &mut Registry, handle: &'static Block, tex: &str) {
         .sound_group("grass")
         .texture(tex)
         .plant()
+        .hitbox([0.3125, 0.0, 0.3125], [0.6875, 0.625, 0.6875])
         .needs_below("#plant_soil")
         .tab(&crate::tabs::NATURAL);
 }
 
 /// Sand and gravel: with nothing under them they fall as an entity and land as a block.
 pub fn register(r: &mut Registry) {
+    // Any block of any mod tagged so comes in these too.
+    r.tag("has_shapes", &["base:stone", "base:cobblestone", "base:mossy_cobblestone", "base:sandstone", "base:bricks", "base:stone_bricks", "base:oak_planks", "base:birch_planks", "base:spruce_planks"]);
+    r.stairs("#has_shapes").tab(&crate::tabs::BUILDING);
+    r.slabs("#has_shapes").tab(&crate::tabs::BUILDING);
+    r.vertical_slabs("#has_shapes").tab(&crate::tabs::BUILDING);
     r.block(&STONE)
         .sound_group("stone")
         .hardness(1.5)
@@ -340,6 +346,7 @@ pub fn register(r: &mut Registry) {
         .sound_group("cloth")
         .textures("cactus_top", "cactus_side", "cactus_top")
         .model_box([1.0, 0.0, 1.0], [15.0, 16.0, 15.0])
+        .hitbox([0.0625, 0.0, 0.0625], [0.9375, 1.0, 0.9375])
         .hardness(0.4)
         .needs_below("#cactus_soil")
         .growth(270.0, 0)
@@ -531,11 +538,11 @@ pub fn torch_state<'a>(d: Dir, s: State<'a>, texture: &str) -> State<'a> {
     if d.horizontal() {
         let frame = weft_sdk::signal::Frame::leaning(d.opposite());
         s.framed_box_with(frame, [-1.0, 3.5, 7.0], [1.0, 13.5, 9.0], faces, [0; 6], Some(([0.0, 3.5, 8.0], Dir::South, -22.5)))
-            .framed_selection(frame, [0.0, 3.0, 5.5], [5.0, 13.0, 10.5])
+            .framed_hitbox(frame, [0.0, 0.1875, 0.34375], [0.3125, 0.8125, 0.65625])
     } else {
         let frame = weft_sdk::signal::Frame::new(d.opposite(), Dir::North);
         s.framed_box(frame, [7.0, 0.0, 7.0], [9.0, 10.0, 9.0], faces)
-            .framed_selection(frame, [6.0, 0.0, 6.0], [10.0, 10.0, 10.0])
+            .framed_hitbox(frame, [0.375, 0.0, 0.375], [0.625, 0.625, 0.625])
     }
 }
 

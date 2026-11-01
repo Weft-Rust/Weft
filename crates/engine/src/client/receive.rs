@@ -50,8 +50,8 @@ impl Client {
                 self.wires.cube_gone(0, pos);
                 fwd.push(terrain::In::Unload(pos));
             }
-            ToClient::Blocks { dim, frame: 0, changes } if dim == self.world.dim => fwd.push(terrain::In::Blocks(changes)),
-            ToClient::Blocks { dim, frame, changes } if dim == self.world.dim => {
+            ToClient::Blocks { dim, frame: 0, changes, extras } if dim == self.world.dim => fwd.push(terrain::In::Blocks(changes, extras)),
+            ToClient::Blocks { dim, frame, changes, extras } if dim == self.world.dim => {
                 if let Some(s) = self
                     .entities
                     .get_mut(&frame)
@@ -59,6 +59,9 @@ impl Client {
                 {
                     for (p, state) in changes {
                         s.set_block(p, state);
+                    }
+                    for (p, parts) in extras {
+                        s.set_extras(p, parts);
                     }
                     s.scan_bounds();
                 }
@@ -391,9 +394,12 @@ impl Client {
             while let Some(o) = items.next() {
                 match o {
                     terrain::Out::Cube { pos, cube, around } => self.world.insert(pos, cube, around),
-                    terrain::Out::Blocks(changes) => {
+                    terrain::Out::Blocks(changes, extras) => {
                         for (p, s) in changes {
                             self.world.set_block(p, s);
+                        }
+                        for (p, parts) in extras {
+                            self.world.set_extras(p, parts);
                         }
                     }
                     terrain::Out::Unload(pos) => self.world.remove(pos),

@@ -131,6 +131,26 @@ impl crate::physics::Blocks for ClientWorld {
             s => s,
         }
     }
+    fn extras(&self, p: IVec3) -> &[u32] {
+        ClientWorld::extras(self, p)
+    }
+}
+
+/// The world as physics reads it on this side: a cube not here yet counts as solid, or as air
+/// for what flies.
+#[derive(Clone, Copy)]
+pub struct SeenCells<'a> {
+    pub world: &'a ClientWorld,
+    pub air_if_missing: bool,
+}
+
+impl crate::physics::Cells for SeenCells<'_> {
+    fn main(&self, p: IVec3) -> Option<u32> {
+        self.world.block_or_air(p).or(self.air_if_missing.then_some(AIR))
+    }
+    fn extras(&self, p: IVec3) -> &[u32] {
+        self.world.extras(p)
+    }
 }
 
 /// Biomes of a block column, taken from the first of its cubes that has them; cubes store none
@@ -565,6 +585,38 @@ impl ClientWorld {
         }
     }
 
+    /// What else is in the cell at `p`.
+    pub fn extras(&self, p: IVec3) -> &[u32] {
+        self.cubes.get(&cube_of(p)).map_or(&[], |slot| slot.cube.extras(local_index(p)))
+    }
+
+    /// What else is in the cell at `p` is now `extras`.
+    pub fn set_extras(&mut self, p: IVec3, extras: Vec<u32>) {
+        let cp = cube_of(p);
+        let Some(slot) = self.cubes.get_mut(&cp) else { return };
+        if slot.cube.extras(local_index(p)) == extras {
+            return;
+        }
+        Arc::make_mut(&mut slot.cube).set_extras(local_index(p), extras);
+        self.next_rev += 1;
+        (slot.rev, slot.stamp) = (self.next_rev, self.next_rev);
+        let l = p & 15;
+        self.touch(cp, around_mask(l.x, l.y, l.z));
+    }
+
+    /// One block of the cell at `p` becomes another state, as the server does it (`Dim::replace_part`):
+    /// what the client shows of breaking it, not waiting to hear.
+    pub fn replace_part(&mut self, p: IVec3, old: u32, new: u32) {
+        let c = content();
+        let is_liquid = |s: u32| c.states[s as usize].liquid.is_some();
+        let was = self.block(p);
+        let Some((main, extras)) = crate::world::cube::cell_after(was, self.extras(p), old, new, is_liquid) else { return };
+        if main != was {
+            self.set_block(p, main);
+        }
+        self.set_extras(p, extras);
+    }
+
     /// Remeshes every cube, e.g. after textures were reloaded.
     pub fn remesh_all(&mut self) {
         let all: Vec<IVec3> = self.cubes.keys().copied().collect();
@@ -866,6 +918,13 @@ fn neighborhood(around: &[Option<Arc<Cube>>; 27], hidden: u32, filler: u32, pos:
             biomes[z * 16 + x] = center.biome(x, z);
         }
     }
+    let mut extras: FxHashMap<usize, Vec<u32>> = center
+        .all_extras()
+        .map(|(i, parts)| {
+            let at = crate::world::cube::offset(i);
+            (pidx(at.x, at.y, at.z), parts.to_vec())
+        })
+        .collect();
     // The cube itself whole, a row at a time; the border from its neighbors block by block.
     let mut own = [0u32; crate::world::cube::VOLUME];
     center.decode(&mut own);
@@ -918,10 +977,13 @@ fn neighborhood(around: &[Option<Arc<Cube>>; 27], hidden: u32, filler: u32, pos:
                 let pi = pidx(x, y, z);
                 states[pi] = cube.get(li);
                 light[pi] = cube.light(li);
+                if !cube.extras(li).is_empty() {
+                    extras.insert(pi, cube.extras(li).to_vec());
+                }
             }
         }
     }
-    Neighborhood { states, light, biomes, origin: (pos * 16).to_array() }
+    Neighborhood { states, extras, light, biomes, origin: (pos * 16).to_array() }
 }
 
 /// A cube's bit for the cube above it, in `cube::around_mask` order.

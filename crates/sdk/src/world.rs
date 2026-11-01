@@ -117,19 +117,54 @@ impl World {
 
     /// The value of property `name` of the block at `pos`: `w.prop(pos, "lit")`.
     pub fn prop(&self, pos: [i32; 3], name: &str) -> Option<&'static str> {
-        state_prop(self.get(pos), name)
+        state_prop(self.get(pos), name).or_else(|| self.parts(pos).into_iter().find_map(|s| state_prop(s, name)))
     }
 
     /// Changes one property of the block at `pos`, keeping the others (its facing stays):
     /// `w.set_prop(pos, "lit", "true")`. False if the block has no such property or value.
     pub fn set_prop(&self, pos: [i32; 3], name: &str, value: &str) -> bool {
-        match state_with(self.get(pos), name, value) {
-            Some(s) => {
-                self.set(pos, s);
-                true
-            }
+        // Of the block `get` gives, else of the first in the cell that has it.
+        let own = self.get(pos);
+        let part = if state_prop(own, name).is_some() {
+            Some(own)
+        } else {
+            self.parts(pos).into_iter().find(|&s| state_prop(s, name).is_some())
+        };
+        match part.and_then(|old| Some((old, state_with(old, name, value)?))) {
+            Some((old, new)) if old == own => self.set(pos, new),
+            Some((old, new)) => self.replace_part(pos, old, new),
             None => false,
         }
+    }
+
+    /// All that is in a cell, which may hold any number of blocks: the one `get` gives first, a
+    /// slab and the water in it, a flower and the snow on it. Air has none.
+    pub fn parts(&self, pos: [i32; 3]) -> Vec<u32> {
+        let mut out = [0u32; 16];
+        let n = unsafe { (host().cell_parts)(self.raw, &pos, out.as_mut_ptr(), out.len() as u32) } as usize;
+        if n <= out.len() {
+            return out[..n].to_vec();
+        }
+        let mut all = vec![0u32; n];
+        unsafe { (host().cell_parts)(self.raw, &pos, all.as_mut_ptr(), n as u32) };
+        all
+    }
+
+    /// Puts another block in a cell with what is there, whatever its shape; `set` would replace
+    /// all of it. Only one thing in a cell can have a block entity, a circuit, light of its own or
+    /// growth: false if there would be two, or the cell isn't loaded.
+    pub fn add_part(&self, pos: [i32; 3], state: u32) -> bool {
+        unsafe { (host().add_part)(self.raw, &pos, state) != 0 }
+    }
+
+    /// Takes one block out of a cell, the others staying. False if it isn't there.
+    pub fn remove_part(&self, pos: [i32; 3], state: u32) -> bool {
+        self.replace_part(pos, state, 0)
+    }
+
+    /// One block of a cell becomes another state, the others staying. False if it isn't there.
+    pub fn replace_part(&self, pos: [i32; 3], old: u32, new: u32) -> bool {
+        unsafe { (host().replace_part)(self.raw, &pos, old, new) != 0 }
     }
 }
 

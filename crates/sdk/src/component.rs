@@ -508,6 +508,7 @@ pub static MINING_SPEED: Component<f32> = Component::named(abi::comp::MINING_SPE
 pub static TOOL_LEVEL: Component<u32> = Component::named(abi::comp::TOOL_LEVEL);
 pub static HARVEST_LEVEL: Component<u32> = Component::named(abi::comp::HARVEST_LEVEL);
 pub static DAMAGE: Component<u32> = Component::named(abi::comp::DAMAGE);
+pub static LOOT_ROLLS: Component<u32> = Component::named(abi::comp::LOOT_ROLLS);
 pub static HARDNESS: Component<f32> = Component::named(abi::comp::HARDNESS);
 pub static FRICTION: Component<f32> = Component::named(abi::comp::FRICTION);
 pub static DRAG: Component<f32> = Component::named(abi::comp::DRAG);

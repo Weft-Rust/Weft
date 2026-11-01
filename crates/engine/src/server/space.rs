@@ -28,6 +28,10 @@ pub struct Space {
     pub(super) neighbor_queue: VecDeque<(IVec3, IVec3)>,
     /// Block changes this tick, sent as deltas.
     pub changes: Vec<(IVec3, u32)>,
+    /// The part of a cell whose callback is running, what the mod's `get` and `set` mean there.
+    pub(super) acting: Option<(IVec3, u32)>,
+    /// Cells whose other blocks changed this tick, with what they have now.
+    pub extra_changes: Vec<(IVec3, Vec<u32>)>,
     /// Cubes whose light changed this tick, sent whole.
     pub resend: Vec<(IVec3, Arc<Cube>)>,
     pub(super) light_dirty: FxHashSet<IVec3>,
@@ -72,6 +76,48 @@ pub struct Space {
 impl crate::physics::Blocks for Space {
     fn block(&self, p: IVec3) -> u32 {
         self.get(p).unwrap_or(AIR)
+    }
+    fn extras(&self, p: IVec3) -> &[u32] {
+        self.extras(p)
+    }
+}
+
+/// The cubes of a world as physics reads them, on any thread while they stay put.
+#[derive(Clone, Copy)]
+pub struct CubeCells<'a>(pub &'a FxHashMap<IVec3, Arc<Cube>>);
+
+impl crate::physics::Cells for CubeCells<'_> {
+    fn main(&self, p: IVec3) -> Option<u32> {
+        self.0.get(&cube_of(p)).map(|cube| cube.get(local_index(p)))
+    }
+    fn extras(&self, p: IVec3) -> &[u32] {
+        self.0.get(&cube_of(p)).map_or(&[], |cube| cube.extras(local_index(p)))
+    }
+    #[inline]
+    fn cell(&self, p: IVec3) -> Option<(u32, &[u32])> {
+        let (cube, i) = (self.0.get(&cube_of(p))?, local_index(p));
+        Some((cube.get(i), cube.extras(i)))
+    }
+}
+
+/// A body's blocks to walk on: everything outside them is air, nothing unloaded.
+pub struct DeckCells<'a>(pub &'a Space);
+
+impl crate::physics::Cells for DeckCells<'_> {
+    fn main(&self, p: IVec3) -> Option<u32> {
+        Some(self.0.get(p).unwrap_or(AIR))
+    }
+    fn extras(&self, p: IVec3) -> &[u32] {
+        Space::extras(self.0, p)
+    }
+}
+
+impl crate::physics::Cells for Space {
+    fn main(&self, p: IVec3) -> Option<u32> {
+        self.get(p)
+    }
+    fn extras(&self, p: IVec3) -> &[u32] {
+        Space::extras(self, p)
     }
 }
 
@@ -122,6 +168,20 @@ impl Space {
         self.cubes
             .get(&cube_of(p))
             .map(|cube| cube.get(local_index(p)))
+    }
+
+    /// What else is in the cell at `p`.
+    pub fn extras(&self, p: IVec3) -> &[u32] {
+        self.cubes
+            .get(&cube_of(p))
+            .map_or(&[], |cube| cube.extras(local_index(p)))
+    }
+
+    /// Puts what else is in a cell of a structure without block updates (building it).
+    pub(super) fn put_extras(&mut self, p: IVec3, extras: Vec<u32>) {
+        if let Some(cube) = self.cubes.get_mut(&cube_of(p)) {
+            Arc::make_mut(cube).set_extras(local_index(p), extras);
+        }
     }
 
     /// Writes a block of a structure without block updates (building it, loading it).

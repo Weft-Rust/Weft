@@ -254,6 +254,8 @@ pub mod comp {
     pub const TOOL_LEVEL: &str = "tool_level";
     /// The block drops its loot only to a fitting tool of at least this level (0 = any tier).
     pub const HARVEST_LEVEL: &str = "harvest_level";
+    /// How many times a block's loot is rolled when it breaks (two slabs in one block).
+    pub const LOOT_ROLLS: &str = "loot_rolls";
     pub const DAMAGE: &str = "damage";
     /// Block: seconds to break by hand at speed 1 (`f32`, 1 by default); negative = unbreakable.
     pub const HARDNESS: &str = "hardness";
@@ -363,6 +365,8 @@ pub mod block_flags {
     /// On a moving body it shoves, but can't be stood on and be taken along by: a piston's head
     /// sliding out from under whoever stands on the piston.
     pub const NOT_STOOD_ON: u32 = 2048;
+    /// Keeps the liquid source it is placed in, and a bucket fills it (waterlogging).
+    pub const HOLDS_LIQUID: u32 = 4096;
 }
 
 #[repr(u32)]
@@ -522,11 +526,10 @@ pub struct StateDesc {
     pub model: Model,
     pub textures: [Str; 6],
     pub boxes: Slice<ModelBox>,
-    /// Collision boxes in 1/16 units; ignored for full cubes.
-    pub collision: Slice<[f32; 6]>,
-    /// What the crosshair picks, outlines and cracks, in 1/16 units; empty: the collision boxes,
-    /// else the model's boxes, else a plant's cross, else the whole block.
-    pub selection: Slice<[f32; 6]>,
+    /// Its shape in fractions of a block: what stops a walker if it is solid, and what the
+    /// crosshair picks, outlines and cracks. Empty: the model's boxes, else a plant's cross, else
+    /// the whole block.
+    pub hitbox: Slice<[f32; 6]>,
     /// Components of this state only, on top of the block's (hardness, light, support and tint
     /// are components too, `comp::HARDNESS` ...).
     pub components: Slice<CompValue>,
@@ -540,8 +543,7 @@ defaults!(StateDesc {
     model: Model::Cube,
     textures: [Str::EMPTY; 6],
     boxes: Slice::EMPTY,
-    collision: Slice::EMPTY,
-    selection: Slice::EMPTY,
+    hitbox: Slice::EMPTY,
     components: Slice::EMPTY,
     signal: SignalDesc::DEFAULT,
 });
@@ -594,6 +596,16 @@ pub struct BlockDesc {
     pub signal_logic: Callback,
     /// `SignalReadArgs`: what a comparator behind it reads, instead of how full it is.
     pub signal_read: Callback,
+    /// `PlaceArgs`: its own item placed in its cell, as `placed`. Another state in `state` takes
+    /// the item (a second slab making the block whole), the same one leaves it to be placed as
+    /// usual.
+    pub merge: Callback,
+    /// What may share a cell with it though their shapes overlap (`#tags`, names).
+    pub shares_cell: Slice<Str>,
+    /// Non-empty: no block of its own but a template, one for each full cube among these names
+    /// and `#tags`, named as that one plus `derive_suffix`, see `Registry::shapes_of`.
+    pub derive_from: Str,
+    pub derive_suffix: Str,
 }
 defaults!(BlockDesc {
     name: Str::EMPTY,
@@ -617,6 +629,10 @@ defaults!(BlockDesc {
     on_signal: Callback::NONE,
     signal_logic: Callback::NONE,
     signal_read: Callback::NONE,
+    merge: Callback::NONE,
+    derive_from: Str::EMPTY,
+    derive_suffix: Str::EMPTY,
+    shares_cell: Slice::EMPTY,
 });
 
 #[repr(C)]
@@ -866,8 +882,15 @@ pub struct PlaceArgs {
     pub face: u32,
     /// Player look direction.
     pub look: [f32; 3],
-    /// In/out: starts as the first state.
+    /// In/out: starts as the first state (for `BlockDesc::merge`, the state there now).
     pub state: u32,
+    /// The block's first state.
+    pub first: u32,
+    /// Just outside where it was clicked, from `pos`'s corner: 0..1 inside this cell, past that
+    /// when it had no room and goes in the next.
+    pub hit: [f32; 3],
+    /// For `BlockDesc::merge`: the state its item would be placed in.
+    pub placed: u32,
 }
 
 #[repr(C)]
@@ -1747,6 +1770,12 @@ pub struct Host {
     pub world_dimension: unsafe extern "C" fn(world: *mut WorldCtx) -> u32,
     /// Returns 0 if the position is not loaded.
     pub set_block: unsafe extern "C" fn(world: *mut WorldCtx, pos: *const [i32; 3], state: u32) -> u32,
+    /// What is in a cell, the one `get_block` gives first: writes up to `cap`, returns how many.
+    pub cell_parts: unsafe extern "C" fn(world: *mut WorldCtx, pos: *const [i32; 3], out: *mut u32, cap: u32) -> u32,
+    /// Puts another block in a cell; 0 if not loaded or two parts would both want to be its main.
+    pub add_part: unsafe extern "C" fn(world: *mut WorldCtx, pos: *const [i32; 3], state: u32) -> u32,
+    /// Replaces a part of a cell with another state, air taking it out; 0 if it isn't there.
+    pub replace_part: unsafe extern "C" fn(world: *mut WorldCtx, pos: *const [i32; 3], old: u32, new: u32) -> u32,
     pub schedule_tick: unsafe extern "C" fn(world: *mut WorldCtx, pos: *const [i32; 3], delay: u32),
     pub world_time: unsafe extern "C" fn(world: *mut WorldCtx) -> u64,
     /// Deterministic per-world random stream.

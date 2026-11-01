@@ -188,7 +188,7 @@ pub fn register(r: &mut Registry) {
                     [0; 6],
                     Some(([8.0, 1.0, 8.0], Dir::East, lean)),
                 )
-                .framed_selection(p.frame(), [5.0, 0.0, 4.0], [11.0, 6.0, 12.0])
+                .framed_hitbox(p.frame(), [0.3125, 0.0, 0.25], [0.6875, 0.375, 0.75])
         })
         .on_use(|u| toggle(u))
         .not_solid()
@@ -260,8 +260,8 @@ pub fn register(r: &mut Registry) {
                 let from = if p.is("short", "true") { 0.0 } else { -4.0 };
                 s.framed_box(frame, [0.0, 12.0, 0.0], [16.0, 16.0, 16.0], plate)
                     .framed_box_with(frame, [6.0, from, 6.0], [10.0, 12.0, 10.0], rod, [1, 1, 0, 0, 1, 1], None)
-                    .framed_collision(frame, [0.0, 12.0, 0.0], [16.0, 16.0, 16.0])
-                    .framed_collision(frame, [6.0, 0.0, 6.0], [10.0, 12.0, 10.0])
+                    .framed_hitbox(frame, [0.0, 0.75, 0.0], [1.0, 1.0, 1.0])
+                    .framed_hitbox(frame, [0.375, 0.0, 0.375], [0.625, 0.75, 0.625])
             })
             .sound_group("stone")
             .hardness(1.5)

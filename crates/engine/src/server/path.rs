@@ -51,17 +51,18 @@ const MAX_DROP: i32 = 3;
 /// Cells a body `height` blocks tall can stand in, from the feet cell `from` towards `to`: the
 /// whole way, or as far as it gets (the reachable cell closest to the target) when `to` is out
 /// of reach or more than `MAX_NODES` cells away.
-pub fn find(c: &Content, block: &impl Fn(IVec3) -> Option<u32>, from: IVec3, to: IVec3, height: i32) -> Vec<IVec3> {
+pub fn find(c: &Content, block: &impl crate::physics::Cells, from: IVec3, to: IVec3, height: i32) -> Vec<IVec3> {
     // Judged by the collision boxes walking bumps into, like the step itself.
     let top = |s: u32| crate::physics::collision_top(c, s);
     let open = |p: IVec3| {
-        block(p).is_some_and(|s| {
+        let free = |s: u32| {
             let st = &c.states[s as usize];
             top(s).is_none()
                 && st
                     .liquid
                     .is_none_or(|l| c.liquids[l as usize].temperature < crate::server::liquid::BURNING)
-        })
+        };
+        block.main(p).is_some_and(free) && block.extras(p).iter().all(|&s| free(s))
     };
     let room = |p: IVec3| (0..height).all(|k| open(p + IVec3::Y * k));
     let burns = |s: u32| {
@@ -70,10 +71,15 @@ pub fn find(c: &Content, block: &impl Fn(IVec3) -> Option<u32>, from: IVec3, to:
             .is_some_and(|l| c.liquids[l as usize].temperature >= 1000)
     };
     let ground = |p: IVec3| {
-        block(p - IVec3::Y).is_some_and(|s| !burns(s) && (c.states[s as usize].liquid.is_some() || top(s).is_some_and(|t| t >= 0.5)))
+        let below = p - IVec3::Y;
+        let holds = |s: u32| c.states[s as usize].liquid.is_some() || top(s).is_some_and(|t| t >= 0.5);
+        block.main(below).is_some_and(|s| {
+            let extras = block.extras(below);
+            !burns(s) && !extras.iter().any(|&e| burns(e)) && (holds(s) || extras.iter().any(|&e| holds(e)))
+        })
     };
     let standable = |p: IVec3| room(p) && ground(p);
-    let wet = |p: IVec3| block(p).is_some_and(|s| c.states[s as usize].liquid.is_some());
+    let wet = |p: IVec3| block.liquid(c, p).is_some();
     let h = |p: IVec3| (p - to).as_vec3().length();
 
     let (mut came, mut queue) = SCRATCH.with_borrow_mut(std::mem::take);

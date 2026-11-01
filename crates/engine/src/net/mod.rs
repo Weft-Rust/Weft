@@ -181,7 +181,8 @@ messages! {
         /// otherwise they come after it. Clients make them on what they generate.
         Edits { dim: u32, specs: Vec<String>, all: bool },
         /// Of the world, or of body `frame`.
-        Blocks { dim: u32, frame: u64, changes: Vec<(IVec3, u32)> },
+        /// `extras`: what else is in cells, after `changes` (which take it away).
+        Blocks { dim: u32, frame: u64, changes: Vec<(IVec3, u32)>, extras: Vec<(IVec3, Vec<u32>)> },
         /// The world's light on body `frame`, by its cubes.
         BodyLight { frame: u64, lights: Vec<(IVec3, u32)> },
         /// Power of pieces of wire: (cell, face, level), of the world or of body `frame`.
@@ -273,10 +274,12 @@ messages! {
         StopUsing,
         /// `frame`: the structure (entity) the block is part of, its position in the structure's
         /// coordinates; 0 for the world. `face`: of its selection that was hit.
-        Break { pos: IVec3, face: u8, frame: u64 },
+        /// `part`: which of what is in the cell.
+        Break { pos: IVec3, part: u32, face: u8, frame: u64 },
         /// Right click on a block: the block reacts first (chests), otherwise the held item is used or
         /// placed against the clicked face. `frame` like `Break`'s; `look` in world space.
-        Use { pos: IVec3, face: u8, look: [f32; 3], sneak: bool, frame: u64 },
+        /// `hit`: where on the block, from its corner.
+        Use { pos: IVec3, part: u32, face: u8, look: [f32; 3], hit: [f32; 3], sneak: bool, frame: u64 },
         UseItem { target: Option<(IVec3, u8)> },
         Select(u32),
         Attack(u64),

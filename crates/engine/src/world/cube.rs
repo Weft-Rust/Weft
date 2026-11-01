@@ -42,6 +42,28 @@ pub fn around_mask(x: i32, y: i32, z: i32) -> u32 {
     mask
 }
 
+/// A cell of `main` and `extras` after `old` in it becomes `new`, air taking it out: the state it
+/// stands for and what else is in it, `None` if `old` isn't there. With what it stood for gone
+/// the next one does, not a liquid while there is something else.
+pub fn cell_after(main: u32, extras: &[u32], old: u32, new: u32, is_liquid: impl Fn(u32) -> bool) -> Option<(u32, Vec<u32>)> {
+    let mut rest = extras.to_vec();
+    if main == old {
+        if new != 0 || rest.is_empty() {
+            return Some((new, rest));
+        }
+        let next = rest.iter().position(|&s| !is_liquid(s)).unwrap_or(0);
+        let main = rest.remove(next);
+        return Some((main, rest));
+    }
+    let at = rest.iter().position(|&s| s == old)?;
+    if new == 0 {
+        rest.remove(at);
+    } else {
+        rest[at] = new;
+    }
+    Some((main, rest))
+}
+
 #[derive(Clone, PartialEq)]
 enum Blocks {
     Uniform(u32),
@@ -58,6 +80,9 @@ enum Light {
 #[derive(Clone)]
 pub struct Cube {
     blocks: Blocks,
+    /// Blocks sharing a cell with the one `get` gives, by index; nearly always none at all. A
+    /// cell of air has none.
+    extras: std::collections::BTreeMap<u16, Vec<u32>>,
     light: Light,
     pub biomes: Option<Box<[u16; 256]>>,
     /// World time it was simulated to when it was last unloaded (0: never), for growth to catch
@@ -71,11 +96,11 @@ pub struct Cube {
 impl Cube {
     /// Same blocks in the same encoding (light and the rest aside).
     pub fn same_blocks(&self, other: &Cube) -> bool {
-        self.blocks == other.blocks
+        self.blocks == other.blocks && self.extras == other.extras
     }
 
     pub fn uniform(state: u32, light: u32) -> Cube {
-        Cube { blocks: Blocks::Uniform(state), light: Light::Uniform(light), biomes: None, ticked: 0, edits: 0 }
+        Cube { blocks: Blocks::Uniform(state), extras: Default::default(), light: Light::Uniform(light), biomes: None, ticked: 0, edits: 0 }
     }
 
     pub fn from_states(states: &[u32; VOLUME]) -> Cube {
@@ -138,8 +163,33 @@ impl Cube {
         }
     }
 
-    /// Returns the previous state.
+    /// What else is in the cell at `i`.
+    #[inline]
+    pub fn extras(&self, i: usize) -> &[u32] {
+        if self.extras.is_empty() {
+            return &[];
+        }
+        self.extras.get(&(i as u16)).map_or(&[], Vec::as_slice)
+    }
+
+    /// Every cell with anything else in it.
+    pub fn all_extras(&self) -> impl Iterator<Item = (usize, &[u32])> {
+        self.extras.iter().map(|(&i, v)| (i as usize, v.as_slice()))
+    }
+
+    pub fn set_extras(&mut self, i: usize, extras: Vec<u32>) {
+        if extras.is_empty() {
+            self.extras.remove(&(i as u16));
+        } else {
+            self.extras.insert(i as u16, extras);
+        }
+    }
+
+    /// Writes the block of a cell, returning the previous state; what else was in it is gone.
     pub fn set(&mut self, i: usize, state: u32) -> u32 {
+        if !self.extras.is_empty() {
+            self.extras.remove(&(i as u16));
+        }
         match &mut self.blocks {
             Blocks::Uniform(s) => {
                 let old = *s;
@@ -205,12 +255,13 @@ impl Cube {
             }
             _ => false,
         };
+        let same_extras = self.extras == old.extras;
         let same_light = match (&self.light, &old.light) {
             (Light::Uniform(a), Light::Uniform(b)) => a == b,
             (Light::Full(a), Light::Full(b)) => a == b,
             _ => false,
         };
-        if same_blocks && same_light {
+        if same_blocks && same_light && same_extras {
             return None;
         }
         if let (Blocks::Uniform(_), Blocks::Uniform(_), Light::Uniform(_), Light::Uniform(_)) =
@@ -221,6 +272,14 @@ impl Cube {
         // Something changed; inside blocks are read by this cube alone, so only the outer
         // layer decides which neighbors care.
         let mut mask = 1 << 13;
+        if !same_extras {
+            for i in self.extras.keys().chain(old.extras.keys()).map(|&i| i as usize) {
+                if self.extras(i) != old.extras(i) {
+                    let at = offset(i);
+                    mask |= around_mask(at.x, at.y, at.z);
+                }
+            }
+        }
         for y in 0..16 {
             for z in 0..16 {
                 let inner = (1..15).contains(&y) && (1..15).contains(&z);
@@ -239,10 +298,10 @@ impl Cube {
         Some(mask)
     }
 
-    /// `Some(state)` when every block is the same.
+    /// `Some(state)` when every block is the same and nothing else is in any cell.
     pub fn uniform_state(&self) -> Option<u32> {
         match &self.blocks {
-            Blocks::Uniform(s) => Some(*s),
+            Blocks::Uniform(s) if self.extras.is_empty() => Some(*s),
             _ => None,
         }
     }
@@ -261,10 +320,10 @@ impl Cube {
             let mut states = Box::new([0u32; VOLUME]);
             self.decode(&mut states);
             let light = std::mem::replace(&mut self.light, Light::Uniform(0));
-            let (biomes, ticked, edits) = (self.biomes.take(), self.ticked, self.edits);
+            let (biomes, ticked, edits, extras) = (self.biomes.take(), self.ticked, self.edits, std::mem::take(&mut self.extras));
             *self = Cube::from_states(&states);
             self.light = light;
-            (self.biomes, self.ticked, self.edits) = (biomes, ticked, edits);
+            (self.biomes, self.ticked, self.edits, self.extras) = (biomes, ticked, edits, extras);
         }
         self.mask_light(!0);
     }
@@ -369,8 +428,14 @@ impl Cube {
                 }
             }
         }
-        // Bit 0: biomes follow, bit 1: the simulated time, bit 2: the last area edit.
-        out.push(self.biomes.is_some() as u8 | ((self.ticked != 0) as u8) << 1 | ((self.edits != 0) as u8) << 2);
+        // Bit 0: biomes follow, bit 1: the simulated time, bit 2: the last area edit, bit 3: what
+        // else is in cells.
+        out.push(
+            self.biomes.is_some() as u8
+                | ((self.ticked != 0) as u8) << 1
+                | ((self.edits != 0) as u8) << 2
+                | (!self.extras.is_empty() as u8) << 3,
+        );
         if let Some(b) = &self.biomes {
             for v in b.iter() {
                 out.extend_from_slice(&v.to_le_bytes());
@@ -381,6 +446,16 @@ impl Cube {
         }
         if self.edits != 0 {
             out.extend_from_slice(&self.edits.to_le_bytes());
+        }
+        if !self.extras.is_empty() {
+            out.extend_from_slice(&(self.extras.len() as u16).to_le_bytes());
+            for (i, parts) in &self.extras {
+                out.extend_from_slice(&i.to_le_bytes());
+                out.extend_from_slice(&(parts.len() as u16).to_le_bytes());
+                for &p in parts {
+                    out.extend_from_slice(&map(p).to_le_bytes());
+                }
+            }
         }
     }
 
@@ -428,7 +503,23 @@ impl Cube {
         };
         let ticked = if flags & 2 != 0 { u64::from_le_bytes(take_bytes(data, 8)?.try_into().ok()?) } else { 0 };
         let edits = if flags & 4 != 0 { u32::from_le_bytes(take_bytes(data, 4)?.try_into().ok()?) } else { 0 };
-        Some(Cube { blocks, light, biomes, ticked, edits })
+        let mut extras = std::collections::BTreeMap::new();
+        if flags & 8 != 0 {
+            let cells = u16::from_le_bytes(take_bytes(data, 2)?.try_into().ok()?);
+            for _ in 0..cells {
+                let i = u16::from_le_bytes(take_bytes(data, 2)?.try_into().ok()?);
+                let n = u16::from_le_bytes(take_bytes(data, 2)?.try_into().ok()?);
+                let mut parts = Vec::with_capacity(n as usize);
+                for _ in 0..n {
+                    parts.push(map(u32::from_le_bytes(take_bytes(data, 4)?.try_into().ok()?)));
+                }
+                if i as usize >= VOLUME {
+                    return None;
+                }
+                extras.insert(i, parts);
+            }
+        }
+        Some(Cube { blocks, extras, light, biomes, ticked, edits })
     }
 }
 
@@ -580,6 +671,36 @@ mod tests {
         for i in 0..VOLUME {
             assert_eq!(back.get(i), c.get(i));
         }
+    }
+
+    #[test]
+    fn extras_stay_with_their_cell() {
+        let mut c = Cube::uniform(1, 0);
+        c.set(10, 2);
+        c.set_extras(10, vec![3, 4]);
+        assert_eq!(c.uniform_state(), None);
+        let mut buf = Vec::new();
+        c.write(&mut buf, |s| s + 100);
+        let mut back = Cube::read(&mut &buf[..], |s| s - 100).unwrap();
+        assert_eq!(back.extras(10), [3, 4]);
+        assert!(back.extras(11).is_empty());
+        back.compact();
+        assert_eq!(back.extras(10), [3, 4]);
+        back.set(10, 5);
+        assert!(back.extras(10).is_empty());
+    }
+
+    #[test]
+    fn the_next_part_stands_for_a_cell() {
+        let liquid = |s: u32| s == 3;
+        // Not a liquid (3) while there is something else.
+        assert_eq!(cell_after(2, &[3, 4], 2, 0, liquid), Some((4, vec![3])));
+        assert_eq!(cell_after(4, &[3], 4, 0, liquid), Some((3, vec![])));
+        assert_eq!(cell_after(3, &[], 3, 0, liquid), Some((0, vec![])));
+        assert_eq!(cell_after(2, &[3, 4], 4, 0, liquid), Some((2, vec![3])));
+        assert_eq!(cell_after(2, &[3, 4], 4, 7, liquid), Some((2, vec![3, 7])));
+        assert_eq!(cell_after(2, &[3, 4], 2, 7, liquid), Some((7, vec![3, 4])));
+        assert_eq!(cell_after(2, &[3, 4], 9, 0, liquid), None);
     }
 
     #[test]

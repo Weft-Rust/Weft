@@ -535,7 +535,7 @@ pub fn track_fall(fall: &mut f32, dy: f64, on_ground: bool, safe: bool) -> Optio
     None
 }
 
-pub fn step(c: &Content, e: &mut Entity, gravity: f64, block: &impl Fn(IVec3) -> Option<u32>, bodies: &[physics::Body]) -> Stepped {
+pub fn step(c: &Content, e: &mut Entity, gravity: f64, block: &impl physics::Cells, bodies: &[physics::Body]) -> Stepped {
     const DT: f64 = crate::world::TICK;
     let k = &c.game.entities[e.kind as usize];
     let mut out = Stepped { land: None, crushed: false };
@@ -619,7 +619,9 @@ pub fn step(c: &Content, e: &mut Entity, gravity: f64, block: &impl Fn(IVec3) ->
     }
     let dy = e.pos.y - start.y;
     e.moved = ((e.pos.x - start.x).powi(2) + (e.pos.z - start.z).powi(2)).sqrt() as f32;
-    let climbing = block(e.pos.floor().as_ivec3()).is_some_and(|s| c.states[s as usize].flags & weft_abi::block_flags::CLIMBABLE != 0);
+    let at = e.pos.floor().as_ivec3();
+    let climbs = |s: u32| c.states[s as usize].flags & weft_abi::block_flags::CLIMBABLE != 0;
+    let climbing = block.main(at).is_some_and(climbs) || block.extras(at).iter().any(|&s| climbs(s));
     if let Some(land) = track_fall(&mut e.fall, dy, e.on_ground, e.in_liquid || climbing) {
         out.land = Some(land);
     }

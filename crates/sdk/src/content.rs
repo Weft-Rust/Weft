@@ -373,6 +373,9 @@ impl Registry {
             looks: None,
             facing: None,
             placement: None,
+            merge: None,
+            made_of: None,
+            shares_cell: Vec::new(),
             signal: None,
         }
     }
@@ -524,8 +527,7 @@ struct StateDef {
     model: Model,
     textures: [String; 6],
     boxes: Vec<([f32; 3], [f32; 3], [String; 6], [[f32; 4]; 6], [u8; 6], abi::BoxTilt)>,
-    collision: Vec<[f32; 6]>,
-    selection: Vec<[f32; 6]>,
+    hitbox: Vec<[f32; 6]>,
     components: Vec<Pending>,
     signal: SignalSpec,
 }
@@ -569,8 +571,7 @@ impl StateDef {
             model: d.model,
             textures: std::array::from_fn(|_| tex.to_string()),
             boxes: Vec::new(),
-            collision: Vec::new(),
-            selection: Vec::new(),
+            hitbox: Vec::new(),
             components: Vec::new(),
             signal: SignalSpec::default(),
         }
@@ -585,6 +586,7 @@ struct BlockCallbacks {
     on_pass: Option<abi::Callback>,
     signal_read: Option<abi::Callback>,
     placement: Option<abi::Callback>,
+    merge: Option<abi::Callback>,
     on_grow: Option<abi::Callback>,
     on_signal: Option<abi::Callback>,
     signal_logic: Option<abi::Callback>,
@@ -702,6 +704,11 @@ macro_rules! state_setters {
             });
             self
         }
+        /// Keeps the liquid source it is placed in, and a bucket fills it: waterlogging.
+        pub fn holds_liquids(mut self) -> Self {
+            self.each(|s, _| s.flags |= bf::HOLDS_LIQUID);
+            self
+        }
         pub fn not_solid(mut self) -> Self {
             self.each(|s, _| s.flags &= !bf::SOLID);
             self
@@ -736,10 +743,15 @@ macro_rules! state_setters {
             self.each(|s, _| s.put(&c::DRAG, d));
             self
         }
+        /// How many times its loot is rolled when it breaks: 2 for two slabs in one block.
+        pub fn loot_rolls(mut self, n: u32) -> Self {
+            self.each(|s, _| s.put(&c::LOOT_ROLLS, n));
+            self
+        }
         /// Custom model made of boxes in 1/16 units, each face showing the state's texture of
-        /// that face (`texture`, `textures`, `faces`). Collision follows the union bounds unless
-        /// `collision` is set. A `models/block/<name>.json` (Blockbench's Java block model) does
-        /// the same from a file.
+        /// that face (`texture`, `textures`, `faces`). It collides and is selected box by box, a
+        /// stair being one slab and a quarter, unless `hitbox` is set. A
+        /// `models/block/<name>.json` (Blockbench's Java block model) does the same from a file.
         pub fn model_box(mut self, min: [f32; 3], max: [f32; 3]) -> Self {
             self.each(|s, _| {
                 if s.model != Model::Boxes {
@@ -816,14 +828,10 @@ macro_rules! state_setters {
             });
             self
         }
-        /// `selection` and `collision` for a model written for a floor with the front to the north.
-        pub fn framed_selection(self, frame: crate::signal::Frame, min: [f32; 3], max: [f32; 3]) -> Self {
-            let (lo, hi) = frame.corners(min, max);
-            self.selection(lo, hi)
-        }
-        pub fn framed_collision(self, frame: crate::signal::Frame, min: [f32; 3], max: [f32; 3]) -> Self {
-            let (lo, hi) = frame.corners(min, max);
-            self.collision(lo, hi)
+        /// `hitbox` for a model written for a floor with the front to the north.
+        pub fn framed_hitbox(self, frame: crate::signal::Frame, min: [f32; 3], max: [f32; 3]) -> Self {
+            let (lo, hi) = frame.corners(min.map(|v| v * 16.0), max.map(|v| v * 16.0));
+            self.hitbox(lo.map(|v| v / 16.0), hi.map(|v| v / 16.0))
         }
         /// Doesn't carry redstone power, the way glass doesn't. Wire can still lie on it.
         pub fn redstone_blocker(mut self) -> Self {
@@ -841,18 +849,13 @@ macro_rules! state_setters {
             self.each(|s, _| s.flags |= bf::STICKY);
             self
         }
-        /// What the crosshair picks, outlines and cracks (pixels 0..16; call again for more boxes),
-        /// when it should differ from the collision and model boxes.
-        pub fn selection(mut self, min: [f32; 3], max: [f32; 3]) -> Self {
+        /// Its shape, in fractions of the block (a slab: `[0.0; 3]` to `[1.0, 0.5, 1.0]`), one box
+        /// a call: what stops a walker, what the crosshair outlines and cracks. On a block that
+        /// isn't solid (`not_solid`, `plant`), only the outline. Without any, the model's boxes,
+        /// else a plant's cross, else the whole block.
+        pub fn hitbox(mut self, min: [f32; 3], max: [f32; 3]) -> Self {
             self.each(|s, _| {
-                s.selection
-                    .push([min[0], min[1], min[2], max[0], max[1], max[2]])
-            });
-            self
-        }
-        pub fn collision(mut self, min: [f32; 3], max: [f32; 3]) -> Self {
-            self.each(|s, _| {
-                s.collision
+                s.hitbox
                     .push([min[0], min[1], min[2], max[0], max[1], max[2]])
             });
             self
@@ -915,6 +918,9 @@ pub struct BlockBuilder<'a> {
     facing: Option<(crate::Facings, crate::Toward)>,
     signal: Option<SignalBuild>,
     placement: Option<std::sync::Arc<dyn Fn(&Place, &mut Props) + Send + Sync>>,
+    merge: Option<Box<dyn Fn(&Place, &mut Props) + Send + Sync>>,
+    made_of: Option<(String, String)>,
+    shares_cell: Vec<String>,
 }
 
 /// Values a property can take: names (`["false", "true"]`) or numbers (`0..=7`).
@@ -1384,6 +1390,27 @@ impl<'a> BlockBuilder<'a> {
     }
 
     /// Chooses property values when a player places it (after `facing`):
+    /// Its own item placed in its cell: `.merge(|p, props| props.set("type", "double"))` takes the
+    /// item in, with `props` those of what is there and `p.placed("type")` how the item would go;
+    /// leaving them as they are places it as usual.
+    pub fn merge(mut self, f: impl Fn(&Place, &mut Props) + Send + Sync + 'static) -> Self {
+        self.merge = Some(Box::new(f));
+        self
+    }
+
+    /// What may be in one cell with it though their shapes overlap (`#tags`, names): snow on a
+    /// plant. Blocks whose shapes don't overlap share a cell without asking.
+    pub fn shares_cell_with(mut self, what: &str) -> Self {
+        self.shares_cell.push(what.to_string());
+        self
+    }
+
+    /// Not a block but a template: see `Registry::shapes_of`.
+    pub(crate) fn made_of(mut self, sources: &str, suffix: &str) -> Self {
+        self.made_of = Some((sources.to_string(), suffix.to_string()));
+        self
+    }
+
     /// `.placement(|p, props| props.set("axis", if p.face() < 2 { "x" } else { "y" }))`.
     pub fn placement(mut self, f: impl Fn(&Place, &mut Props) + Send + Sync + 'static) -> Self {
         self.placement = Some(std::sync::Arc::new(f));
@@ -1450,6 +1477,15 @@ impl Drop for BlockBuilder<'_> {
                 a.state = first + index_of(&props, &p);
             }));
         }
+        if let Some(f) = self.merge.take() {
+            let props = self.props.clone();
+            self.callbacks.merge = Some(callback(move |a: &mut abi::PlaceArgs| {
+                let Some(mut p) = combinations(&props).into_iter().nth((a.state - a.first) as usize) else { return };
+                f(Place::wrap(a), &mut p);
+                a.state = a.first + index_of(&props, &p);
+            }));
+        }
+        let shares_cell: Vec<Str> = self.shares_cell.iter().map(|x| Str::new(x)).collect();
         let prop_values: Vec<Vec<Str>> = self
             .props
             .iter()
@@ -1498,8 +1534,7 @@ impl Drop for BlockBuilder<'_> {
                 model: s.model,
                 textures: std::array::from_fn(|i| Str::new(&s.textures[i])),
                 boxes: Slice::new(b),
-                collision: Slice::new(&s.collision),
-                selection: Slice::new(&s.selection),
+                hitbox: Slice::new(&s.hitbox),
                 components: Slice::new(v),
                 signal: abi::SignalDesc {
                     kind: s.signal.kind,
@@ -1532,6 +1567,10 @@ impl Drop for BlockBuilder<'_> {
             on_scheduled: cb.on_scheduled.unwrap_or(abi::Callback::NONE),
             on_pass: cb.on_pass.unwrap_or(abi::Callback::NONE),
             signal_read: cb.signal_read.unwrap_or(abi::Callback::NONE),
+            merge: cb.merge.unwrap_or(abi::Callback::NONE),
+            derive_from: self.made_of.as_ref().map_or(Str::EMPTY, |m| Str::new(&m.0)),
+            derive_suffix: self.made_of.as_ref().map_or(Str::EMPTY, |m| Str::new(&m.1)),
+            shares_cell: Slice::new(&shares_cell),
             placement: cb.placement.unwrap_or(abi::Callback::NONE),
             replace: self.replace as u32,
             grow_seconds: cb.grow.0,
@@ -2157,20 +2196,21 @@ impl SignalBuild {
         if self.kind == abi::signal_kind::WIRE {
             let mask = p.int("faces");
             // A thin plate on each face it lies on.
+            const T: f32 = 1.0 / 16.0;
             const PLATES: [[f32; 6]; 6] = [
-                [0.0, 0.0, 0.0, 1.0, 16.0, 16.0],
-                [15.0, 0.0, 0.0, 16.0, 16.0, 16.0],
-                [0.0, 0.0, 0.0, 16.0, 1.0, 16.0],
-                [0.0, 15.0, 0.0, 16.0, 16.0, 16.0],
-                [0.0, 0.0, 0.0, 16.0, 16.0, 1.0],
-                [0.0, 0.0, 15.0, 16.0, 16.0, 16.0],
+                [0.0, 0.0, 0.0, T, 1.0, 1.0],
+                [1.0 - T, 0.0, 0.0, 1.0, 1.0, 1.0],
+                [0.0, 0.0, 0.0, 1.0, T, 1.0],
+                [0.0, 1.0 - T, 0.0, 1.0, 1.0, 1.0],
+                [0.0, 0.0, 0.0, 1.0, 1.0, T],
+                [0.0, 0.0, 1.0 - T, 1.0, 1.0, 1.0],
             ];
-            d.selection = (0..6)
+            d.hitbox = (0..6)
                 .filter(|f| mask & (1 << f) != 0)
                 .map(|f| PLATES[f as usize])
                 .collect();
             if mask == 0 {
-                d.selection = vec![PLATES[2]];
+                d.hitbox = vec![PLATES[2]];
             }
         }
     }
@@ -2303,6 +2343,15 @@ impl Place {
     }
     pub fn look(&self) -> [f32; 3] {
         self.args.look
+    }
+    /// Just outside where it was clicked, 0..1 from this cell's corner: for a slab, `hit()[1] > 0.5`
+    /// is the upper half, on a floor, under a ceiling, against a wall or on another slab alike.
+    pub fn hit(&self) -> [f32; 3] {
+        self.args.hit
+    }
+    /// In `merge`: a property of how its item would go.
+    pub fn placed(&self, prop: &str) -> Option<&'static str> {
+        crate::world::state_prop(self.args.placed, prop)
     }
     /// Horizontal facing the player looks towards: 0 = -Z (north), 1 = +X, 2 = +Z, 3 = -X.
     pub fn horizontal(&self) -> u32 {

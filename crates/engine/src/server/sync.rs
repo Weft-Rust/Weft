@@ -125,12 +125,14 @@ impl Server {
                 for st in r.bodies.values_mut() {
                     st.resend.clear();
                     st.changes.clear();
+                    st.extra_changes.clear();
                     st.signals.level_changes.clear();
                     st.edited.clear();
                     st.world_light_changed = false;
                 }
                 r.space.resend.clear();
                 r.space.changes.clear();
+                r.space.extra_changes.clear();
                 r.space.signals.level_changes.clear();
                 r.entities.killed.clear();
                 r.entities.taken.clear();
@@ -160,7 +162,7 @@ fn send_block_changes(p: &mut Player, dim: &DimSet) {
                     .send(ToClient::Cube { dim: p.dim, frame: 0, pos: *pos, cube: cube.clone(), edit: true });
             }
         }
-        if !reg.space.changes.is_empty() {
+        if !reg.space.changes.is_empty() || !reg.space.extra_changes.is_empty() {
             let changes: Vec<(IVec3, u32)> = reg
                 .space
                 .changes
@@ -168,9 +170,16 @@ fn send_block_changes(p: &mut Player, dim: &DimSet) {
                 .filter(|(b, _)| p.sent.contains(&(*b >> 4)))
                 .copied()
                 .collect();
-            if !changes.is_empty() {
+            let extras: Vec<(IVec3, Vec<u32>)> = reg
+                .space
+                .extra_changes
+                .iter()
+                .filter(|(b, _)| p.sent.contains(&(*b >> 4)))
+                .cloned()
+                .collect();
+            if !changes.is_empty() || !extras.is_empty() {
                 p.conn
-                    .send(ToClient::Blocks { dim: p.dim, frame: 0, changes });
+                    .send(ToClient::Blocks { dim: p.dim, frame: 0, changes, extras });
             }
         }
         if !reg.space.signals.level_changes.is_empty() {
@@ -336,8 +345,8 @@ fn send_entities(
                 if st.world_light_changed {
                     bodies.push(ToClient::BodyLight { frame: id, lights: st.world_light.iter().map(|(p, l)| (*p, *l)).collect() });
                 }
-                if !st.changes.is_empty() {
-                    bodies.push(ToClient::Blocks { dim: p.dim, frame: id, changes: st.changes.clone() });
+                if !st.changes.is_empty() || !st.extra_changes.is_empty() {
+                    bodies.push(ToClient::Blocks { dim: p.dim, frame: id, changes: st.changes.clone(), extras: st.extra_changes.clone() });
                 }
                 if !st.signals.level_changes.is_empty() {
                     bodies.push(ToClient::Signals { dim: p.dim, frame: id, changes: st.signals.level_changes.clone() });

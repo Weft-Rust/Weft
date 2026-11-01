@@ -50,6 +50,9 @@ pub static HOST: Host = Host {
     get_block_loaded,
     world_dimension,
     set_block,
+    cell_parts,
+    add_part,
+    replace_part,
     schedule_tick,
     world_time,
     random,
@@ -487,11 +490,35 @@ fn ip(p: *const [i32; 3]) -> IVec3 {
 }
 
 unsafe extern "C" fn get_block(w: *mut abi::WorldCtx, pos: *const [i32; 3]) -> u32 {
-    unsafe { dim(w).get(ip(pos)).unwrap_or(content::AIR) }
+    unsafe { dim(w).seen(ip(pos)).unwrap_or(content::AIR) }
 }
 
 unsafe extern "C" fn get_block_loaded(w: *mut abi::WorldCtx, pos: *const [i32; 3]) -> u32 {
-    unsafe { dim(w).get(ip(pos)).unwrap_or(u32::MAX) }
+    unsafe { dim(w).seen(ip(pos)).unwrap_or(u32::MAX) }
+}
+
+unsafe extern "C" fn cell_parts(w: *mut abi::WorldCtx, pos: *const [i32; 3], out: *mut u32, cap: u32) -> u32 {
+    unsafe {
+        let parts = dim(w).parts(ip(pos));
+        std::ptr::copy_nonoverlapping(parts.as_ptr(), out, parts.len().min(cap as usize));
+        parts.len() as u32
+    }
+}
+
+unsafe extern "C" fn add_part(w: *mut abi::WorldCtx, pos: *const [i32; 3], state: u32) -> u32 {
+    if state as usize >= content().states.len() {
+        misuse("add_part", || format!("no state {state}"));
+        return 0;
+    }
+    unsafe { dim(w).add_part(content(), ip(pos), state) as u32 }
+}
+
+unsafe extern "C" fn replace_part(w: *mut abi::WorldCtx, pos: *const [i32; 3], old: u32, new: u32) -> u32 {
+    if new as usize >= content().states.len() {
+        misuse("replace_part", || format!("no state {new}"));
+        return 0;
+    }
+    unsafe { dim(w).replace_part(content(), ip(pos), old, new) as u32 }
 }
 
 unsafe extern "C" fn world_dimension(w: *mut abi::WorldCtx) -> u32 {
@@ -523,7 +550,7 @@ unsafe extern "C" fn set_block(w: *mut abi::WorldCtx, pos: *const [i32; 3], stat
         log::error!("mod tried to set invalid state {state}");
         return 0;
     }
-    unsafe { dim(w).set(content(), ip(pos), state).is_some() as u32 }
+    unsafe { dim(w).set_seen(content(), ip(pos), state).is_some() as u32 }
 }
 
 unsafe extern "C" fn structure_block(w: *mut abi::WorldCtx, entity: u64, pos: *const [i32; 3]) -> u32 {
@@ -730,7 +757,7 @@ unsafe extern "C" fn entities_near_bodies(w: *mut abi::WorldCtx, pos: *const [f6
 unsafe extern "C" fn in_liquid(w: *mut abi::WorldCtx, pos: *const [f64; 3]) -> u32 {
     unsafe {
         let d = dim(w);
-        crate::physics::liquid_at(content(), &|p| d.get(p), DVec3::from_array(*pos)).is_some() as u32
+        crate::physics::liquid_at(content(), &*d.space, DVec3::from_array(*pos)).is_some() as u32
     }
 }
 

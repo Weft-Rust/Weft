@@ -911,7 +911,7 @@ pub async fn dimensions(t: T) -> R {
         .collect();
     t.check(spawned.is_empty(), format!("nothing spawns among the debug blocks: {spawned:?}"));
     // Lava is drawn solid: blocks behind ice do not show through it.
-    let at = t.op("find 60 base:lava").await?;
+    let at = t.op("find 200 base:lava").await?;
     let l: Vec<i32> = at
         .split_whitespace()
         .filter_map(|v| v.parse().ok())

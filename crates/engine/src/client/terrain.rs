@@ -33,7 +33,7 @@ pub enum In {
         cube: Arc<Cube>,
         edit: bool,
     },
-    Blocks(Vec<(IVec3, u32)>),
+    Blocks(Vec<(IVec3, u32)>, Vec<(IVec3, Vec<u32>)>),
     Unload(IVec3),
     Saved(Vec<IVec3>),
     Edits {
@@ -60,7 +60,7 @@ pub enum Out {
         cube: Arc<Cube>,
         around: Around,
     },
-    Blocks(Vec<(IVec3, u32)>),
+    Blocks(Vec<(IVec3, u32)>, Vec<(IVec3, Vec<u32>)>),
     Unload(IVec3),
     /// The view now spans cubes `lo..=hi` up and down.
     Range {
@@ -485,7 +485,7 @@ impl Terrain {
                 self.arrived(pos);
                 self.emit_all(changed);
             }
-            In::Blocks(changes) => {
+            In::Blocks(changes, extras) => {
                 self.whole = true;
                 for &(p, s) in &changes {
                     let cp = crate::world::cube_of(p);
@@ -496,7 +496,12 @@ impl Terrain {
                         }
                     }
                 }
-                self.out.push(Out::Blocks(changes));
+                for (p, parts) in &extras {
+                    if let Some(cube) = self.cubes.get_mut(&crate::world::cube_of(*p)) {
+                        Arc::make_mut(cube).set_extras(crate::world::local_index(*p), parts.clone());
+                    }
+                }
+                self.out.push(Out::Blocks(changes, extras));
             }
             In::Unload(pos) => {
                 self.server.remove(&pos);

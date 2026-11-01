@@ -235,6 +235,7 @@ fn init(r: &mut Registry) {
         .mineable("pickaxe")
         .tab(&BASE_BUILDING);
     r.block(&REINFORCED_STONE)
+        .tag("has_shapes")
         .shader("stripes")
         .hardness(4.0)
         .mineable("pickaxe")

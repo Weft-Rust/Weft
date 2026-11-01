@@ -296,7 +296,7 @@ mod tests {
     fn server_messages_roundtrip() {
         let msgs = [
             ToServer::Join { name: "Ann".into(), key: "k".into() },
-            ToServer::Use { pos: IVec3::new(-5, 70, 3), face: 3, look: [0.1, -0.5, 0.8], sneak: true, frame: 0 },
+            ToServer::Use { pos: IVec3::new(-5, 70, 3), part: 7, face: 3, hit: [0.5, 1.0, 0.25], look: [0.1, -0.5, 0.8], sneak: true, frame: 0 },
             ToServer::Move {
                 pos: DVec3::new(1.5, 64.0, -3.25),
                 yaw: 1.0,

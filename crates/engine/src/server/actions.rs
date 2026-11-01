@@ -88,7 +88,7 @@ impl Server {
                 let Some((r, entity)) = self.region(pi) else { return };
                 let held = r.entities.held(entity).item;
                 // Said now, or it would mine all that time for nothing.
-                if r.with_space(c, frame, |d, _| d.may_break(c, pos, held, entity)) == Some(false) {
+                if r.with_space(c, frame, |d, _| d.get(pos).is_none_or(|state| d.may_break(c, pos, state, held, entity))) == Some(false) {
                     self.players[pi].mining = None;
                     self.players[pi]
                         .conn
@@ -145,7 +145,7 @@ impl Server {
                 }
             }
 
-            ToServer::Break { pos, face, frame } => {
+            ToServer::Break { pos, part, face, frame } => {
                 let Some((r, _)) = self.region(pi) else { return };
                 let (frame, pos) = r.landed_as(frame, pos);
                 let mining = self.players[pi].mining.take();
@@ -164,27 +164,20 @@ impl Server {
                     let started = mining
                         .filter(|m| m.0 == frame && m.1 == pos)
                         .map_or(now, |m| m.2);
-                    let need = d
-                        .get(pos)
-                        .map_or(0.0, |s| dim::mining_time(c, s, held.item, head_wet, on_ground, speed))
-                        * crate::world::TPS as f32;
+                    let part = d.aimed_part(c, pos, part);
+                    let need = dim::mining_time(c, part, held.item, head_wet, on_ground, speed) * crate::world::TPS as f32;
                     let too_soon = !creative && ((now - started) as f32 + 2.0) < need * 0.7;
                     let keeps = creative && c.no_creative_break(held.item);
                     if !within(o.to_local(eye), pos, reach) || too_soon || keeps {
                         // The client already shows air.
-                        if let Some(state) = d.get(pos) {
-                            d.space.changes.push((pos, state));
-                        }
+                        d.resend_cell(pos);
                         return false;
                     }
-                    let free = c
-                        .states
-                        .get(d.get(pos).unwrap_or(0) as usize)
-                        .is_some_and(|s| s.hardness <= 0.0);
-                    let done = d.break_face(c, pos, face, held, entity, !creative);
+                    let free = c.states.get(part as usize).is_some_and(|s| s.hardness <= 0.0);
+                    let done = d.break_face(c, pos, part, face, held, entity, !creative);
                     // The client already shows air: a refused break sends the block back.
-                    if !done && let Some(state) = d.get(pos) {
-                        d.space.changes.push((pos, state));
+                    if !done && d.get(pos).is_some() {
+                        d.resend_cell(pos);
                         refused = true;
                     }
                     done && !free
@@ -200,7 +193,7 @@ impl Server {
                 }
             }
 
-            ToServer::Use { pos, face, look, sneak, frame } => {
+            ToServer::Use { pos, part, face, look, hit, sneak, frame } => {
                 let Some((r, _)) = self.region(pi) else { return };
                 let (frame, pos) = r.landed_as(frame, pos);
                 enum Did {
@@ -211,14 +204,14 @@ impl Server {
                 }
                 let Some((r, entity)) = self.region(pi) else { return };
                 let Some(e) = r.entities.get(entity) else { return };
-                let (eye, sel, player_box, creative) = (e.pos + DVec3::Y * e.eye(c), e.selected, e.aabb(c), e.mode == GameMode::Creative);
+                let (eye, sel, creative) = (e.pos + DVec3::Y * e.eye(c), e.selected, e.mode == GameMode::Creative);
                 let held = r.entities.held(entity);
                 let reach = r.attribute(c, entity, extend::BLOCK_REACH, false) + BLOCK_SLACK;
                 let did = r.with_space(c, frame, |d, o| {
                     if !within(o.to_local(eye), pos, reach) {
                         return Did::Nothing;
                     }
-                    if !sneak && d.player_use(c, pos, face, entity) {
+                    if !sneak && d.player_use(c, pos, part, face, entity) {
                         return Did::Used;
                     }
                     let Some(state) = c
@@ -229,19 +222,8 @@ impl Server {
                     else {
                         return Did::NoBlock;
                     };
-                    let target = if d
-                        .get(pos)
-                        .is_some_and(|s| c.states[s as usize].flags & abi::block_flags::REPLACEABLE != 0)
-                    {
-                        pos
-                    } else {
-                        pos + crate::world::DIRS[face as usize]
-                    };
-                    let block_box = crate::physics::Aabb { min: target.as_dvec3(), max: target.as_dvec3() + DVec3::ONE };
-                    let solid = c.states[state as usize].flags & abi::block_flags::SOLID != 0;
-                    if (!solid || !o.box_to_local(player_box).intersects(&block_box))
-                        && d.place(c, target, face, state, look, entity, held.item)
-                    {
+                    let hit = hit.map(|v| v.clamp(0.0, 1.0));
+                    if let Some(target) = d.place_clicked(c, pos, face, state, look, hit, entity, held.item) {
                         // A named stack names the block entity it becomes (a renamed chest).
                         if let (Some(name), Some(id)) = (crate::stack::name(&held), d.anchored(target)) {
                             d.entities

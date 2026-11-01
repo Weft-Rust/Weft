@@ -681,8 +681,27 @@ fn push_name(n: &Name, cx: &Ctx, out: &mut Vec<Span>, st: &mut State, depth: u32
             format_depth(cx.lang.get("item.spawn_egg"), &args, cx, out, st, color, depth + 1);
             st.color = color;
         }
+        // So is a stair nobody named after what it is made of.
+        None if depth < 4 && shape_of(n).is_some() => {
+            let color = st.color;
+            let (source, key) = shape_of(n).unwrap_or_default();
+            format_depth(cx.lang.get(&key), &[Arg::Name(Name::Block(source))], cx, out, st, color, depth + 1);
+            st.color = color;
+        }
         _ => push_text(out, &n.keys().1, st),
     }
+}
+
+/// What a block made of another is made of (its first state), and the lang key for that.
+fn shape_of(n: &Name) -> Option<(u32, String)> {
+    let c = crate::content::try_content()?;
+    let name = match n {
+        Name::Item(i) => &c.items.get(*i as usize)?.name,
+        Name::Block(s) => &c.block_of(*c.states.get(*s as usize).map(|_| s)?).name,
+        _ => return None,
+    };
+    let (source, key) = c.shapes.get(name)?;
+    Some((c.block_names.get(source).map(|&b| c.blocks[b as usize].first_state)?, key.clone()))
 }
 
 /// Re-evaluates conditional spans; `test` answers a condition without its `!`. True if anything

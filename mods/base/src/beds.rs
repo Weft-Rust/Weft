@@ -207,7 +207,7 @@ pub fn register(r: &mut Registry) {
                 Dir::North => 2,
                 _ => 3,
             };
-            let mut s = s.cutout().selection([0.0, 0.0, 0.0], [16.0, 9.0, 16.0]);
+            let mut s = s.cutout().hitbox([0.0; 3], [1.0, 0.5625, 1.0]);
             for b in if head { HEAD_BOXES } else { FOOT_BOXES } {
                 let top = TOP[head as usize][quarters];
                 let (min, max, faces) = turned(b, quarters, top);

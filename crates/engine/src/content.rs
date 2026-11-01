@@ -110,6 +110,7 @@ pub struct BlockCallbacks {
     pub on_pass: Option<Callback>,
     pub signal_read: Option<Callback>,
     pub placement: Option<Callback>,
+    pub merge: Option<Callback>,
     pub on_grow: Option<Callback>,
     /// Growth over time: (mean ticks per step, light needed).
     pub grow: Option<(f64, u32)>,
@@ -495,6 +496,7 @@ pub struct Ids {
     pub name: Option<u32>,
     pub conductor: Option<u32>,
     pub worn: Option<u32>,
+    pub loot_rolls: Option<u32>,
     pub worn_texture: Option<u32>,
     pub wear_per_hit: Option<u32>,
     pub spawn_egg: Option<u32>,
@@ -538,6 +540,10 @@ pub struct Content {
     pub ref_lists: Vec<Vec<[u32; 2]>>,
     pub components: Components,
     pub ids: Ids,
+    /// Blocks made of others (`Registry::shapes_of`): by name, the source and the lang key for it.
+    pub shapes: FxHashMap<String, (String, String)>,
+    /// What may be in a cell with this block though their shapes overlap, by block.
+    pub shares_cell: FxHashMap<u32, Match>,
     /// (`mineable/<class>`, `tools/<class>`) component ids per tool class.
     pub tool_classes: Vec<(u32, Option<u32>)>,
     /// Items carrying each tag, the preferred first (`refs::tag_items`).
@@ -643,6 +649,23 @@ impl Content {
     pub fn spawn_egg_of(&self, kind: u32) -> Option<u32> {
         let (name, egg) = (&self.game.entities.get(kind as usize)?.name, self.ids.spawn_egg?);
         (1..self.items.len() as u32).find(|&i| self.components.text(comps::ITEM, i, egg) == Some(name.as_str()))
+    }
+
+    /// Whether the shapes of two states overlap, in one cell.
+    pub fn overlap(&self, a: u32, b: u32) -> bool {
+        const TOUCHING: f32 = 1e-4;
+        self.states[a as usize].selection.iter().any(|x| {
+            self.states[b as usize]
+                .selection
+                .iter()
+                .any(|y| (0..3).all(|i| x[i] + TOUCHING < y[i + 3] && y[i] + TOUCHING < x[i + 3]))
+        })
+    }
+
+    /// Whether either of two states said it may be in a cell with the other.
+    pub fn may_share(&self, a: u32, b: u32) -> bool {
+        let says = |x: u32, y: u32| self.shares_cell.get(&self.states[x as usize].block).is_some_and(|m| self.matches(m, y));
+        says(a, b) || says(b, a)
     }
 
     /// The item a middle click on this block picks: the block's own item, else the first its
@@ -826,8 +849,7 @@ pub struct RawState {
     pub textures: [String; 6],
     /// (min, max, textures, uv, turn, tilt) per box, see `abi::ModelBox`.
     pub boxes: Vec<([f32; 3], [f32; 3], [String; 6], [[f32; 4]; 6], [u8; 6], weft_abi::BoxTilt)>,
-    pub collision: Vec<[f32; 6]>,
-    pub selection: Vec<[f32; 6]>,
+    pub hitbox: Vec<[f32; 6]>,
     pub signal: RawSignal,
     pub components: Vec<RawValue>,
 }
@@ -847,6 +869,10 @@ pub struct RawBlock {
     pub opens: String,
     /// Handles of blocks this one replaced; they resolve to this block.
     pub extra_cells: Vec<usize>,
+    /// A template: which blocks it makes one for, and what goes after their names.
+    pub derive: Option<(String, String)>,
+    /// What may share a cell with it though their shapes overlap.
+    pub shares_cell: Vec<String>,
 }
 
 pub struct RawItem {
@@ -928,6 +954,137 @@ fn inherit_states(b: &mut RawBlock, old: &RawBlock) {
     b.components = comps;
 }
 
+/// Whether a tag name fits `pattern`, whose `*` stands for any text.
+fn tag_fits(pattern: &str, tag: &str) -> bool {
+    match pattern.split_once('*') {
+        Some((pre, post)) => tag.len() >= pre.len() + post.len() && tag.starts_with(pre) && tag.ends_with(post),
+        None => pattern == tag,
+    }
+}
+
+/// Is it what a block should be counted for: a value, or a tag saying how it is mined. Other tags
+/// say what it is, which a stair of it isn't.
+fn carries_over(v: &RawValue) -> bool {
+    !v.schema.is_empty() || !v.bytes.is_empty() || v.text.is_some() || v.name.starts_with("mineable/")
+}
+
+/// The blocks templates make (`Registry::shapes_of`), of every mod's, each template gone from
+/// the lists. Returns (name, source's name, lang key) of each.
+fn expand_templates(
+    blocks: &mut Vec<(ModId, RawBlock)>,
+    items: &mut Vec<(ModId, RawItem)>,
+    games: &[crate::registry::RawGame],
+) -> Vec<(String, String, String)> {
+    let templates: Vec<usize> = (0..blocks.len()).filter(|&i| blocks[i].1.derive.is_some()).collect();
+    if templates.is_empty() {
+        return Vec::new();
+    }
+    // Tags given from outside, by a block's name.
+    let mut given: FxHashMap<&str, Vec<&str>> = FxHashMap::default();
+    for set in games.iter().flat_map(|g| &g.sets).filter(|s| !s.remove) {
+        if let crate::components::Target::Name(n) = &set.target {
+            given.entry(n.split('[').next().unwrap_or(n)).or_default().push(&set.value.name);
+        }
+    }
+    let matches = |b: &RawBlock, wanted: &str| match wanted.strip_prefix('#') {
+        Some(pattern) => {
+            let own = b.components.iter().chain(b.states.iter().flat_map(|s| &s.components)).map(|v| v.name.as_str());
+            own.chain(given.get(b.name.as_str()).into_iter().flatten().copied()).any(|t| tag_fits(pattern, t))
+        }
+        None => b.name == wanted,
+    };
+    let mut made: Vec<(ModId, RawBlock)> = Vec::new();
+    let mut made_items: Vec<(ModId, RawItem)> = Vec::new();
+    let mut source_tags: Vec<(usize, RawValue)> = Vec::new();
+    let mut shapes = Vec::new();
+    let tag = |name: String| RawValue { name, schema: String::new(), bytes: Vec::new(), text: None };
+    for &t in &templates {
+        let (owner, template) = &blocks[t];
+        let Some((sources, suffix)) = &template.derive else { continue };
+        let short = template.name.split_once(':').map_or(template.name.as_str(), |x| x.1);
+        let item = items.iter().find(|i| i.1.block == template.name);
+        for (s, (_, source)) in blocks.iter().enumerate() {
+            let cube = source.states[0].model == Model::Cube && source.derive.is_none();
+            if !cube || !sources.split_whitespace().any(|w| matches(source, w)) {
+                continue;
+            }
+            let name = format!("{}{suffix}", source.name);
+            // Two mods asking for the same, or a mod's own block by that name, are the one.
+            if made.iter().any(|m| m.1.name == name) || blocks.iter().any(|b| b.1.name == name) {
+                continue;
+            }
+            let id = source.name.replace(':', ".");
+            source_tags.push((s, tag(format!("{short}_of/{id}"))));
+            let from = &source.states[0];
+            let states = template
+                .states
+                .iter()
+                .map(|own| {
+                    let mut st = own.clone();
+                    st.textures = from.textures.clone();
+                    st.filter = from.filter;
+                    if own.model == Model::Cube {
+                        (st.flags, st.opacity, st.layer) = (from.flags, from.opacity, from.layer);
+                    } else if from.layer == Layer::Translucent {
+                        st.layer = from.layer;
+                        st.flags |= from.flags & abi::block_flags::CULL_SAME;
+                    }
+                    st.components = from.components.iter().filter(|v| carries_over(v)).cloned().collect();
+                    st.components.extend(own.components.iter().cloned());
+                    st
+                })
+                .collect();
+            let mut components: Vec<RawValue> = source.components.iter().filter(|v| carries_over(v)).cloned().collect();
+            components.extend(template.components.iter().cloned());
+            components.push(tag(format!("{short}/{id}")));
+            shapes.push((name.clone(), source.name.clone(), format!("shape.{short}")));
+            if let Some((owner, i)) = item {
+                made_items.push((
+                    *owner,
+                    RawItem {
+                        name: name.clone(),
+                        cell: 0,
+                        seq: i.seq,
+                        texture: String::new(),
+                        block: name.clone(),
+                        components: i.components.clone(),
+                        on_use: i.on_use,
+                    },
+                ));
+            }
+            made.push((
+                *owner,
+                RawBlock {
+                    name,
+                    cell: 0,
+                    states,
+                    props: template.props.clone(),
+                    components,
+                    cb: template.cb,
+                    replace: false,
+                    own_states: true,
+                    retexture: Vec::new(),
+                    opens: template.opens.clone(),
+                    extra_cells: Vec::new(),
+                    derive: None,
+                    shares_cell: template.shares_cell.clone(),
+                },
+            ));
+        }
+    }
+    for (s, value) in source_tags {
+        blocks[s].1.components.push(value);
+    }
+    let names: Vec<String> = templates.iter().map(|&t| blocks[t].1.name.clone()).collect();
+    blocks.retain(|b| b.1.derive.is_none());
+    items.retain(|i| !names.contains(&i.1.block));
+    blocks.append(&mut made);
+    items.append(&mut made_items);
+    blocks.par_sort_by(|a, b| a.1.name.cmp(&b.1.name).then(a.1.replace.cmp(&b.1.replace)));
+    items.par_sort_by(|a, b| a.1.name.cmp(&b.1.name));
+    shapes
+}
+
 /// A model file on every state of a block: its elements become the boxes (faces left to the
 /// block keep the state's textures), a cube parent sets the face textures.
 fn apply_model(b: &mut RawBlock, m: &crate::block_model::FileModel) {
@@ -970,8 +1127,7 @@ pub(crate) unsafe fn copy_block(d: &abi::BlockDesc) -> RawBlock {
                 model: s.model,
                 textures: std::array::from_fn(|i| s.textures[i].as_str().to_string()),
                 boxes,
-                collision: s.collision.as_slice().to_vec(),
-                selection: s.selection.as_slice().to_vec(),
+                hitbox: s.hitbox.as_slice().to_vec(),
                 signal: RawSignal {
                     kind: s.signal.kind,
                     attach: s.signal.attach as u8,
@@ -986,6 +1142,8 @@ pub(crate) unsafe fn copy_block(d: &abi::BlockDesc) -> RawBlock {
         RawBlock {
             name: d.name.as_str().to_string(),
             cell: d.cell as usize,
+            derive: (!d.derive_from.as_str().is_empty()).then(|| (d.derive_from.as_str().to_string(), d.derive_suffix.as_str().to_string())),
+            shares_cell: d.shares_cell.as_slice().iter().map(|x| x.as_str().to_string()).collect(),
             states,
             props: d
                 .props
@@ -1009,6 +1167,7 @@ pub(crate) unsafe fn copy_block(d: &abi::BlockDesc) -> RawBlock {
                 on_scheduled: cb(d.on_scheduled),
                 on_pass: cb(d.on_pass),
                 signal_read: cb(d.signal_read),
+                merge: cb(d.merge),
                 placement: cb(d.placement),
                 on_grow: cb(d.on_grow),
                 on_signal: cb(d.on_signal),
@@ -1372,6 +1531,9 @@ pub fn freeze(mut mods: Vec<ModMeta>, regs: Vec<RawRegistrar>) -> Result<Content
     let mut errors: Vec<String> = Vec::new();
     let Merged { blocks, mut items, mut biomes, mut dims, tint_kinds, biome_tints, mut games } = merge_registrars(&mods, regs, &mut errors);
     let mut blocks = apply_replacements(&mods, blocks, &mut items);
+    let shapes = expand_templates(&mut blocks, &mut items, &games);
+    let shares_specs: Vec<(String, Vec<String>)> =
+        blocks.iter().filter(|b| !b.1.shares_cell.is_empty()).map(|b| (b.1.name.clone(), b.1.shares_cell.clone())).collect();
     apply_block_models(&mods, &mut blocks, &mut errors);
     let tint_kinds = freeze_tints(tint_kinds, biome_tints, &mut biomes, &mut errors);
     check_unique(&mods, &blocks, &mut items, &mut biomes, &mut dims, &mut errors);
@@ -1428,6 +1590,19 @@ pub fn freeze(mut mods: Vec<ModMeta>, regs: Vec<RawRegistrar>) -> Result<Content
     let commands = freeze_commands(&mods, &mut games, &mut errors);
     let mut word_sets = collect_word_sets(&mut games);
     let (liquids, reactions) = freeze_liquids(&mut games, &mut states, &block_defs, &block_names, &components, &mut errors);
+    let mut shares_cell: FxHashMap<u32, Match> = FxHashMap::default();
+    for (name, specs) in &shares_specs {
+        let Some(&block) = block_names.get(name) else { continue };
+        let mut all = Vec::new();
+        for spec in specs {
+            let total = block_defs.iter().map(|b| b.states).sum();
+            match crate::refs::Ref::parse(spec).and_then(|r| crate::refs::blocks(&r, &block_names, &block_defs, &components, total)) {
+                Ok(found) => all.extend(found),
+                Err(e) => errors.push(format!("{name} shares_cell_with: {e}")),
+            }
+        }
+        shares_cell.insert(block, Match(all.into_iter().collect()));
+    }
     let (item_liquid, containers) = item_containers(&item_defs, &liquids, &components, &mut errors);
     let creative_tabs = creative_tabs(&mods, &games, &item_defs, &item_names, &components, &mut errors);
     let mut ordered_items: Vec<u32> = (1..item_defs.len() as u32).collect();
@@ -1502,6 +1677,8 @@ pub fn freeze(mut mods: Vec<ModMeta>, regs: Vec<RawRegistrar>) -> Result<Content
         dims: dim_defs,
         components,
         ids,
+        shapes: shapes.into_iter().map(|(n, s, k)| (n, (s, k))).collect(),
+        shares_cell,
         tool_classes,
         tag_items,
         textures: textures.names,
@@ -1740,29 +1917,26 @@ fn number_blocks(mods: &[ModMeta], blocks: Vec<(ModId, RawBlock)>, textures: &mu
                     uv: *uv,
                 })
                 .collect();
-            let mut collision: Vec<[f32; 6]> = s.collision.iter().map(|c| c.map(|v| v / 16.0)).collect();
-            if collision.is_empty() && s.model == Model::Boxes && !boxes.is_empty() {
-                let mut u = [f32::MAX, f32::MAX, f32::MAX, f32::MIN, f32::MIN, f32::MIN];
-                for bx in &boxes {
-                    for i in 0..3 {
-                        u[i] = u[i].min(bx.min[i]);
-                        u[i + 3] = u[i + 3].max(bx.max[i]);
-                    }
-                }
-                collision.push(u);
-            }
             boxes.shrink_to_fit();
-            let selection: Vec<[f32; 6]> = if !s.selection.is_empty() {
-                s.selection.iter().map(|b| b.map(|v| v / 16.0)).collect()
-            } else if s.model == Model::Cube {
-                vec![[0.0, 0.0, 0.0, 1.0, 1.0, 1.0]]
-            } else if !collision.is_empty() {
-                collision.clone()
-            } else if !boxes.is_empty() {
+            let of_model = || -> Vec<[f32; 6]> {
                 boxes
                     .iter()
                     .map(|b| [b.min[0], b.min[1], b.min[2], b.max[0], b.max[1], b.max[2]])
                     .collect()
+            };
+            let collision = if !s.hitbox.is_empty() {
+                s.hitbox.clone()
+            } else if s.model == Model::Boxes {
+                of_model()
+            } else {
+                Vec::new()
+            };
+            let selection: Vec<[f32; 6]> = if !s.hitbox.is_empty() {
+                s.hitbox.clone()
+            } else if s.model == Model::Cube {
+                vec![[0.0, 0.0, 0.0, 1.0, 1.0, 1.0]]
+            } else if !boxes.is_empty() {
+                of_model()
             } else if s.model == Model::Cross {
                 vec![[0.125, 0.0, 0.125, 0.875, 0.8, 0.875]]
             } else {
@@ -2302,6 +2476,7 @@ fn component_ids(components: &Components) -> Ids {
         name: id(abi::comp::NAME),
         conductor: id(abi::comp::CONDUCTOR),
         worn: id(abi::comp::WORN),
+        loot_rolls: id(abi::comp::LOOT_ROLLS),
         worn_texture: id(abi::comp::WORN_TEXTURE),
         wear_per_hit: id(abi::comp::WEAR_PER_HIT),
         spawn_egg: id(abi::comp::SPAWN_EGG),

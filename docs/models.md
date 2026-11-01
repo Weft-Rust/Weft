@@ -15,7 +15,7 @@ A block or item made of boxes takes Blockbench's **Java Block/Item** model: expo
 
 From a Java model the engine reads `elements` (`from`, `to`, `rotation`, and `faces` with their `texture`, `uv` and `rotation`), `textures` with `#name` references and `parent`, another model file or one of vanilla's cube parents (`block/cube_all`, `block/cube`, `block/cube_column`, `block/cube_bottom_top`) which give a plain cube its face textures. A face whose `#name` no texture sets shows the block's own texture of that face, so a file can bring only the shape and leave the textures to `.texture(..)` / `.textures(..)` in code. Faces the file leaves out aren't drawn. `uv` is 0 to 16 across a picture of any size, fractions included, so a face can be a part of an unwrap.
 
-In code the same is `.model_box(min, max)` (pixels, 0..16), whose faces show the state's textures. A block's model decides its shape for everyone, collision and selection included (the union of its boxes, unless `.collision(..)`/`.selection(..)` says otherwise).
+In code the same is `.model_box(min, max)` (pixels, 0..16), whose faces show the state's textures. A block's model decides its shape for everyone, collision and selection included (box by box, so a stair is one slab and a quarter, unless `.hitbox(min, max)`, in fractions of a block, says otherwise).
 
 For items, `models/item/<name>.json` with `"parent": "item/generated"` and a `layer0` texture is a flat item showing that texture; with `elements` the item is drawn as those boxes in the hand, on the ground and in slots. A face without a texture shows the item's own icon.
 
