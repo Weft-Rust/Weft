@@ -3,8 +3,8 @@
 //! instead (`model.rs`): bones and keyframes are what those need, faces textured from many
 //! files what blocks need.
 //!
-//! What is read: `elements` (`from`, `to`, `faces` with `texture` and `uv`), `textures` with
-//! `#name` references, and `parent` (another file, or vanilla's cube parents and
+//! What is read: `elements` (`from`, `to`, `rotation`, `faces` with `texture`, `uv` and
+//! `rotation`), `textures` with `#name` references, and `parent` (another file, or vanilla's cube parents and
 //! `item/generated`, which the engine knows without their files). A face's `#name` that no
 //! texture sets takes the block's own texture of that face, so a file can give only the shape.
 
@@ -12,14 +12,30 @@ use rustc_hash::FxHashMap;
 use serde_json::Value;
 
 /// One element: corners in model pixels (0..16), per face (-X, +X, -Y, +Y, -Z, +Z) the texture
-/// name (empty: the block's own of that face) and texels (negative: from the position; `NO_FACE`
-/// in u0: not drawn).
+/// name (empty: the block's own of that face), texels (negative: from the position; `NO_FACE` in
+/// u0: not drawn) and quarter turns of its picture, and how the element is tilted.
 #[derive(Clone, Debug, PartialEq)]
 pub struct FileBox {
     pub min: [f32; 3],
     pub max: [f32; 3],
     pub textures: [String; 6],
     pub uv: [[f32; 4]; 6],
+    pub turn: [u8; 6],
+    pub tilt: weft_abi::BoxTilt,
+}
+
+impl FileBox {
+    /// As drawn: in blocks, `texture` giving the id of a face's name.
+    pub fn model_box(&self, mut texture: impl FnMut(&str, usize) -> u32) -> crate::content::ModelBox {
+        crate::content::ModelBox {
+            turn: self.turn,
+            tilt: weft_abi::BoxTilt { origin: self.tilt.origin.map(|v| v / 16.0), ..self.tilt },
+            min: self.min.map(|v| v / 16.0),
+            max: self.max.map(|v| v / 16.0),
+            textures: std::array::from_fn(|i| texture(&self.textures[i], i)),
+            uv: self.uv,
+        }
+    }
 }
 
 /// A face the element leaves out.
@@ -89,10 +105,7 @@ pub fn load(name: &str, read: &dyn Fn(&str) -> Option<String>) -> Result<Option<
                 Ok(std::array::from_fn(|j| a[j].as_f64().unwrap_or(0.0) as f32))
             };
             let (from, to) = (v3("from")?, v3("to")?);
-            if e.get("rotation").and_then(|r| r.get("angle")).and_then(Value::as_f64).is_some_and(|a| a != 0.0) {
-                log::warn!("model {name}: element {i} is drawn unrotated; rotated elements are not supported");
-            }
-            let mut b = FileBox { min: std::array::from_fn(|j| from[j].min(to[j])), max: std::array::from_fn(|j| from[j].max(to[j])), textures: Default::default(), uv: [[NO_FACE, 0.0, 0.0, 0.0]; 6] };
+            let mut b = FileBox { min: std::array::from_fn(|j| from[j].min(to[j])), max: std::array::from_fn(|j| from[j].max(to[j])), textures: Default::default(), uv: [[NO_FACE, 0.0, 0.0, 0.0]; 6], turn: [0; 6], tilt: tilt(e) };
             let faces = e.get("faces").and_then(Value::as_object);
             for (d, face) in FACES.iter().enumerate() {
                 let Some(f) = faces.and_then(|f| f.get(*face)) else { continue };
@@ -101,6 +114,9 @@ pub fn load(name: &str, read: &dyn Fn(&str) -> Option<String>) -> Result<Option<
                     Some(a) => std::array::from_fn(|j| a[j].as_f64().unwrap_or(0.0) as f32),
                     None => [-1.0; 4],
                 };
+                // Files turn a picture clockwise, `ModelBox::turn` goes the other way round.
+                let quarters = f.get("rotation").and_then(Value::as_i64).unwrap_or(0).div_euclid(90);
+                b.turn[d] = (-quarters).rem_euclid(4) as u8;
             }
             out.boxes.push(b);
         }
@@ -118,6 +134,20 @@ pub fn load(name: &str, read: &dyn Fn(&str) -> Option<String>) -> Result<Option<
     Ok(Some(out))
 }
 
+/// An element's `rotation` (pixels, about one axis).
+fn tilt(e: &Value) -> weft_abi::BoxTilt {
+    let Some(r) = e.get("rotation") else { return weft_abi::BoxTilt::NONE };
+    let degrees = r.get("angle").and_then(Value::as_f64).unwrap_or(0.0) as f32;
+    let axis = match r.get("axis").and_then(Value::as_str) {
+        Some("x") => [1.0, 0.0, 0.0],
+        Some("y") => [0.0, 1.0, 0.0],
+        Some("z") => [0.0, 0.0, 1.0],
+        _ => return weft_abi::BoxTilt::NONE,
+    };
+    let origin = r.get("origin").and_then(Value::as_array).filter(|a| a.len() == 3).map_or([8.0; 3], |a| std::array::from_fn(|j| a[j].as_f64().unwrap_or(8.0) as f32));
+    weft_abi::BoxTilt { origin, axis, degrees }
+}
+
 /// A name in a file: `block/x` is the model's own namespace's, `minecraft:` is dropped.
 fn qualify(ns: &str, v: &str) -> String {
     let v = v.strip_prefix("minecraft:").unwrap_or(v);
@@ -132,7 +162,7 @@ mod tests {
     fn java_models() {
         let files: FxHashMap<&str, &str> = [
             ("m:block/lamp", r##"{"parent":"m:block/lamp_base","textures":{"glass":"m:block/glass"},
-                "elements":[{"from":[4,0,4],"to":[12,10,12],"faces":{"up":{"texture":"#glass","uv":[4,4,12,12]},"north":{"texture":"#side"},"south":{"texture":"#nothing"}}}]}"##),
+                "elements":[{"from":[4,0,4],"to":[12,10,12],"rotation":{"angle":22.5,"axis":"y","origin":[8,0,8]},"faces":{"up":{"texture":"#glass","uv":[4.25,4,12,12],"rotation":90},"north":{"texture":"#side"},"south":{"texture":"#nothing"}}}]}"##),
             ("m:block/lamp_base", r#"{"textures":{"side":"block/lamp_side"}}"#),
             ("m:block/log", r#"{"parent":"block/cube_column","textures":{"end":"m:block/log_top","side":"m:block/log"}}"#),
             ("m:item/gem", r#"{"parent":"minecraft:item/generated","textures":{"layer0":"item/gem"}}"#),
@@ -144,7 +174,9 @@ mod tests {
         let b = &lamp.boxes[0];
         assert_eq!((b.min, b.max), ([4.0, 0.0, 4.0], [12.0, 10.0, 12.0]));
         // up: its own texture and texels; north: the parent's; south: the block's own; west: none.
-        assert_eq!((b.textures[3].as_str(), b.uv[3]), ("m:block/glass", [4.0, 4.0, 12.0, 12.0]));
+        assert_eq!((b.textures[3].as_str(), b.uv[3]), ("m:block/glass", [4.25, 4.0, 12.0, 12.0]));
+        assert_eq!((b.turn[3], b.turn[4]), (3, 0));
+        assert_eq!((b.tilt.origin, b.tilt.axis, b.tilt.degrees), ([8.0, 0.0, 8.0], [0.0, 1.0, 0.0], 22.5));
         assert_eq!((b.textures[4].as_str(), b.uv[4][0]), ("m:block/lamp_side", -1.0));
         assert_eq!((b.textures[5].as_str(), b.uv[0][0]), ("", NO_FACE));
         let log = load("m:block/log", &read).unwrap().unwrap();

@@ -228,6 +228,12 @@ impl Client {
         (b != u32::MAX).then_some(b)
     }
 
+    /// The block the client has at `pos` of moving structure `entity`.
+    pub fn structure_block(&self, entity: u64, pos: [i32; 3]) -> Option<u32> {
+        let b = unsafe { (host().client_structure_block)(self.raw, entity, &pos) };
+        (b != u32::MAX).then_some(b)
+    }
+
     /// Whether the cube holding `pos` is here and has been drawn.
     pub fn cube_shown(&self, pos: [i32; 3]) -> bool {
         unsafe { (host().client_cube_shown)(self.raw, &pos) != 0 }

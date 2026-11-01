@@ -106,6 +106,16 @@ fn texture_frame(name: u32) -> Frame {
     return Frame(base, base, 0.0, size);
 }
 
+// A body's blocks have their own light and are lit as under open sky; where it is, the world has
+// its say.
+fn on_body(l: vec4<f32>, k: i32) -> vec4<f32> {
+    if k == 0 {
+        return l;
+    }
+    let w = unpack_light(bitcast<u32>(offsets[k].w));
+    return vec4(min(l.x, w.x), max(l.yzw, w.yzw));
+}
+
 fn finish(local: vec3<f32>, origin: vec4<i32>) -> vec4<f32> {
     let pos = vec3<f32>(origin.xyz) * 16.0 + local - g.cam_frac.xyz + offsets[origin.w].xyz;
     return vec4(pos, 1.0);
@@ -139,7 +149,7 @@ fn vs_face(@builtin(vertex_index) vi: u32, @builtin(instance_index) ii: u32) -> 
     out.layer2 = fr.b;
     out.blend = fr.blend;
     out.glow = glow_of(fr.a);
-    out.light = corner_light(w2, w3, c);
+    out.light = on_body(corner_light(w2, w3, c), origins[ii].w);
     let o = origins[ii] + g.cam_cube;
     out.slot = shader_of(tex_id);
     out.pos = vec3<f32>(o.xyz * 16) + local;
@@ -171,7 +181,7 @@ fn vs_quad(@builtin(vertex_index) vi: u32, @builtin(instance_index) ii: u32) -> 
     let local = quad_pos(records[base + c]);
     let w4 = records[base + 4u];
     let uvw = records[base + 5u];
-    let uv = quad_uv(uvw);
+    let uv = quad_uv_fine(uvw, records[base], records[base + 1u], records[base + 2u], records[base + 3u]);
     var uvs = array<vec2<f32>, 4>(vec2(uv.x, uv.w), vec2(uv.z, uv.w), vec2(uv.z, uv.y), vec2(uv.x, uv.y));
     let n = normalize(cross(p1 - p0, p2 - p1));
     // Face shading blended by normal; plants opt out like vanilla's crossed squares.
@@ -191,7 +201,7 @@ fn vs_quad(@builtin(vertex_index) vi: u32, @builtin(instance_index) ii: u32) -> 
     out.layer2 = fr.b;
     out.blend = fr.blend;
     out.glow = glow_of(fr.a);
-    out.light = corner_light(records[base + 6u], records[base + 7u], c);
+    out.light = on_body(corner_light(records[base + 6u], records[base + 7u], c), origins[ii].w);
     let o = origins[ii] + g.cam_cube;
     out.slot = shader_of(tex_id);
     out.pos = vec3<f32>(o.xyz * 16) + local;
@@ -201,8 +211,14 @@ fn vs_quad(@builtin(vertex_index) vi: u32, @builtin(instance_index) ii: u32) -> 
         tint = tint_color(tint_kind, w4 >> FACE_BIOME_SHIFT, o.x * 16 + i32(round(local.x)), o.z * 16 + i32(round(local.z)));
     }
     out.tint = tint;
-    out.color = tint * shade;
-    out.overlay = 0u;
+    let ov = frames[g.extra.x + tex_id];
+    if ov != 0u {
+        out.overlay = texture_frame(ov - 1u).a + 1u;
+        out.color = vec3(shade);
+    } else {
+        out.overlay = 0u;
+        out.color = tint * shade;
+    }
     return out;
 }
 

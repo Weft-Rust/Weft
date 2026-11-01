@@ -6,7 +6,7 @@ members = ["crates/*", "backends/*", "mods/*", "mods/base/api"]
 version = "26.10.4"
 edition = "2024"
 license = "MPL-2.0"
-rust-version = "1.90"
+rust-version = "1.95"
 
 [workspace.dependencies]
 weft_abi = { path = "crates/abi" }

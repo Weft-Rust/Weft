@@ -134,6 +134,7 @@ pub static HOST: Host = Host {
     client_text: crate::app::api::client_text,
     client_command_reply: crate::app::api::client_command_reply,
     client_block: crate::app::api::client_block,
+    client_structure_block: crate::app::api::client_structure_block,
     client_cube_shown: crate::app::api::client_cube_shown,
     client_light: crate::app::api::client_light,
     client_slot: crate::app::api::client_slot,
@@ -185,6 +186,7 @@ pub static HOST: Host = Host {
     reg_particle,
     reg_sky,
     particles,
+    signal_at,
     client_particles: crate::app::api::client_particles,
     reg_config,
     config_value,
@@ -221,6 +223,10 @@ pub static HOST: Host = Host {
     set_entity_look,
     structure_block,
     set_structure_block,
+    lift_blocks,
+    put_down_body,
+    body_go,
+    signal_read_changed,
     reg_terrain,
     reg_screen_part,
     dim_column,
@@ -297,7 +303,7 @@ unsafe extern "C" fn navigate(w: *mut abi::WorldCtx, id: u64, target: *const [f6
     unsafe {
         let c = content();
         let d = dim(w);
-        let target = DVec3::from_array(*target);
+        let target = d.place.to_world(DVec3::from_array(*target));
         let mul = d.attribute(c, id, crate::server::MOVEMENT_SPEED, false) as f32;
         let jump_mul = d.attribute(c, id, crate::server::JUMP_STRENGTH, false) as f32;
         if let Some(e) = d.entities.get_mut(id) {
@@ -314,7 +320,7 @@ unsafe extern "C" fn navigating(w: *mut abi::WorldCtx, id: u64) -> u32 {
 unsafe extern "C" fn biome_at(w: *mut abi::WorldCtx, pos: *const [i32; 3]) -> u32 {
     unsafe {
         let p = ip(pos);
-        dim(w).cubes.get(&crate::world::cube_of(p)).map_or(0, |c| c.biome((p.x & 15) as usize, (p.z & 15) as usize) as u32)
+        dim(w).space.cubes.get(&crate::world::cube_of(p)).map_or(0, |c| c.biome((p.x & 15) as usize, (p.z & 15) as usize) as u32)
     }
 }
 
@@ -487,8 +493,9 @@ unsafe extern "C" fn set_block(w: *mut abi::WorldCtx, pos: *const [i32; 3], stat
 unsafe extern "C" fn structure_block(w: *mut abi::WorldCtx, entity: u64, pos: *const [i32; 3]) -> u32 {
     unsafe {
         let d = dim(w);
-        match d.structures.get(&entity) {
+        match d.bodies.get(&entity) {
             Some(s) if entity != 0 => s.get(ip(pos)).unwrap_or(crate::content::AIR),
+            _ if entity != 0 && entity == d.frame => d.get(ip(pos)).unwrap_or(crate::content::AIR),
             _ => u32::MAX,
         }
     }
@@ -499,6 +506,31 @@ unsafe extern "C" fn set_structure_block(w: *mut abi::WorldCtx, entity: u64, pos
         return 0;
     }
     unsafe { dim(w).with_space(content(), entity, |d, _| d.set(content(), ip(pos), state).is_some()).unwrap_or(false) as u32 }
+}
+
+unsafe extern "C" fn lift_blocks(w: *mut abi::WorldCtx, center: *const [i32; 3], cells: *const [i32; 3], count: usize) -> u64 {
+    unsafe {
+        let cells: Vec<IVec3> = std::slice::from_raw_parts(cells, count).iter().map(|p| IVec3::from_array(*p)).collect();
+        dim(w).lift_for_mod(content(), ip(center), &cells)
+    }
+}
+
+unsafe extern "C" fn put_down_body(w: *mut abi::WorldCtx, entity: u64) {
+    unsafe { dim(w).ask_put_down(entity) }
+}
+
+unsafe extern "C" fn body_go(w: *mut abi::WorldCtx, entity: u64, pos: *const [f64; 3], ticks: u32) {
+    unsafe {
+        let d = dim(w);
+        let to = d.place.to_world(DVec3::from_array(*pos));
+        if let Some(e) = d.entities.get_mut(entity).filter(|e| e.motion != crate::server::entity::Motion::Parked) {
+            e.motion = crate::server::entity::Motion::To { to, left: ticks.clamp(1, u16::MAX as u32) as u16 };
+        }
+    }
+}
+
+unsafe extern "C" fn signal_read_changed(w: *mut abi::WorldCtx, pos: *const [i32; 3]) {
+    unsafe { dim(w).space.signals.read_changed(content(), ip(pos)) }
 }
 
 unsafe extern "C" fn schedule_tick(w: *mut abi::WorldCtx, pos: *const [i32; 3], delay: u32) {
@@ -551,6 +583,7 @@ unsafe extern "C" fn entity_get(w: *mut abi::WorldCtx, id: u64, out: *mut abi::E
         match d.entities.get(id) {
             Some(e) => {
                 *out = e.state(c, d.max_health(c, id));
+                (*out).pos = d.place.to_local(e.pos).to_array();
                 1
             }
             None => 0,
@@ -561,10 +594,11 @@ unsafe extern "C" fn entity_get(w: *mut abi::WorldCtx, id: u64, out: *mut abi::E
 unsafe extern "C" fn entity_set(w: *mut abi::WorldCtx, id: u64, s: *const abi::EntityState) {
     unsafe {
         let s = &*s;
+        let place = dim(w).place;
         if let Some(e) = dim(w).entities.get_mut(id) {
             let pos = DVec3::from_array(s.pos);
             if pos.is_finite() {
-                e.pos = pos;
+                e.pos = place.to_world(pos);
             }
             let vel = DVec3::from_array(s.vel);
             if vel.is_finite() {
@@ -628,7 +662,7 @@ unsafe extern "C" fn entity_attack(w: *mut abi::WorldCtx, attacker: u64, target:
 
 unsafe extern "C" fn entities_near_bodies(w: *mut abi::WorldCtx, pos: *const [f64; 3], radius: f64, out: *mut u64, max: usize) -> usize {
     unsafe {
-        let ids = dim(w).entities.near_bodies(content(), DVec3::from_array(*pos), radius);
+        let ids = dim(w).entities.near_bodies(content(), dim(w).place.to_world(DVec3::from_array(*pos)), radius);
         for (i, id) in ids.iter().take(max).enumerate() {
             *out.add(i) = *id;
         }
@@ -652,7 +686,7 @@ unsafe extern "C" fn entity_swing_strength(w: *mut abi::WorldCtx, id: u64) -> f3
 
 unsafe extern "C" fn entities_near(w: *mut abi::WorldCtx, pos: *const [f64; 3], radius: f64, kind: u32, out: *mut u64, max: usize) -> usize {
     unsafe {
-        let ids = dim(w).entities.near(DVec3::from_array(*pos), radius, kind);
+        let ids = dim(w).entities.near(dim(w).place.to_world(DVec3::from_array(*pos)), radius, kind);
         for (i, id) in ids.iter().take(max).enumerate() {
             *out.add(i) = *id;
         }
@@ -718,7 +752,7 @@ unsafe extern "C" fn spawn_item(w: *mut abi::WorldCtx, pos: *const [f64; 3], sta
 }
 
 unsafe extern "C" fn block_entity(w: *mut abi::WorldCtx, pos: *const [i32; 3]) -> u64 {
-    unsafe { dim(w).entities.anchors.get(&ip(pos)).copied().unwrap_or(0) }
+    unsafe { dim(w).anchored(ip(pos)).unwrap_or(0) }
 }
 
 unsafe extern "C" fn open_menu(w: *mut abi::WorldCtx, player: u64, menu: u32, owner: u64) {
@@ -743,7 +777,7 @@ unsafe extern "C" fn open_menu_at(w: *mut abi::WorldCtx, player: u64, menu: u32,
         let p = ip(pos);
         let c = content();
         let name = c.game.menus.get(menu as usize).map_or("?", |m| m.name.as_str());
-        match d.entities.anchors.get(&p).copied() {
+        match d.anchored(p) {
             Some(owner) => {
                 open_menu(w, player, menu, owner);
                 1
@@ -763,7 +797,7 @@ unsafe extern "C" fn inventory_create(w: *mut abi::WorldCtx, slots: u32, pos: *c
         let c = content();
         let id = d.new_id();
         let p = DVec3::from_array(*pos);
-        let e = crate::server::entity::Entity::new(id, c.game.virtual_kind, if p.is_finite() { p } else { DVec3::ZERO }, 1.0);
+        let e = crate::server::entity::Entity::new(id, c.game.virtual_kind, if p.is_finite() { d.place.to_world(p) } else { DVec3::ZERO }, 1.0);
         d.entities.insert(c, e);
         d.entities.inventories.insert(id, vec![ItemStack::EMPTY; slots.min(1 << 16) as usize]);
         id
@@ -787,7 +821,7 @@ unsafe extern "C" fn skip_ticks(w: *mut abi::WorldCtx, ticks: u64) {
 unsafe extern "C" fn entity_teleport(w: *mut abi::WorldCtx, id: u64, to: u32, pos: *const [f64; 3]) {
     unsafe {
         let d = dim(w);
-        d.events.push(crate::server::DimEvent::Teleport { from: d.id, id, dim: to, pos: DVec3::from_array(*pos) })
+        d.events.push(crate::server::DimEvent::Teleport { from: d.id, id, dim: to, pos: d.place.to_world(DVec3::from_array(*pos)) })
     }
 }
 
@@ -802,7 +836,7 @@ unsafe extern "C" fn area_fill(w: *mut abi::WorldCtx, desc: *const abi::AreaFill
     unsafe {
         let d = dim(w);
         let a = &*desc;
-        if d.framed || !a.radius.is_finite() || a.radius <= 0.0 || a.state as usize >= crate::content::content().states.len() {
+        if d.frame != 0 || !a.radius.is_finite() || a.radius <= 0.0 || a.state as usize >= crate::content::content().states.len() {
             return;
         }
         let fill = crate::server::area::AreaFill { id: 0, center: DVec3::from_array(a.center), radius: a.radius, state: a.state, keep_unbreakable: a.flags & abi::area_flags::KEEP_UNBREAKABLE != 0, keep_liquids: a.flags & abi::area_flags::KEEP_LIQUIDS != 0 };
@@ -893,11 +927,12 @@ unsafe extern "C" fn gizmo(w: *mut abi::WorldCtx, group: Str, kind: u32, a: *con
         if kind > abi::gizmo_kind::FILL || !d.gizmo_groups.iter().any(|g| g == group) {
             return;
         }
+        let place = d.place;
         d.gizmos.push(crate::net::GizmoShape {
             group: group.to_string(),
             kind: kind as u8,
-            a: DVec3::from_array(*a),
-            b: DVec3::from_array(*b),
+            a: place.to_world(DVec3::from_array(*a)),
+            b: place.to_world(DVec3::from_array(*b)),
             color,
             ticks: ticks.max(1),
             text: crate::ui::text::Msg::new(key.as_str(), crate::client::modui::args(args)),
@@ -1835,13 +1870,21 @@ unsafe extern "C" fn reg_sky(r: *mut abi::Registrar, d: *const abi::SkyDesc) {
 
 unsafe extern "C" fn particles(w: *mut abi::WorldCtx, b: *const abi::ParticleBurst) {
     unsafe {
-        let b = *b;
+        let mut b = *b;
         if (b.kind as usize) < content().game.particles.len() {
             let d = dim(w);
+            b.pos = d.place.to_world(DVec3::from_array(b.pos)).to_array();
             d.events.push(crate::server::DimEvent::Particles { dim: d.id, burst: b });
         } else {
             misuse("particles", || format!("no particle {}", b.kind));
         }
+    }
+}
+
+unsafe extern "C" fn signal_at(w: *mut abi::WorldCtx, pos: *const [i32; 3]) -> u32 {
+    unsafe {
+        let d = dim(w);
+        d.space.signals.power_at(content(), d.signal_view(), IVec3::from_array(*pos)) as u32
     }
 }
 

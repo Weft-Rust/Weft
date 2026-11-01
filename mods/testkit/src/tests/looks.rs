@@ -289,6 +289,7 @@ pub async fn block_model_file(t: T) -> R {
     let f = t.feet();
     let p = add(f, [0, 2, -3]);
     t.set(p, "testmod:pedestal").await?;
+    t.op("put me 0 testmod:pedestal 1").await?;
     t.c().look(0.0, 15.0);
     t.settled().await?;
     let shot = t.shot("pedestal").await?;
@@ -312,6 +313,10 @@ pub async fn block_model_file(t: T) -> R {
     t.frames(2).await?;
     let filled = t.on_screen([p[0] as f64 + 0.18, p[1] as f64 + 0.35, p[2] as f64 + 0.5]).map(|(sx, sy)| crate::runner::lum(cube.avg(sx - 0.003, sy - 0.003, sx + 0.003, sy + 0.003))).unwrap_or(255.0);
     t.probe("a pack's model draws a cube there", filled, filled < 150.0);
+    // Its item with it: in the hotbar's first slot the cube covers more than the pedestal did.
+    let covered = |s: &crate::runner::Shot| s.share(0.392, 0.955, 0.408, 0.99, |c| c[0].abs_diff(c[1]) > 12 || c[1].abs_diff(c[2]) > 12 || c[0] < 90);
+    let (before, after) = (covered(&shot), covered(&cube));
+    t.probe("the item takes the pack's model, how much more of its slot is covered", after - before, after > before + 0.02);
     Ok(())
 }
 
@@ -636,6 +641,119 @@ pub async fn ctm_off_the_cube(t: T) -> R {
     t.check(p[0] > 0.01 && p[1] > 0.01, format!("plants of both tiles: {p:?}"));
     t.check(b[0] > 0.01 && b[1] > 0.01, format!("boxes of both tiles: {b:?}"));
     Ok(())
+}
+
+/// Any method on any block, here plants and box models connecting up and down, and a tile that
+/// is a model file with its picture an unwrap, on a plain cube.
+pub async fn ctm_any_model(t: T) -> R {
+    t.flat().await?;
+    let f = t.feet();
+    t.fill(add(f, [-9, 0, -7]), add(f, [9, 6, -7]), "snow").await?;
+    t.fill(add(f, [-9, 0, 7]), add(f, [9, 6, 7]), "snow").await?;
+    for (x, block) in [(-4, "testkit:varied_plant"), (1, "testkit:varied_box")] {
+        for y in 0..3 {
+            t.set(add(f, [x, y, -5]), block).await?;
+        }
+        t.set(add(f, [x + 2, 0, -5]), block).await?;
+    }
+    // A pack's model of a tinted block, its own textures on it: only what the block tints is.
+    let grass = add(f, [-1, 0, -5]);
+    t.set(grass, "base:grass").await?;
+    let row: Vec<i32> = (-5..=5).collect();
+    for &x in &row {
+        t.set(add(f, [x, 0, 4]), "testkit:varied_cube").await?;
+    }
+    let pack = format!("{}/resourcepacks/testkit_ctm", t.c().run_dir());
+    let write = |file: &str, text: &str| -> R {
+        let path = format!("{pack}/testkit/{file}");
+        std::fs::create_dir_all(std::path::Path::new(&path).parent().unwrap()).map_err(|e| e.to_string())?;
+        std::fs::write(&path, text).map_err(|e| e.to_string())
+    };
+    let whole = |f: &str| format!(r#"{{"elements":[{{"from":[0,0,0],"to":[16,16,16],"faces":{{{f}}}}}]}}"#);
+    let base_model = format!("{pack}/base/models/block/grass.json");
+    std::fs::create_dir_all(std::path::Path::new(&base_model).parent().unwrap()).map_err(|e| e.to_string())?;
+    std::fs::write(&base_model, whole(r#""north":{},"south":{},"east":{},"west":{},"up":{},"down":{}"#)).map_err(|e| e.to_string())?;
+    write("textures/block/varied.ctm", "method = vertical\ntiles = colors/red colors/green colors/blue colors/yellow\n")?;
+    write("textures/block/varied_cube.ctm", "method = random\ntiles = shapes/thin <default>\nhides_neighbors = false\n")?;
+    let face = r##"{"texture":"#unwrap","uv":[0.25,0.25,1.25,1.25]}"##;
+    write(
+        "models/block/shapes/thin.json",
+        &format!(r##"{{"textures":{{"unwrap":"block/unwrap"}},"elements":[{{"from":[6,0,6],"to":[10,16,10],"faces":{{"north":{face},"south":{face},"east":{face},"west":{face},"up":{face},"down":{face}}}}}]}}"##),
+    )?;
+    weft_sdk::settings::RESOURCE_PACKS.set("testkit_ctm");
+    t.c().reload_assets();
+    t.frames(5).await?;
+    let out = async {
+        t.look_at(add(f, [0, 1, -5]));
+        t.settled().await?;
+        let s = t.shot("connected").await?;
+        let at = |s: &crate::runner::Shot, p: [f64; 3], test: fn(probe::C) -> bool| t.on_screen(p).map_or(0.0, |(x, y)| s.share(x - 0.004, y - 0.004, x + 0.004, y + 0.004, test));
+        let red: fn(probe::C) -> bool = |c| c[0] > 120 && c[1] < 70 && c[2] < 70;
+        let green: fn(probe::C) -> bool = |c| c[1] > 120 && c[0] < 70 && c[2] < 70;
+        let blue: fn(probe::C) -> bool = |c| c[2] > 120 && c[0] < 70 && c[1] < 90;
+        let yellow: fn(probe::C) -> bool = |c| c[0] > 120 && c[1] > 110 && c[2] < 70;
+        for (x, depth, what) in [(-4, 0.5, "plant"), (1, 0.13, "box model")] {
+            let o = |x: i32, y: i32| [(f[0] + x) as f64 + 0.5, (f[1] + y) as f64 + 0.5, (f[2] - 5) as f64 + 1.0 - depth];
+            t.check(at(&s, o(x, 0), red) > 0.5, format!("{what}: red at the bottom"));
+            t.check(at(&s, o(x, 1), green) > 0.5, format!("{what}: green in the middle"));
+            t.check(at(&s, o(x, 2), blue) > 0.5, format!("{what}: blue on top"));
+            t.check(at(&s, o(x + 2, 0), yellow) > 0.5, format!("{what}: yellow alone"));
+        }
+
+        let side = |h: f64| [grass[0] as f64 + 0.5, grass[1] as f64 + h, grass[2] as f64 + 1.0];
+        let brown: fn(probe::C) -> bool = |c| c[0] > c[1] && c[1] > c[2];
+        let greenish: fn(probe::C) -> bool = |c| c[1] > c[0] && c[1] > c[2];
+        t.check(at(&s, side(0.3), brown) > 0.5, "a model's dirt side isn't tinted");
+        t.check(at(&s, side(0.97), greenish) > 0.3, "and it has its tinted overlay");
+
+        t.look_at(add(f, [0, 0, 4]));
+        t.settled().await?;
+        let s = t.shot("models").await?;
+        let (mut thin, mut plain, mut stray, mut ground, mut dark) = (0, 0, 0, 0, 0);
+        let orange: fn(probe::C) -> bool = |c| c[0] > 120 && c[1] > 50 && c[1] < 130 && c[2] < 60;
+        let grass: fn(probe::C) -> bool = |c| c[1] > c[0] && c[1] > c[2] && c[1] > 40;
+        for &x in &row {
+            let middle = [(f[0] + x) as f64 + 0.5, f[1] as f64 + 0.5, (f[2] + 4) as f64 + 0.375];
+            if at(&s, middle, blue) > 0.5 {
+                thin += 1;
+                // All of a face is the island, right up to its corners (further out a cube may
+                // stand in front of it).
+                for (a, b) in [(0.41, 0.08), (0.59, 0.08), (0.41, 0.92), (0.59, 0.92)].into_iter().filter(|_| x.abs() <= 3) {
+                    if at(&s, [(f[0] + x) as f64 + a, f[1] as f64 + b, (f[2] + 4) as f64 + 0.375], blue) < 0.5 {
+                        stray += 1;
+                    }
+                }
+                // A side is lit, though the block's own cell and maybe the next one have no light.
+                if x != 0 {
+                    let side = if x < 0 { 0.625 } else { 0.375 };
+                    if t.on_screen([(f[0] + x) as f64 + side, f[1] as f64 + 0.5, (f[2] + 4) as f64 + 0.5]).is_some_and(|(sx, sy)| crate::runner::lum(s.avg(sx - 0.002, sy - 0.004, sx + 0.002, sy + 0.004)) < 25.0) {
+                        dark += 1;
+                    }
+                }
+                // Beside the column, the floor its cube no longer hides.
+                let side = if x <= 0 { 0.12 } else { 0.88 };
+                if at(&s, [(f[0] + x) as f64 + side, f[1] as f64 + 0.01, (f[2] + 4) as f64 + 0.5], grass) > 0.5 {
+                    ground += 1;
+                }
+            } else if at(&s, middle, orange) > 0.5 {
+                plain += 1;
+            } else if at(&s, middle, red) > 0.1 {
+                stray += 1;
+            }
+        }
+        t.note(format!("thin {thin}, plain {plain}, off the island {stray}, floor seen by {ground}, dark sides {dark}"));
+        t.check(dark == 0, format!("a model's sides are lit: {dark} are dark"));
+        t.check(thin > 0 && plain > 0, format!("the rule picks the model and the plain cube: {thin} and {plain}"));
+        t.check(stray == 0, format!("the model's texels are the island on its unwrap: {stray} show around it"));
+        t.check(ground > 0, format!("hides_neighbors = false: the floor shows beside a model: {ground} of {thin}"));
+        Ok(())
+    }
+    .await;
+    weft_sdk::settings::RESOURCE_PACKS.set("");
+    let _ = std::fs::remove_dir_all(&pack);
+    t.c().reload_assets();
+    t.frames(2).await?;
+    out
 }
 
 /// From high above, where the view's cubes don't reach the ground, it is land all the way under

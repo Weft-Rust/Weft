@@ -79,7 +79,7 @@ impl Server {
                     let solid = c.game.entities[e.kind as usize].is(abi::entity_flags::SOLID);
                     if solid || e.sent.is_none_or(|s| (s.0 - now.0).length_squared() > 1e-6 || (s.1 - now.1).abs() > 0.01 || (s.2 - now.2).abs() > 0.01 || s.3 != now.3) {
                         if e.sent.is_some() {
-                            m.push((e.id, e.pos, e.yaw, e.pitch, e.pose, e.support.unwrap_or(0)));
+                            m.push((e.id, e.pos, e.yaw, e.pitch, e.pose, e.frame.unwrap_or(0)));
                         }
                         e.sent = Some(now);
                     }
@@ -96,13 +96,16 @@ impl Server {
             d.day_moved = false;
             d.weather_moved = false;
             for r in &mut d.regions {
-                for st in r.structures.values_mut() {
+                for st in r.bodies.values_mut() {
                     st.resend.clear();
                     st.changes.clear();
+                    st.signals.level_changes.clear();
                     st.edited.clear();
+                    st.world_light_changed = false;
                 }
-                r.resend.clear();
-                r.changes.clear();
+                r.space.resend.clear();
+                r.space.changes.clear();
+                r.space.signals.level_changes.clear();
                 r.entities.killed.clear();
                 r.entities.taken.clear();
                 r.entities.pushed.clear();
@@ -116,7 +119,7 @@ impl Server {
                     .filter(|e| e.anchor.is_some() && r.entities.dirty_inv.contains(&e.id))
                     .map(|e| cube_of(e.pos.floor().as_ivec3()))
                     .collect();
-                r.modified.extend(anchored);
+                r.space.modified.extend(anchored);
                 r.entities.dirty_inv.clear();
             }
         }
@@ -125,15 +128,21 @@ impl Server {
 
 fn send_block_changes(p: &mut Player, dim: &DimSet) {
     for reg in &dim.regions {
-        for (pos, cube) in &reg.resend {
+        for (pos, cube) in &reg.space.resend {
             if p.sent.contains(pos) {
-                p.conn.send(ToClient::Cube { dim: p.dim, pos: *pos, cube: cube.clone(), edit: true });
+                p.conn.send(ToClient::Cube { dim: p.dim, frame: 0, pos: *pos, cube: cube.clone(), edit: true });
             }
         }
-        if !reg.changes.is_empty() {
-            let changes: Vec<(IVec3, u32)> = reg.changes.iter().filter(|(b, _)| p.sent.contains(&(*b >> 4))).copied().collect();
+        if !reg.space.changes.is_empty() {
+            let changes: Vec<(IVec3, u32)> = reg.space.changes.iter().filter(|(b, _)| p.sent.contains(&(*b >> 4))).copied().collect();
             if !changes.is_empty() {
-                p.conn.send(ToClient::Blocks { dim: p.dim, changes });
+                p.conn.send(ToClient::Blocks { dim: p.dim, frame: 0, changes });
+            }
+        }
+        if !reg.space.signals.level_changes.is_empty() {
+            let changes: Vec<(IVec3, u8, u8)> = reg.space.signals.level_changes.iter().filter(|(b, ..)| p.sent.contains(&(*b >> 4))).copied().collect();
+            if !changes.is_empty() {
+                p.conn.send(ToClient::Signals { dim: p.dim, frame: 0, changes });
             }
         }
     }
@@ -205,21 +214,37 @@ fn send_entities(c: &'static Content, p: &mut Player, dim: &DimSet, moved: &[cra
             }
         }
     }
-    // Structures: all their cubes with the entity, then the cubes that change.
-    let mut structures = Vec::new();
+    // Bodies: all their cubes with the entity, then what changes.
+    let mut bodies = Vec::new();
     for reg in &dim.regions {
-        for (&id, st) in &reg.structures {
+        for (&id, st) in &reg.bodies {
             if spawn.iter().any(|v| v.id == id) {
-                structures.push(ToClient::Structure { id, cubes: st.cubes.iter().map(|(p, c)| (*p, c.clone())).collect(), full: true });
-            } else if !st.resend.is_empty() && p.known.contains(&id) && visible.contains(&id) {
-                structures.push(ToClient::Structure { id, cubes: st.resend.clone(), full: false });
+                bodies.push(ToClient::BodyLight { frame: id, lights: st.world_light.iter().map(|(p, l)| (*p, *l)).collect() });
+                for (pos, cube) in &st.cubes {
+                    bodies.push(ToClient::Cube { dim: p.dim, frame: id, pos: *pos, cube: cube.clone(), edit: false });
+                    let changes = st.signals.levels_in(c, *pos, cube);
+                    if !changes.is_empty() {
+                        bodies.push(ToClient::Signals { dim: p.dim, frame: id, changes });
+                    }
+                }
+            } else if p.known.contains(&id) && visible.contains(&id) {
+                bodies.extend(st.resend.iter().map(|(pos, cube)| ToClient::Cube { dim: p.dim, frame: id, pos: *pos, cube: cube.clone(), edit: true }));
+                if st.world_light_changed {
+                    bodies.push(ToClient::BodyLight { frame: id, lights: st.world_light.iter().map(|(p, l)| (*p, *l)).collect() });
+                }
+                if !st.changes.is_empty() {
+                    bodies.push(ToClient::Blocks { dim: p.dim, frame: id, changes: st.changes.clone() });
+                }
+                if !st.signals.level_changes.is_empty() {
+                    bodies.push(ToClient::Signals { dim: p.dim, frame: id, changes: st.signals.level_changes.clone() });
+                }
             }
         }
     }
     if !spawn.is_empty() {
         p.conn.send(ToClient::Spawn(spawn));
     }
-    for m in structures {
+    for m in bodies {
         p.conn.send(m);
     }
     if !shared.is_empty() {
@@ -337,7 +362,8 @@ fn send_cubes(p: &mut Player, dim: &DimSet, def: &crate::content::DimensionDef, 
     let unsent = to_send.len().saturating_sub(SEND_PER_TICK) as u64;
     for &(_, pos) in to_send.iter().take(SEND_PER_TICK) {
         if let Some(cube) = dim.snapshot(pos) {
-            p.conn.send(ToClient::Cube { dim: p.dim, pos, cube, edit: false });
+            p.conn.send(ToClient::Cube { frame: 0, dim: p.dim, pos, cube, edit: false });
+            p.send_levels(dim, pos);
             p.sent.insert(pos);
             p.unsent.remove(&pos);
         }
@@ -374,7 +400,7 @@ pub(super) fn gizmos_for(p: &Player, dim: &DimSet, tick: u64, me: DVec3) -> Vec<
     if on("regions") {
         const COLORS: [u32; 6] = [0xFF4040FF, 0x40FF40FF, 0x4080FFFF, 0xFFFF40FF, 0xFF40FFFF, 0x40FFFFFF];
         for (i, r) in dim.regions.iter().enumerate() {
-            let (Some(lo), Some(hi)) = (r.cubes.keys().copied().reduce(IVec3::min), r.cubes.keys().copied().reduce(IVec3::max)) else { continue };
+            let (Some(lo), Some(hi)) = (r.space.cubes.keys().copied().reduce(IVec3::min), r.space.cubes.keys().copied().reduce(IVec3::max)) else { continue };
             let (a, b) = ((lo * 16).as_dvec3() + 0.05, ((hi + 1) * 16).as_dvec3() - 0.05);
             out.push(shape("regions", 1, a, b, COLORS[i % COLORS.len()]));
         }
@@ -394,4 +420,16 @@ pub(super) fn gizmos_for(p: &Player, dim: &DimSet, tick: u64, me: DVec3) -> Vec<
         }
     }
     out
+}
+
+impl Player {
+    /// What has power in a cube this player just got.
+    pub(super) fn send_levels(&mut self, dim: &DimSet, pos: IVec3) {
+        if let Some(r) = dim.regions.iter().find(|r| r.space.cubes.contains_key(&pos)) {
+            let changes = r.space.signals.levels_in(crate::content::content(), pos, r.space.cubes[&pos].as_ref());
+            if !changes.is_empty() {
+                self.conn.send(ToClient::Signals { dim: self.dim, frame: 0, changes });
+            }
+        }
+    }
 }

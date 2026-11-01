@@ -87,7 +87,7 @@ impl Dim {
             log::error!("event {}: value of {} bytes, others had {size}", def.name, bytes.len());
             return;
         }
-        self.event_queue.entry(event).or_default().extend_from_slice(bytes);
+        self.space.event_queue.entry(event).or_default().extend_from_slice(bytes);
     }
 
     /// Engine events by name, with their `abi` struct as the value.
@@ -101,10 +101,10 @@ impl Dim {
     /// Hands every queued value to the handlers: one call per event and handler with the batch.
     pub fn deliver_events(&mut self, c: &'static Content) {
         for _ in 0..MAX_ROUNDS {
-            if self.event_queue.is_empty() {
+            if self.space.event_queue.is_empty() {
                 return;
             }
-            let queue = std::mem::take(&mut self.event_queue);
+            let queue = std::mem::take(&mut self.space.event_queue);
             for (event, bytes) in queue {
                 let def = &c.game.events[event as usize];
                 let stride = def.size.load(Ordering::Relaxed).max(1);
@@ -115,9 +115,9 @@ impl Dim {
                 }
             }
         }
-        if !self.event_queue.is_empty() {
+        if !self.space.event_queue.is_empty() {
             log::warn!("events still queued after {MAX_ROUNDS} rounds in dimension {}; dropping them", self.id);
-            self.event_queue.clear();
+            self.space.event_queue.clear();
         }
     }
 

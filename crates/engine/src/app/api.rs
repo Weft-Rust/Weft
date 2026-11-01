@@ -367,13 +367,16 @@ pub unsafe extern "C" fn client_command(c: *mut abi::ClientCtx, op: u32, text: S
             op_::OPEN_WORLD | op_::NEW_WORLD => {
                 r.leave_world_silent();
                 let dir = r.settings.saves_dir();
-                let existing = crate::saves::list(&dir).into_iter().find(|w| w.name == text);
-                let meta = match existing {
-                    Some(w) if op == op_::NEW_WORLD => {
-                        let _ = std::fs::remove_dir_all(&w.dir);
+                let mut named: Vec<_> = crate::saves::list(&dir).into_iter().filter(|w| w.name == text).collect();
+                named.sort_by_key(|w| !crate::saves::in_own_folder(w));
+                let meta = match named.into_iter().next() {
+                    Some(w) if op == op_::OPEN_WORLD => w,
+                    Some(w) => {
+                        if crate::saves::in_own_folder(&w) {
+                            let _ = std::fs::remove_dir_all(&w.dir);
+                        }
                         crate::saves::create(&dir, &text, num as u64)
                     }
-                    Some(w) => w,
                     None => crate::saves::create(&dir, &text, num as u64),
                 };
                 r.start_world(meta);
@@ -450,6 +453,10 @@ pub unsafe extern "C" fn client_text(c: *mut abi::ClientCtx, which: u32, index: 
 
 pub unsafe extern "C" fn client_block(c: *mut abi::ClientCtx, pos: *const [i32; 3]) -> u32 {
     unsafe { client(c).map_or(u32::MAX, |cl| cl.world.block(IVec3::from_array(*pos))) }
+}
+
+pub unsafe extern "C" fn client_structure_block(c: *mut abi::ClientCtx, entity: u64, pos: *const [i32; 3]) -> u32 {
+    unsafe { client(c).and_then(|cl| cl.entities.get(&entity)).and_then(|e| e.structure.as_ref()).map_or(u32::MAX, |s| s.block(IVec3::from_array(*pos))) }
 }
 
 pub unsafe extern "C" fn client_cube_shown(c: *mut abi::ClientCtx, pos: *const [i32; 3]) -> u32 {

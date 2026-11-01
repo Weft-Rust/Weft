@@ -280,11 +280,15 @@ impl Dim {
         let (sy, cy) = (e.yaw as f64).sin_cos();
         let (sp, cp) = (e.pitch as f64).sin_cos();
         let dir = DVec3::new(-sy * cp, sp, -cy * cp);
-        let structures: Vec<(u64, DVec3, &dyn crate::physics::Blocks)> = self
-            .structures
+        let structures: Vec<(u64, crate::physics::Transform, &dyn crate::physics::Blocks)> = self
+            .bodies
             .iter()
-            .filter_map(|(&sid, s)| self.entities.get(sid).map(|b| (sid, super::structure::origin(b.pos), &**s as &dyn crate::physics::Blocks)))
+            .filter_map(|(&sid, s)| self.entities.get(sid).map(|b| (sid, crate::physics::Transform::of(b.pos), &**s as &dyn crate::physics::Blocks)))
             .collect();
+        // Asked from a body's blocks, it looks along those.
+        if self.frame != 0 {
+            return crate::physics::pick(c, &|p| self.get(p), &[], self.place.to_local(eye), dir, max, liquids);
+        }
         crate::physics::pick(c, &|p| self.get(p), &structures, eye, dir, max, liquids)
     }
 }

@@ -11,6 +11,7 @@
 //!                        # block they are), block (same block), state (same block state)
 //! faces = sides          # all, top, bottom, sides, north, south, east, west
 //! inner_seams = true     # covered neighbors do not connect
+//! hides_neighbors = false  # the block no longer hides the faces next to it
 //! weights = 8 1 1        # random
 //! symmetry = opposite    # random: none, opposite (pairs opposite faces), all
 //! width = 2              # repeat
@@ -25,16 +26,22 @@
 //! Resolving is a texture id swap at mesh time, so records and shaders are unchanged. Compact sets
 //! are expanded to all 47 tiles when the block textures are listed.
 //!
-//! Plants and box models take `random` and `fixed` only (a plant counts as face 0, a side): the
-//! rest goes by neighbors in a face's plane, which they don't have. Such a rule stops the game.
+//! Every method works on every block: what a method looks at are the neighbors in the plane of a
+//! face, whatever is drawn there (a plant counts as face 0, a side). Only compact doesn't go with
+//! custom models, its tiles being cut for a cube's face. Such a rule stops the game.
+//!
+//! A tile with a model file of its name (`models/block/...`) is that model: the method picks it
+//! for the whole block, and its faces then resolve as any others. `hides_neighbors = false` says
+//! a block this applies to has holes, so what is next to it is drawn.
 
 use std::sync::{Arc, RwLock};
 
-use rustc_hash::FxHashMap;
+use rustc_hash::{FxHashMap, FxHashSet};
 
+use super::looks::{Drawn, Looks, Names};
 use super::mesher::{Neighborhood, pidx};
 use crate::assets::Assets;
-use crate::content::Content;
+use crate::content::{Content, ModelBox};
 
 #[derive(Clone, Copy, PartialEq, Debug)]
 enum Method {
@@ -65,8 +72,12 @@ struct Rule {
     inner_seams: bool,
     blocks: Vec<u32>,
     heights: Vec<(i32, i32)>,
-    biomes: Option<(bool, [u64; 4])>,
+    biomes: Option<(bool, Vec<u64>)>,
     tiles: Vec<u32>,
+    /// Per tile the model it is in `Ctm::models`, or `NO_MODEL`. Empty: only textures.
+    models: Vec<u32>,
+    /// `hides_neighbors = false`.
+    open: bool,
     /// Random: tile index for the top byte of the position hash.
     pick: Vec<u8>,
     /// Random: face groups sharing a hash (1 none, 2 opposite, 6 all).
@@ -82,7 +93,19 @@ pub struct Ctm {
     /// Per texture id: its `<name>_overlay` texture id + 1, or 0. The overlay is drawn over the
     /// face and takes the block's tint instead of the face (vanilla's grass sides).
     pub overlay: Vec<u32>,
+    /// What tiles draw that are models.
+    models: Vec<Vec<ModelBox>>,
+    /// Per state, if its faces aren't simply its `textures`: what they show. Neighbors connect
+    /// by what shows.
+    shown: Vec<Option<Box<[Vec<u32>; 6]>>>,
+    /// Per state: the face and texture whose rules may pick it a model, or `NO_MODEL` as the
+    /// texture. Empty if no rule has models.
+    model_from: Vec<(u8, u32)>,
+    /// Per state: drawn with holes, so it hides nothing. Empty if no rule says so.
+    open: Vec<bool>,
 }
+
+const NO_MODEL: u32 = u32::MAX;
 
 /// Textures needed on top of the content's block textures.
 #[derive(Default)]
@@ -189,32 +212,46 @@ fn tile_names(v: &str, texture: &str) -> Vec<Option<String>> {
     out
 }
 
-/// Reads the `.ctm` files of all block textures. Tile textures get ids after the content's.
-/// Whether a block of this model shows `tex` other than on a cube's face, on a face in `faces`.
-fn off_cube<'a>(model: weft_abi::Model, textures: &[u32; 6], mut boxes: impl Iterator<Item = &'a [u32; 6]>, tex: u32, faces: u8) -> bool {
-    match model {
-        weft_abi::Model::Cross => faces & 1 != 0 && textures[0] == tex,
-        weft_abi::Model::Boxes => boxes.any(|b| (0..6).any(|d| faces & (1 << d) != 0 && b[d] == tex)),
-        _ => false,
-    }
+/// Whether something drawn other than as a cube shows `tex`, on a face in `faces`.
+fn off_cube(d: &Drawn, tex: u32, faces: u8) -> bool {
+    d.model != weft_abi::Model::Cube && (0..6).any(|f| faces & (1 << f) != 0 && d.on_face(f).contains(&tex))
 }
 
-pub fn load(assets: &Assets, c: &Content) -> (Ctm, Extra) {
-    let base = c.textures.len() as u32;
+/// The tile `name` as a model, if it has a file. A face the file names no texture for shows the
+/// picture of the same name if there is one, else `plain`.
+fn tile_model(assets: &Assets, name: &str, plain: u32, names: &mut Names) -> Option<Vec<ModelBox>> {
+    assets.path(name, "models", "json")?;
+    let read = |n: &str| assets.read(n, "models", "json").map(|b| String::from_utf8_lossy(&b).into_owned());
+    let m = crate::block_model::load(name, &read).unwrap_or_else(|e| {
+        log::error!("tile {e}");
+        None
+    })?;
+    let own = if assets.path(name, "textures", "png").is_some() { names.id(name) } else { plain };
+    let boxes = super::looks::file_boxes(&m, &|_| own, &mut |t| names.id(t));
+    (!boxes.is_empty()).then_some(boxes)
+}
+
+/// Reads the `.ctm` files of all block textures, those `looks` brought included (all in `names`)
+/// and those of tiles that are models. Other textures get ids after those.
+pub fn load(assets: &Assets, c: &Content, looks: &Looks, mut names: Names) -> (Ctm, Extra) {
+    let base = c.textures.len();
     let mut extra = Extra::default();
-    let mut ids: FxHashMap<String, u32> = c.textures.iter().enumerate().map(|(i, n)| (n.clone(), i as u32)).collect();
-    let mut ctm = Ctm { by_texture: vec![(0, 0); c.textures.len()], rules: Vec::new(), overlay: vec![0; c.textures.len()] };
-    for (tex, name) in c.textures.iter().enumerate() {
+    let mut ctm = Ctm::default();
+    let mut overlays: Vec<(u32, u32)> = Vec::new();
+    let mut todo: Vec<u32> = (0..names.list.len() as u32).collect();
+    let mut queued: FxHashSet<u32> = todo.iter().copied().collect();
+    let mut tile_models: FxHashMap<(String, u32), u32> = FxHashMap::default();
+    // Compact sets waiting for their composite ids, which come after every tile name.
+    let mut compact: Vec<(usize, u32, Vec<u32>)> = Vec::new();
+    let mut next = 0;
+    while let Some(&tex) = todo.get(next) {
+        next += 1;
+        let name = names.list[tex as usize].clone();
         let over = format!("{name}_overlay");
         if assets.path(&over, "textures", "png").is_some() {
-            extra.names.push(over);
-            ctm.overlay[tex] = base + extra.names.len() as u32;
+            overlays.push((tex, names.id(&over) + 1));
         }
-    }
-    // Compact sets waiting for their composite ids, which come after every tile name.
-    let mut compact: Vec<(usize, Vec<u32>)> = Vec::new();
-    for (tex, name) in c.textures.iter().enumerate() {
-        let Some(src) = assets.read(name, "textures", "ctm").map(|b| String::from_utf8_lossy(&b).into_owned()) else { continue };
+        let Some(src) = assets.read(&name, "textures", "ctm").map(|b| String::from_utf8_lossy(&b).into_owned()) else { continue };
         let start = ctm.rules.len() as u32;
         for section in crate::kv::sections(&src) {
             let kv: FxHashMap<&str, &str> = section.iter().map(|p| (p.1, p.2)).collect();
@@ -238,16 +275,31 @@ pub fn load(assets: &Assets, c: &Content) -> (Ctm, Extra) {
                 }
             };
             let is_compact = matches!(kv.get("method").copied(), Some("compact" | "ctm_compact"));
-            let mut tiles: Vec<u32> = tile_names(kv.get("tiles").copied().unwrap_or(""), name)
-                .into_iter()
-                .map(|t| match t {
-                    None => tex as u32,
-                    Some(n) => *ids.entry(n.clone()).or_insert_with(|| {
-                        extra.names.push(n);
-                        base + extra.names.len() as u32 - 1
-                    }),
-                })
-                .collect();
+            let (mut tiles, mut models) = (Vec::new(), Vec::new());
+            for t in tile_names(kv.get("tiles").copied().unwrap_or(""), &name) {
+                let Some(n) = t else {
+                    tiles.push(tex);
+                    models.push(NO_MODEL);
+                    continue;
+                };
+                let known = tile_models.get(&(n.clone(), tex)).copied();
+                let model = known.or_else(|| {
+                    let boxes = tile_model(assets, &n, tex, &mut names)?;
+                    for t in boxes.iter().flat_map(|b| b.textures) {
+                        if queued.insert(t) {
+                            todo.push(t);
+                        }
+                    }
+                    ctm.models.push(boxes);
+                    let m = ctm.models.len() as u32 - 1;
+                    tile_models.insert((n.clone(), tex), m);
+                    Some(m)
+                });
+                // A model's tile shown on a single face is the plain texture: the face is the
+                // model's now.
+                tiles.push(if model.is_some() { tex } else { names.id(&n) });
+                models.push(model.unwrap_or(NO_MODEL));
+            }
             let needed = match method {
                 Method::Ctm if is_compact => 5,
                 Method::Ctm => 47,
@@ -264,10 +316,18 @@ pub fn load(assets: &Assets, c: &Content) -> (Ctm, Extra) {
                 log::warn!("{name}.ctm: {:?} needs {needed} tiles, has {}", method, tiles.len());
                 continue;
             }
-            let (rule_faces, rule_blocks) = (kv.get("faces").map_or(0b111111, |v| faces(v)), kv.get("blocks").is_some());
+            let has_models = models.iter().any(|m| *m != NO_MODEL);
+            if !has_models {
+                models.clear();
+            }
+            if is_compact && has_models {
+                let why = format!("{name}.ctm: compact ctm doesn't support custom models, and its tiles have model files: use ctm with all 47 tiles");
+                log::error!("{why}");
+                panic!("{why}");
+            }
             let rule_index = ctm.rules.len();
             if is_compact {
-                compact.push((rule_index, tiles[..5].to_vec()));
+                compact.push((rule_index, tex, tiles[..5].to_vec()));
                 tiles.clear();
             }
             let pick = if method == Method::Random {
@@ -298,10 +358,10 @@ pub fn load(assets: &Assets, c: &Content) -> (Ctm, Extra) {
             }
             let biomes = kv.get("biomes").map(|v| {
                 let (invert, list) = v.strip_prefix('!').map_or((false, *v), |r| (true, r));
-                let mut set = [0u64; 4];
+                let mut set = vec![0u64; c.biomes.len() / 64 + 1];
                 for b in list.split_whitespace() {
                     match crate::refs::Ref::parse(b).and_then(|r| crate::refs::biomes(&r, &c.biome_names, &c.components, c.biomes.len() as u32)) {
-                        Ok(list) => list.into_iter().filter(|&i| i < 256).for_each(|i| set[i as usize / 64] |= 1 << (i % 64)),
+                        Ok(list) => list.into_iter().for_each(|i| set[i as usize / 64] |= 1 << (i % 64)),
                         Err(e) => log::error!("{name}.ctm: biomes: {e}"),
                     }
                 }
@@ -320,8 +380,12 @@ pub fn load(assets: &Assets, c: &Content) -> (Ctm, Extra) {
                 heights: kv.get("heights").map_or(Vec::new(), |v| ranges(v)),
                 biomes,
                 tiles,
+                models,
+                open: kv.get("hides_neighbors").is_some_and(|v| *v == "false"),
                 pick,
+                // A model is one for the block, so every face's look at the rule must agree.
                 symmetry: match kv.get("symmetry").copied() {
+                    _ if has_models => 6,
                     Some("opposite") => 2,
                     Some("all") => 6,
                     _ => 1,
@@ -331,29 +395,88 @@ pub fn load(assets: &Assets, c: &Content) -> (Ctm, Extra) {
                     kv.get("height").and_then(|v| v.parse().ok()).unwrap_or(1).max(1),
                 ),
             });
-            if !matches!(method, Method::Random | Method::Fixed) {
-                let blocks = &ctm.rules[rule_index].blocks;
-                let on = c.states.iter().find(|s| (!rule_blocks || blocks.contains(&s.block)) && off_cube(s.model, &s.textures, s.boxes.iter().map(|b| &b.textures), tex as u32, rule_faces));
-                if let Some(s) = on {
-                    let block = c.block_names.iter().find(|n| *n.1 == s.block).map_or("?", |n| n.0.as_str());
-                    let why = format!("{name}.ctm: {method:?} needs a cube's face, and {block} shows this texture without one: only random and fixed work there (or leave it out with blocks =)");
-                    log::error!("{why}");
-                    panic!("{why}");
-                }
-            }
         }
-        ctm.by_texture[tex] = (start, ctm.rules.len() as u32 - start);
+        if ctm.by_texture.len() <= tex as usize {
+            ctm.by_texture.resize(tex as usize + 1, (0, 0));
+        }
+        ctm.by_texture[tex as usize] = (start, ctm.rules.len() as u32 - start);
     }
-    let first_composite = base + extra.names.len() as u32;
-    for (rule, src) in compact {
+    let first_composite = names.list.len() as u32;
+    for (rule, tex, src) in compact {
+        let r = &ctm.rules[rule];
+        let name = &names.list[tex as usize];
+        let on = c.states.iter().enumerate().find_map(|(st, s)| {
+            let hit = (r.blocks.is_empty() || r.blocks.contains(&s.block)) && off_cube(&looks.drawn(st as u32, s), tex, r.faces);
+            hit.then(|| c.block_names.iter().find(|n| *n.1 == s.block).map_or("a block", |n| n.0.as_str()))
+        });
+        if let Some(on) = on {
+            let why = format!("{name}.ctm: compact ctm doesn't support custom models, and {on} shows this texture on one: use ctm with all 47 tiles (or leave it out with blocks =)");
+            log::error!("{why}");
+            panic!("{why}");
+        }
+        if ctm.models.iter().flatten().any(|b| (0..6).any(|d| r.faces & (1 << d) != 0 && super::mesher::box_face(b, d).is_some() && b.textures[d] == tex)) {
+            let why = format!("{name}.ctm: compact ctm doesn't support custom models, and a tile's model shows this texture: use ctm with all 47 tiles");
+            log::error!("{why}");
+            panic!("{why}");
+        }
         let start = first_composite + extra.composites.len() as u32;
         extra.composites.extend(COMPACT.iter().map(|q| q.map(|code| src[code as usize])));
         ctm.rules[rule].tiles = (start..start + 47).collect();
     }
+    ctm.overlay = vec![0; names.list.len()];
+    for (tex, over) in overlays {
+        ctm.overlay[tex as usize] = over;
+    }
+    extra.names = names.list.split_off(base);
     if !ctm.rules.is_empty() {
-        log::info!("connected textures: {} rules, {} tiles, {} generated", ctm.rules.len(), extra.names.len(), extra.composites.len());
+        ctm.see_states(c, looks);
+        log::info!("connected textures: {} rules, {} models, {} textures, {} generated", ctm.rules.len(), ctm.models.len(), extra.names.len(), extra.composites.len());
     }
     (ctm, extra)
+}
+
+impl Ctm {
+    /// Works out what the rules mean for each block state.
+    fn see_states(&mut self, c: &Content, looks: &Looks) {
+        let (any_models, any_open) = (self.rules.iter().any(|r| !r.models.is_empty()), self.rules.iter().any(|r| r.open));
+        self.shown = c
+            .states
+            .iter()
+            .enumerate()
+            .map(|(st, s)| {
+                let d = looks.drawn(st as u32, s);
+                (d.model != weft_abi::Model::Cube || d.textures != s.textures).then(|| Box::new(std::array::from_fn(|f| d.on_face(f))))
+            })
+            .collect();
+        if any_models {
+            self.model_from = vec![(0, NO_MODEL); c.states.len()];
+        }
+        if any_open {
+            self.open = vec![false; c.states.len()];
+        }
+        if !any_models && !any_open {
+            return;
+        }
+        for (st, s) in c.states.iter().enumerate().filter(|(_, s)| s.liquid.is_none()) {
+            let d = looks.drawn(st as u32, s);
+            for dir in 0..6 {
+                for tex in d.on_face(dir) {
+                    let &(start, len) = self.by_texture.get(tex as usize).unwrap_or(&(0, 0));
+                    for rule in &self.rules[start as usize..(start + len) as usize] {
+                        if !rule.blocks.is_empty() && !rule.blocks.contains(&s.block) {
+                            continue;
+                        }
+                        if rule.open {
+                            self.open[st] = true;
+                        }
+                        if !rule.models.is_empty() && rule.faces & (1 << dir) != 0 && self.model_from[st].1 == NO_MODEL {
+                            self.model_from[st] = (dir as u8, tex);
+                        }
+                    }
+                }
+            }
+        }
+    }
 }
 
 fn hash(x: i32, y: i32, z: i32, f: u32) -> u64 {
@@ -366,18 +489,48 @@ impl Ctm {
         self.overlay.get(tex as usize).is_some_and(|&o| o != 0)
     }
 
+    /// Whether a block of these flags hides the faces next to it.
+    #[inline]
+    pub fn hides(&self, flags: u32, state: u32) -> bool {
+        flags & weft_abi::block_flags::OPAQUE != 0 && !self.open.get(state as usize).is_some_and(|o| *o)
+    }
+
+    /// Whether a rule says this state is drawn with holes.
+    #[inline]
+    pub fn is_open(&self, state: u32) -> bool {
+        self.open.get(state as usize).is_some_and(|o| *o)
+    }
+
+    /// The model a rule picks for the block at `(x, y, z)` in the cube, if any.
+    #[inline]
+    pub fn model(&self, c: &Content, n: &Neighborhood, x: i32, y: i32, z: i32, state: u32) -> Option<&[ModelBox]> {
+        let &(dir, tex) = self.model_from.get(state as usize).filter(|f| f.1 != NO_MODEL)?;
+        let &(start, len) = self.by_texture.get(tex as usize)?;
+        let (rule, tile) = self.pick(c, n, x, y, z, dir as usize, tex, start as usize..(start + len) as usize)?;
+        self.models.get(*rule.models.get(tile)? as usize).map(Vec::as_slice)
+    }
+
     /// Texture for face `dir` of the block at `(x, y, z)` in the cube, `tex` being its plain one.
     #[inline]
     #[allow(clippy::too_many_arguments)]
     pub fn resolve(&self, c: &Content, n: &Neighborhood, x: i32, y: i32, z: i32, dir: usize, tex: u32) -> u32 {
         match self.by_texture.get(tex as usize) {
-            Some(&(start, len)) if len > 0 => self.resolve_rules(c, n, x, y, z, dir, tex, start as usize..(start + len) as usize),
+            Some(&(start, len)) if len > 0 => self.pick(c, n, x, y, z, dir, tex, start as usize..(start + len) as usize).map_or(tex, |(rule, tile)| rule.tiles.get(tile).copied().unwrap_or(tex)),
             _ => tex,
         }
     }
 
+    /// Whether `state` shows `tex` on face `dir`.
+    fn shows(&self, c: &Content, state: u32, dir: usize, tex: u32) -> bool {
+        match self.shown.get(state as usize) {
+            Some(Some(faces)) => faces[dir].contains(&tex),
+            _ => c.states[state as usize].textures[dir] == tex,
+        }
+    }
+
+    /// The first rule that goes for this face, and which of its tiles it wants.
     #[allow(clippy::too_many_arguments)]
-    fn resolve_rules(&self, c: &Content, n: &Neighborhood, x: i32, y: i32, z: i32, dir: usize, tex: u32, rules: std::ops::Range<usize>) -> u32 {
+    fn pick(&self, c: &Content, n: &Neighborhood, x: i32, y: i32, z: i32, dir: usize, tex: u32, rules: std::ops::Range<usize>) -> Option<(&Rule, usize)> {
         let s = n.states[pidx(x, y, z)];
         let info = &c.states[s as usize];
         let world = [n.origin[0] + x, n.origin[1] + y, n.origin[2] + z];
@@ -393,9 +546,9 @@ impl Ctm {
             if !rule.heights.is_empty() && !rule.heights.iter().any(|&(lo, hi)| world[1] >= lo && world[1] <= hi) {
                 continue;
             }
-            if let Some((invert, set)) = rule.biomes {
+            if let Some((invert, set)) = &rule.biomes {
                 let b = n.biomes[(z * 16 + x) as usize] as usize;
-                if (set[b / 64] >> (b % 64) & 1 == 1) == invert {
+                if set.get(b / 64).is_some_and(|w| w >> (b % 64) & 1 == 1) == *invert {
                     continue;
                 }
             }
@@ -404,12 +557,12 @@ impl Ctm {
                 let same = match rule.connect {
                     Connect::Block => c.states[ns as usize].block == info.block,
                     Connect::State => ns == s,
-                    Connect::Tile => c.states[ns as usize].textures[dir] == tex,
+                    Connect::Tile => self.shows(c, ns, dir, tex),
                 };
                 // With inner seams a neighbor whose own face here is covered breaks the run.
                 same && !(rule.inner_seams && {
                     let front = n.states[at(a, b, nrm)];
-                    front != 0 && c.states[front as usize].flags & weft_abi::block_flags::OPAQUE != 0
+                    front != 0 && self.hides(c.states[front as usize].flags, front)
                 })
             };
             let tile = match rule.method {
@@ -470,9 +623,9 @@ impl Ctm {
                 }
                 Method::Fixed => 0,
             };
-            return rule.tiles.get(tile).copied().unwrap_or(tex);
+            return Some((rule, tile));
         }
-        tex
+        None
     }
 }
 
@@ -483,14 +636,20 @@ mod tests {
     #[test]
     fn only_what_shows_a_texture_off_a_cube_counts() {
         use weft_abi::Model;
-        let none: [&[u32; 6]; 0] = [];
         let (t, sides_only) = ([7; 6], 0b110011);
-        assert!(off_cube(Model::Cross, &t, none.into_iter(), 7, 0b111111));
-        assert!(!off_cube(Model::Cross, &t, none.into_iter(), 8, 0b111111));
-        assert!(!off_cube(Model::Cube, &t, none.into_iter(), 7, 0b111111));
-        let top = [0, 0, 0, 7, 0, 0];
-        assert!(off_cube(Model::Boxes, &[0; 6], [&top].into_iter(), 7, 0b111111));
-        assert!(!off_cube(Model::Boxes, &[0; 6], [&top].into_iter(), 7, sides_only), "not on the faces the rule is for");
+        let plain = |model| Drawn { model, boxes: &[], textures: t };
+        assert!(off_cube(&plain(Model::Cross), 7, 0b111111));
+        assert!(!off_cube(&plain(Model::Cross), 8, 0b111111));
+        assert!(!off_cube(&plain(Model::Cube), 7, 0b111111));
+        let top = [ModelBox::whole([0, 0, 0, 7, 0, 0])];
+        let boxes = Drawn { model: Model::Boxes, boxes: &top, textures: [0; 6] };
+        assert!(off_cube(&boxes, 7, 0b111111));
+        assert!(!off_cube(&boxes, 7, sides_only), "not on the faces the rule is for");
+        // A face the file leaves out holds a texture only to fill the field.
+        let mut gone = ModelBox::whole([7; 6]);
+        gone.uv = [[crate::block_model::NO_FACE, 0.0, 0.0, 0.0]; 6];
+        let gone = [gone];
+        assert!(!off_cube(&Drawn { model: Model::Boxes, boxes: &gone, textures: [0; 6] }, 7, 0b111111));
     }
 
     #[test]

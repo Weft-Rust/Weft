@@ -1,6 +1,10 @@
 //! Stage 8: moving collisions with the test mod's lift, skiff and crate.
 
-use super::add;
+use std::time::Duration;
+
+use weft_sdk::*;
+
+use super::{add, probe};
 use crate::runner::{R, T};
 
 async fn spawn(t: &T, kind: &str, p: [i32; 3]) -> Result<u64, String> {
@@ -13,6 +17,226 @@ async fn pos_of(t: &T, id: &str) -> Result<[f64; 3], String> {
     let line = t.op(&format!("entity {id}")).await?;
     let v: Vec<f64> = line.split_whitespace().skip(1).take(3).filter_map(|s| s.parse().ok()).collect();
     v.try_into().map_err(|_| format!("entity #{id}: {line}"))
+}
+
+/// A chest on a flying structure is a chest: it keeps what is in it, opens, goes with the structure,
+/// is saved with it, and spills where it is when it breaks.
+pub async fn body_chest(t: T) -> R {
+    t.world(1).await?;
+    t.op("mode creative").await?;
+    let f = t.feet();
+    let id = spawn(&t, "testmod:skiff", add(f, [0, 12, 0])).await?;
+    t.op(&format!("structureset {id} 1 1 0 base:chest")).await?;
+    t.frames(5).await?;
+    let near = |t: T, id: u64| async move {
+        let at = pos_of(&t, &id.to_string()).await?;
+        t.op(&format!("near {} {} {} 8", at[0].floor(), at[1].floor(), at[2].floor())).await
+    };
+    let list = near(t.clone(), id).await?;
+    let chest = list.split_whitespace().find(|e| e.contains("chest")).and_then(|e| e.split(':').next()).ok_or(format!("no chest entity among {list}"))?.to_string();
+    t.op(&format!("put {chest} 0 base:cobblestone 7")).await?;
+    // It is where its block is, however the structure goes.
+    let (a, b) = (pos_of(&t, &id.to_string()).await?, pos_of(&t, &chest).await?);
+    // Asked a tick apart, the structure having gone on by 0.3 of a block.
+    t.check((b[0] - a[0] - 1.0).abs() < 0.7 && (b[1] - a[1] - 1.5).abs() < 0.1, format!("the chest is at its block: structure {a:?}, chest {b:?}"));
+    t.secs(1.0).await?;
+    let (a, b2) = (pos_of(&t, &id.to_string()).await?, pos_of(&t, &chest).await?);
+    t.check((b2[0] - b[0]).abs() > 2.0, "it goes with the structure");
+    t.check((b2[0] - a[0] - 1.0).abs() < 0.7, format!("and stays at its block: structure {a:?}, chest {b2:?}"));
+
+    // Open from on board.
+    t.op(&format!("onto {id} 1.0")).await?;
+    t.secs(0.4).await?;
+    t.c().look(-90.0, -40.0);
+    t.secs(0.2).await?;
+    t.check_eq(t.state().target_frame, id, "the chest on the structure is looked at");
+    t.press("core:use");
+    t.secs(0.4).await?;
+    let open = t.c().screen();
+    t.check(!open.is_empty(), "it opens from on board");
+    // Still open after it flew on.
+    t.secs(0.4).await?;
+    t.check_eq(t.c().screen(), open, "and stays open as it flies");
+    t.c().close_screen();
+    t.no_screen().await?;
+
+    // Saved with it.
+    let name = format!("test-{}", t.name());
+    t.c().leave_world();
+    t.screen("core:title").await?;
+    t.c().open_world(&name, 1);
+    t.until("joined again", Duration::from_secs(60), |t| t.flag(client::client_flags::JOINED)).await?;
+    t.loaded().await?;
+    let list = t.op(&format!("near {} {} {} 96", f[0], f[1] + 12, f[2])).await?;
+    let id: u64 = list.split_whitespace().find(|e| e.ends_with("testmod:skiff")).and_then(|e| e.split(':').next()).and_then(|e| e.parse().ok()).ok_or(format!("no skiff among {list}"))?;
+    let list = near(t.clone(), id).await?;
+    let chest = list.split_whitespace().find(|e| e.contains("chest")).and_then(|e| e.split(':').next()).ok_or(format!("no chest after loading among {list}"))?.to_string();
+    let (name, count, _) = t.slot(&chest, 0).await?;
+    t.check(name.contains("cobblestone") && count == 7, format!("what it held came back: {name} {count}"));
+
+    // Spills in the world, at the chest.
+    let at = pos_of(&t, &chest).await?;
+    t.op(&format!("structureset {id} 1 1 0 air")).await?;
+    t.frames(5).await?;
+    let list = t.op(&format!("near {} {} {} 6", at[0].floor(), at[1].floor(), at[2].floor())).await?;
+    t.check(list.contains("core:item"), format!("what it held fell out right there: {list}"));
+    t.check(t.op(&format!("entity {chest}")).await.is_err(), "the chest is gone");
+    Ok(())
+}
+
+/// Sneaking, nobody steps off the edge of what they stand on, whichever way that is going.
+/// Each walk has to get to the edge, or it says nothing.
+pub async fn body_sneak_edge(t: T) -> R {
+    t.flat().await?;
+    t.cmd("/rule testkit:no_hurt 1").await?;
+    let f = t.feet();
+    let y = 8;
+    let skiff = t.op(&format!("spawn testmod:skiff {} {} {}", f[0], f[1] + y, f[2] + 9)).await?;
+    // With more on it, lower, the way it goes: past the deck's edge isn't past the box around it.
+    let more = t.op(&format!("spawn testmod:skiff {} {} {}", f[0], f[1] + y + 8, f[2] + 9)).await?;
+    for x in [-2, 2] {
+        t.op(&format!("structureset {more} {x} -1 0 base:oak_planks")).await?;
+    }
+    let still_at = add(f, [-8, y, 0]);
+    t.fill(add(still_at, [-1, 0, -1]), add(still_at, [1, 0, 1]), "base:stone").await?;
+    let still = t.op(&format!("lift {} {} {} 1", still_at[0], still_at[1], still_at[2])).await?;
+    let cross_at = add(f, [8, y, 0]);
+    for p in [[0, 0], [1, 0], [-1, 0], [0, 1], [0, -1]] {
+        t.set(add(cross_at, [p[0], 0, p[1]]), "base:stone").await?;
+    }
+    let cross = t.op(&format!("lift {} {} {} 1", cross_at[0], cross_at[1], cross_at[2])).await?;
+    t.frames(5).await?;
+    let along = [("core:left", 0.0f32), ("core:right", 0.0)];
+    let corners = [("core:forward", 45.0f32), ("core:forward", 225.0)];
+    for (name, id, walks) in [("a structure going sideways", &skiff, &along), ("one with more on it", &more, &along), ("one standing still", &still, &along), ("the corners of a cross", &cross, &corners)] {
+        let Ok(body) = id.parse::<u64>() else { return Err(format!("no {name}")) };
+        for &(key, yaw) in walks {
+            // Off what it was on first.
+            t.cmd(&format!("/tp {} {} {}", f[0], f[1] + 20, f[2])).await?;
+            t.secs(0.2).await?;
+            t.op(&format!("onto {id} 1.0")).await?;
+            t.c().look(yaw, 0.0);
+            t.secs(0.5).await?;
+            t.hold("core:sneak", 2.4);
+            t.frames(3).await?;
+            t.hold(key, 2.2);
+            let began = std::time::Instant::now();
+            let (mut far, mut fell, mut log) = (0.0f64, false, Vec::new());
+            while began.elapsed() < Duration::from_secs_f32(2.2) {
+                t.frames(1).await?;
+                let st = t.state();
+                let Some(on) = t.c().entity(body).map(|e| e.pos) else { continue };
+                let rel = [st.pos[0] - on[0], st.pos[1] - on[1], st.pos[2] - on[2]];
+                far = far.max(rel[0].abs()).max(rel[2].abs());
+                log.push(format!("{:.3} {:.3} {:.3} ground {}", rel[0], rel[1], rel[2], t.flag(client::client_flags::ON_GROUND)));
+                if rel[1] < 0.7 {
+                    fell = true;
+                    break;
+                }
+            }
+            let last = log[log.len().saturating_sub(6)..].join(" | ");
+            t.check(!fell, format!("not off {name}, {key} at {yaw}: {last}"));
+            t.check(fell || far > 0.7, format!("walking got to the edge of {name}, {key} at {yaw}: only {far:.2}"));
+            t.secs(2.5 - began.elapsed().as_secs_f32().min(2.5)).await?;
+        }
+    }
+    Ok(())
+}
+
+/// Blocks go on a structure wherever it has none yet, not only in the parts of it that happen to
+/// be stored already.
+pub async fn body_place(t: T) -> R {
+    t.flat().await?;
+    t.op("mode creative").await?;
+    t.op("put me 0 oak_planks 64").await?;
+    t.c().select(0);
+    let f = t.feet();
+    // A plate lifted around a spot over it: all it has is a layer under its middle.
+    let center = add(f, [0, 4, -5]);
+    t.fill(add(center, [-1, -1, -1]), add(center, [1, -1, 1]), "base:slime_block").await?;
+    let id = t.op(&format!("lift {} {} {} 1", center[0], center[1], center[2])).await?;
+    t.cmd(&format!("/tp {} {} {}", center[0] as f64 + 0.5, center[1] + 2, center[2] as f64 + 3.5)).await?;
+    t.c().fly(true);
+    t.secs(0.5).await?;
+    t.look_at(add(center, [0, -1, 0]));
+    t.secs(0.3).await?;
+    t.check(t.state().target_frame.to_string() == id, "looking at the structure");
+    t.press("core:use");
+    t.secs(0.5).await?;
+    t.check_eq(t.op(&format!("sblock {id} 0 0 0")).await?, "base:oak_planks".to_string(), "a block goes on top of the plate");
+    // Beyond anything it has: past its edge, from the side.
+    t.look_at(add(center, [1, -1, 1]));
+    t.secs(0.3).await?;
+    t.press("core:use");
+    t.secs(0.5).await?;
+    t.check_eq(t.op(&format!("sblock {id} 1 0 1")).await?, "base:oak_planks".to_string(), "and another");
+    Ok(())
+}
+
+/// Carried along, the camera doesn't bob: it goes by how fast one walks on what one stands on.
+pub async fn body_no_bob(t: T) -> R {
+    t.flat().await?;
+    let f = t.feet();
+    let id = spawn(&t, "testmod:skiff", add(f, [0, 3, -6])).await?;
+    t.op(&format!("onto {id} 1.0")).await?;
+    t.secs(0.8).await?;
+    let mut most = 0.0f32;
+    for _ in 0..200 {
+        t.frames(1).await?;
+        most = most.max(t.state().bob);
+    }
+    t.probe("bob standing on what moves", most, most < 0.005);
+    // Walking on it does.
+    t.hold("core:forward", 0.4);
+    let mut walked = 0.0f32;
+    for _ in 0..40 {
+        t.frames(1).await?;
+        walked = walked.max(t.state().bob);
+    }
+    t.probe("bob walking on it", walked, walked > 0.02);
+    // From one body straight onto another stays there.
+    let other = spawn(&t, "testmod:lift", add(f, [0, 3, 6])).await?;
+    t.op(&format!("onto {other} 1.0")).await?;
+    t.secs(0.5).await?;
+    let (p, b) = (t.state().pos, t.c().entity(other).map_or([0.0; 3], |e| e.pos));
+    t.check((p[0] - b[0]).abs() < 2.0 && (p[2] - b[2]).abs() < 2.0, format!("onto another body: at {p:?}, it at {b:?}"));
+    Ok(())
+}
+
+/// A body is lit from the moment it is there, and a block broken shows its light at once.
+pub async fn body_lit_at_once(t: T) -> R {
+    t.flat().await?;
+    t.op("mode creative").await?;
+    let f = t.feet();
+    let at = add(f, [0, 2, -5]);
+    t.set(at, "base:stone").await?;
+    t.look_at(at);
+    t.secs(0.8).await?;
+    let Some((x, y)) = t.on_screen([at[0] as f64 + 0.5, at[1] as f64 + 0.9, at[2] as f64 + 1.02]) else {
+        return Err("it isn't in view".into());
+    };
+    let shade = |c: probe::C| c[0] as i32 + c[1] as i32 + c[2] as i32;
+    let before = shade(t.pixel(x + 0.01, y + 0.012).await?);
+    let id = t.op(&format!("lift {} {} {} 0", at[0], at[1], at[2])).await?;
+    t.check(id != "0", "it lifted");
+    let mut darkest = before;
+    for _ in 0..30 {
+        t.frames(1).await?;
+        darkest = darkest.min(shade(t.pixel(x + 0.01, y + 0.012).await?));
+    }
+    t.check(darkest * 10 >= before * 7, format!("not dark for a moment: {darkest} of {before}"));
+    t.op(&format!("remove {id}")).await?;
+
+    // Broken by hand: what was inside a block has the light of the air now, in the same frame.
+    let b = add(f, [1, 0, -4]);
+    t.set(b, "base:stone").await?;
+    t.look_at(b);
+    t.secs(0.5).await?;
+    t.press("core:attack");
+    t.until("gone on the client", Duration::from_secs(2), |t| t.c().block(b) == Some(0)).await?;
+    let sky = t.c().light(b).unwrap_or(0) & 255;
+    t.check(sky > 0, format!("a broken block's place is lit in the frame it goes: {sky}"));
+    Ok(())
 }
 
 /// Standing on a lift carries the player up and back down with it, without fall damage.

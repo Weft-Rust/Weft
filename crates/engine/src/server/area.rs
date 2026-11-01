@@ -187,7 +187,7 @@ impl Dim {
     pub fn area_fill(&mut self, c: &'static Content, fill: &AreaFill, fresh: &[IVec3]) -> FillStats {
         let mut stats = FillStats::default();
         let start = std::time::Instant::now();
-        let targets: Vec<(IVec3, Arc<Cube>)> = self.cubes.iter().filter(|(cp, _)| fill.touches(**cp)).map(|(cp, cube)| (*cp, cube.clone())).collect();
+        let targets: Vec<(IVec3, Arc<Cube>)> = self.space.cubes.iter().filter(|(cp, _)| fill.touches(**cp)).map(|(cp, cube)| (*cp, cube.clone())).collect();
         // With whether the cube had a light source.
         let done: Vec<(IVec3, Option<(Cube, Vec<IVec3>)>, bool)> =
             targets.par_iter().map(|(cp, cube)| (*cp, fill.apply(c, *cp, cube), cube.palette().iter().any(|&s| c.states[s as usize].light != [0; 3]))).collect();
@@ -197,13 +197,13 @@ impl Dim {
         for (cp, result, emitted) in done {
             let Some((mut cube, edges)) = result else {
                 // Reached but unchanged: it still counts as having had this edit.
-                if let Some(cube) = self.cubes.get_mut(&cp) {
+                if let Some(cube) = self.space.cubes.get_mut(&cp) {
                     Arc::make_mut(cube).edits = fill.id;
                 }
                 continue;
             };
             stats.edges += edges.len();
-            self.edge_updates.extend(edges);
+            self.space.edge_updates.extend(edges);
             cube.edits = fill.id;
             stats.cubes += 1;
             stats.whole += cube.uniform_state().is_some() as usize;
@@ -212,8 +212,8 @@ impl Dim {
                 .entities
                 .anchors
                 .iter()
-                .filter(|(p, _)| crate::world::cube_of(**p) == cp && cube.get(crate::world::local_index(**p)) != self.get(**p).unwrap_or(u32::MAX))
-                .map(|(p, id)| (*p, *id))
+                .filter(|((frame, p), _)| *frame == 0 && crate::world::cube_of(*p) == cp && cube.get(crate::world::local_index(*p)) != self.get(*p).unwrap_or(u32::MAX))
+                .map(|((_, p), id)| (*p, *id))
                 .collect();
             for (_, id) in gone {
                 self.entities.remove(id);
@@ -221,19 +221,22 @@ impl Dim {
             if emitted {
                 lost_light.push(cp);
             }
-            self.grid.cube_unloaded(cp);
-            self.grid.cube_loaded(c, cp, &cube);
-            self.cubes.insert(cp, Arc::new(cube));
-            self.edited.insert(cp);
-            self.conn.remove(&cp);
+            self.space.grid.cube_unloaded(cp);
+            self.space.signals.cube_unloaded(c, cp);
+            self.space.grid.cube_loaded(c, cp, &cube);
+            self.space.signals.cube_loaded(c, cp, &cube);
+            self.space.cubes.insert(cp, Arc::new(cube));
+            self.space.edited.insert(cp);
+            self.space.conn.remove(&cp);
             // Clients get the blocks now, whatever the light does.
-            self.light_dirty.insert(cp);
+            self.space.light_dirty.insert(cp);
             relight.push(cp);
         }
         for &cp in fresh {
             let mut cube = Cube::uniform(fill.state, 0);
             cube.edits = fill.id;
-            self.grid.cube_loaded(c, cp, &cube);
+            self.space.grid.cube_loaded(c, cp, &cube);
+            self.space.signals.cube_loaded(c, cp, &cube);
             self.add_cube(cp, Arc::new(cube));
             relight.push(cp);
             stats.cubes += 1;
@@ -241,7 +244,7 @@ impl Dim {
         }
         stats.apply_ms = start.elapsed().as_secs_f64() * 1000.0;
         let start = std::time::Instant::now();
-        stats.relit = relight_after(c, self.id, fill.state, &mut self.cubes, &mut self.light_dirty, &relight, &lost_light);
+        stats.relit = relight_after(c, self.id, fill.state, &mut self.space.cubes, &mut self.space.light_dirty, &relight, &lost_light);
         stats.light_ms = start.elapsed().as_secs_f64() * 1000.0;
         // Lit for good: they go out to players like any loaded cube.
         let mut fresh = fresh.to_vec();

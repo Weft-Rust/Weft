@@ -2,6 +2,7 @@
 //! items, the held item, flames, the block selection outline, break progress and gizmo boxes
 //! (textured boxes built on the CPU each frame, a few hundred at most).
 
+use super::looks::ItemDraw;
 use crate::gpu_layout::box_mode;
 use super::models::{MAX_LAYERS, Posed};
 use glam::{DVec3, IVec3, Mat4, Quat, Vec3, Vec4};
@@ -380,10 +381,10 @@ impl EntityRenderer {
     /// The opaque pixels of an item's sprite, read the first time it is held or dropped.
     fn load_sprite(&mut self, assets: &Assets, item: u32) {
         let Some(name) = sprite_name(item) else { return };
-        if self.sprites.contains_key(name) {
+        if self.sprites.contains_key(&name) {
             return;
         }
-        let img = assets.read(name, "textures", "png").and_then(|b| decode_png(&b));
+        let img = assets.read(&name, "textures", "png").and_then(|b| decode_png(&b));
         let sprite = img.map(|img| {
             let size = img.width;
             // Animated strips: the first frame.
@@ -395,7 +396,7 @@ impl EntityRenderer {
                 .collect();
             Sprite { size, pixels }
         });
-        self.sprites.insert(name.to_string(), sprite);
+        self.sprites.insert(name, sprite);
     }
 
     /// An item's model as boxes in the unit cube, made once: a block item's shape, else its
@@ -405,38 +406,42 @@ impl EntityRenderer {
             return Some(m);
         }
         let c = content();
-        let def = c.items.get(item as usize).filter(|_| item != 0)?;
         let first = self.item_boxes.len();
         let white = Vec4::new(1.0, 1.0, 1.0, 0.0);
-        let block = def.block.map(|st| &c.states[st as usize]);
         let looks = super::looks::current();
-        let look = looks.item(item);
-        let model = look.and_then(|l| l.model.as_deref()).unwrap_or(&def.model);
-        let icon = look.and_then(|l| l.icon).unwrap_or(def.icon);
-        match block {
-            _ if !model.is_empty() => boxes_shape(&mut self.item_boxes, textures, Mat4::IDENTITY, model, &c.states[0], white),
-            Some(st) if def.icon == u32::MAX && st.item_sprite().is_none() => block_shape(&mut self.item_boxes, textures, Mat4::IDENTITY, st, white),
-            _ => {
-                let l = match block {
-                    Some(st) if icon == u32::MAX => textures.texture(st.item_sprite().unwrap_or(st.textures[0])),
-                    _ => textures.texture(icon),
-                };
-                match sprite_name(item).and_then(|n| self.sprites.get(n)).and_then(|s| s.as_ref()) {
-                    Some(sp) => {
-                        let n = sp.size as f32;
-                        // Only the outline: a side face against a neighboring pixel would fight
-                        // with it. Mode 4: every face takes the color of this one texel.
-                        for &(x, y, hidden) in &sp.pixels {
-                            let m = Mat4::from_translation(Vec3::new(x as f32 / n, 1.0 - (y as f32 + 1.0) / n, 7.5 / 16.0)) * Mat4::from_scale(Vec3::new(1.0 / n, 1.0 / n, 1.0 / 16.0));
-                            self.item_boxes.push(GpuBox { rows: rows(m), uvo: [(x as f32 + 0.5) / n, (y as f32 + 0.5) / n, 0.0, 0.0], color: white.to_array(), ids: [0, box_mode::TEXEL, l, hidden], ..Default::default() });
-                        }
-                    }
-                    None => {
-                        let m = Mat4::from_translation(Vec3::new(0.0, 0.0, 0.5)) * Mat4::from_scale(Vec3::new(1.0, 1.0, 0.0));
-                        self.item_boxes.push(GpuBox { rows: rows(m), color: white.to_array(), ids: [0, box_mode::FACES, l | l << 16, l | l << 16], ids2: [l | l << 16, 0, 0, 0], ..Default::default() });
-                    }
+        let sprite = match looks.item_draw(c, item) {
+            ItemDraw::Model(model) => {
+                boxes_shape(&mut self.item_boxes, textures, Mat4::IDENTITY, model, &c.states[0], white);
+                None
+            }
+            ItemDraw::Icon(t) => Some(t),
+            ItemDraw::Block(state) => {
+                let s = &c.states[state as usize];
+                let sprite = looks.block_sprite(state, s);
+                if sprite.is_none() {
+                    boxes_shape(&mut self.item_boxes, textures, Mat4::IDENTITY, &looks.block_shape(state, s), s, white);
+                }
+                sprite
+            }
+            ItemDraw::Nothing => return None,
+        };
+        if let Some(t) = sprite {
+            let l = textures.texture(t);
+        match sprite_name(item).and_then(|n| self.sprites.get(&n)).and_then(|s| s.as_ref()) {
+            Some(sp) => {
+                let n = sp.size as f32;
+                // Only the outline: a side face against a neighboring pixel would fight
+                // with it. Mode 4: every face takes the color of this one texel.
+                for &(x, y, hidden) in &sp.pixels {
+                    let m = Mat4::from_translation(Vec3::new(x as f32 / n, 1.0 - (y as f32 + 1.0) / n, 7.5 / 16.0)) * Mat4::from_scale(Vec3::new(1.0 / n, 1.0 / n, 1.0 / 16.0));
+                    self.item_boxes.push(GpuBox { rows: rows(m), uvo: [(x as f32 + 0.5) / n, (y as f32 + 0.5) / n, 0.0, 0.0], color: white.to_array(), ids: [0, box_mode::TEXEL, l, hidden], ..Default::default() });
                 }
             }
+            None => {
+                let m = Mat4::from_translation(Vec3::new(0.0, 0.0, 0.5)) * Mat4::from_scale(Vec3::new(1.0, 1.0, 0.0));
+                self.item_boxes.push(GpuBox { rows: rows(m), color: white.to_array(), ids: [0, box_mode::FACES, l | l << 16, l | l << 16], ids2: [l | l << 16, 0, 0, 0], ..Default::default() });
+            }
+        }
         }
         let m = (first as u32, (self.item_boxes.len() - first) as u32);
         self.item_models.insert(item, m);
@@ -889,14 +894,15 @@ fn fire_boxes(out: &mut Vec<GpuBox>, textures: &GameTextures, base: Vec3, width:
 }
 
 /// Texture a held item is drawn from as a solid sprite: its icon, or the texture of a plant block.
-fn sprite_name(item: u32) -> Option<&'static str> {
+fn sprite_name(item: u32) -> Option<String> {
     let c = content();
-    let def = c.items.get(item as usize).filter(|_| item != 0)?;
-    if def.icon != u32::MAX {
-        return c.textures.get(def.icon as usize).map(String::as_str);
-    }
-    let st = &c.states[def.block? as usize];
-    st.item_sprite().and_then(|t| c.textures.get(t as usize)).map(String::as_str)
+    let looks = super::looks::current();
+    let t = match looks.item_draw(c, item) {
+        ItemDraw::Icon(t) => t,
+        ItemDraw::Block(state) => looks.block_sprite(state, &c.states[state as usize])?,
+        _ => return None,
+    };
+    looks.texture_name(c, t).map(str::to_string)
 }
 
 /// From view space to the camera-relative world for what the first person view holds: it bobs
@@ -969,64 +975,40 @@ fn hand_boxes(out: &mut Vec<GpuBox>, cam: &Camera, h: &Hand, skin: Option<(u32, 
     }
 }
 
-/// A block item drawn as its model's boxes; `m` maps the block's unit cube.
-fn block_shape(out: &mut Vec<GpuBox>, textures: &GameTextures, m: Mat4, s: &crate::content::StateInfo, color: Vec4) {
-    boxes_shape(out, textures, m, &s.item_shape(), s, color);
-}
-
 /// Model boxes (a block's, or an item's from its file) in the unit cube `m` maps, tinted like
 /// `s` (an item's own boxes pass air: no tint).
 fn boxes_shape(out: &mut Vec<GpuBox>, textures: &GameTextures, m: Mat4, boxes: &[crate::content::ModelBox], s: &crate::content::StateInfo, color: Vec4) {
+    let tint = crate::content::item_tint(s.tint) & 0xff_ffff;
     for b in boxes {
-        let (mn, mx) = (Vec3::from_array(b.min), Vec3::from_array(b.max));
-        let mb = m * Mat4::from_translation(mn) * Mat4::from_scale(mx - mn);
-        let l = b.textures.map(|t| textures.texture(t));
-        // Faces the block tints take the tint here, not from a tinted copy drawn on top (the
-        // untinted faces would show through cutout holes and at the edges).
-        let overlaid = |d: usize| textures.overlays.get(b.textures[d] as usize).is_some_and(|&o| o != 0);
-        let tinted = if s.tint == 0 { 0 } else { (0..6).filter(|&d| s.tint_faces & (1 << d) != 0 && !overlaid(d)).fold(0, |m, d| m | 1 << d) };
-        out.push(GpuBox {
-            rows: rows(mb),
-            dims: mn.extend(1.0).to_array(),
-            uvo: mx.extend(0.0).to_array(),
-            color: color.to_array(),
-            ids: [0, box_mode::FACES, l[0] | l[1] << 16, l[2] | l[3] << 16],
-            ids2: [l[4] | l[5] << 16, 0, tinted, crate::content::item_tint(s.tint) & 0xff_ffff],
-        });
-        tinted_faces(out, textures, mb, s, &b.textures, color);
+        for d in 0..6 {
+            let Some((corners, uv)) = super::mesher::box_face(b, d) else { continue };
+            let (n, shade) = super::mesher::face_look(&corners);
+            let [p0, p1, _, p3] = corners.map(Vec3::from_array);
+            let overlay = textures.overlays.get(b.textures[d] as usize).filter(|&&o| o != 0).map(|o| o - 1);
+            let mut face = |texture: u32, tinted: bool, lift: f32| {
+                let place = Mat4::from_cols((p1 - p0).extend(0.0), (p3 - p0).extend(0.0), Vec4::ZERO, (p0 + n * lift).extend(1.0));
+                out.push(GpuBox {
+                    rows: rows(m * place),
+                    dims: [shade, 0.0, 0.0, 0.0],
+                    uvo: uv.map(|v| v / 16.0),
+                    color: color.to_array(),
+                    ids: [0, box_mode::QUAD, textures.texture(texture), 0],
+                    ids2: [0, 0, tinted as u32, tint],
+                });
+            };
+            // Faces the block tints take the tint here, not from a tinted copy drawn on top (the
+            // untinted faces would show through cutout holes and at the edges).
+            face(b.textures[d], s.tint != 0 && s.tint_faces & (1 << d) != 0 && overlay.is_none(), 0.0);
+            // The tinted part of a face (a grass side), just outside it.
+            if let Some(o) = overlay.filter(|_| s.tint != 0) {
+                face(o, true, 0.002);
+            }
+        }
     }
 }
 
 fn rows(m: Mat4) -> [[f32; 4]; 3] {
     [m.row(0).to_array(), m.row(1).to_array(), m.row(2).to_array()]
-}
-
-/// The tinted overlays of a block item's textures (grass sides) drawn on top. `m` maps the unit
-/// cube.
-fn tinted_faces(out: &mut Vec<GpuBox>, textures: &GameTextures, m: Mat4, s: &crate::content::StateInfo, faces: &[u32; 6], color: Vec4) {
-    if s.tint == 0 {
-        return;
-    }
-    let tint = crate::content::item_tint(s.tint);
-    let rgb = Vec3::new(((tint >> 16) & 255) as f32, ((tint >> 8) & 255) as f32, (tint & 255) as f32) / 255.0;
-    for d in 0..6 {
-        let Some(tex) = textures.overlays.get(faces[d] as usize).filter(|&&o| o != 0).map(|o| o - 1) else { continue };
-        let l = textures.texture(tex);
-        // A zero-thick box just outside that face.
-        let axis = d / 2;
-        let mut offset = Vec3::ZERO;
-        let mut scale = Vec3::ONE;
-        offset[axis] = if d % 2 == 1 { 1.002 } else { -0.002 };
-        scale[axis] = 0.0;
-        let f = m * Mat4::from_translation(offset) * Mat4::from_scale(scale);
-        out.push(GpuBox {
-            rows: rows(f),
-            color: (color.truncate() * rgb).extend(color.w).to_array(),
-            ids: [0, box_mode::FACES, l | l << 16, l | l << 16],
-            ids2: [l | l << 16, 0, 0, 0],
-            ..Default::default()
-        });
-    }
 }
 
 /// An item model instance: `m` places the model's unit cube.
@@ -1037,8 +1019,12 @@ fn item_instance(m: Mat4, first: u32, hurt: f32, light: u32) -> GpuBox {
 /// Whether the item shows as its block's shape (else as a sprite).
 fn shows_block(item: u32) -> bool {
     let c = content();
-    let reshaped = super::looks::current().item(item).is_some_and(|l| l.model.is_some());
-    c.items.get(item as usize).is_some_and(|d| reshaped || !d.model.is_empty() || (d.icon == u32::MAX && d.block.is_some_and(|st| c.states[st as usize].item_sprite().is_none())))
+    let looks = super::looks::current();
+    match looks.item_draw(c, item) {
+        ItemDraw::Model(_) => true,
+        ItemDraw::Block(state) => looks.block_sprite(state, &c.states[state as usize]).is_none(),
+        _ => false,
+    }
 }
 
 /// Where an item goes in the hand of a model, from its arm at the shoulder (pixels): vanilla's

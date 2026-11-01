@@ -159,8 +159,10 @@ pub fn out_of_reach(m: &OpenMenu, dim: &Dim, player: u64) -> bool {
         return false;
     }
     let Some(owner) = dim.entities.get(m.owner).filter(|o| !o.removed) else { return true };
-    let Some(anchor) = owner.anchor.filter(|_| m.on_block) else { return false };
-    dim.entities.get(player).is_none_or(|p| (p.pos - (anchor.as_dvec3() + glam::DVec3::splat(0.5))).length_squared() > 8.5 * 8.5)
+    if owner.anchor.is_none() || !m.on_block {
+        return false;
+    }
+    dim.entities.get(player).is_none_or(|p| (p.pos - owner.pos).length_squared() > 8.5 * 8.5)
 }
 
 pub fn tick(m: &mut OpenMenu, dim: &mut Dim, c: &Content, player: u64) {

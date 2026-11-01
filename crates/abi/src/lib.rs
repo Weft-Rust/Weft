@@ -350,6 +350,15 @@ pub mod block_flags {
     /// Hide faces between two blocks of this kind (glass). Without it see-through blocks keep
     /// their inner faces, which is what makes leaves look dense.
     pub const CULL_SAME: u32 = 128;
+    /// Pistons can't move it.
+    pub const IMMOVABLE: u32 = 256;
+    /// Doesn't carry redstone power, the way glass doesn't. Wire can still lie on it.
+    pub const SIGNAL_BLOCKER: u32 = 512;
+    /// A piston moving it takes what touches it along, like slime.
+    pub const STICKY: u32 = 1024;
+    /// On a moving body it shoves, but can't be stood on and be taken along by: a piston's head
+    /// sliding out from under whoever stands on the piston.
+    pub const NOT_STOOD_ON: u32 = 2048;
 }
 
 #[repr(u32)]
@@ -361,6 +370,9 @@ pub enum Model {
     Cross = 2,
     /// `boxes` with their own textures.
     Boxes = 4,
+    /// Redstone wire: not meshed, the client draws it from its signal (its textures: the dot on
+    /// top, the line on the sides).
+    Wire = 8,
 }
 
 #[repr(u32)]
@@ -379,6 +391,20 @@ pub trait Schema {
 }
 
 /// Faces in order: -X, +X, -Y, +Y, -Z, +Z.
+/// A model box turned around an axis, a torch on a wall: around `origin` (1/16 block units), about
+/// `axis`, by `degrees`, right-handed.
+#[repr(C)]
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub struct BoxTilt {
+    pub origin: [f32; 3],
+    pub axis: [f32; 3],
+    pub degrees: f32,
+}
+
+impl BoxTilt {
+    pub const NONE: BoxTilt = BoxTilt { origin: [0.0; 3], axis: [0.0, 1.0, 0.0], degrees: 0.0 };
+}
+
 #[repr(C)]
 #[derive(Clone, Copy)]
 pub struct ModelBox {
@@ -390,8 +416,95 @@ pub struct ModelBox {
     /// Per face texel rectangle (u0, v0, u1, v1, 0..16); negative: from the box's position, like
     /// a cube's face.
     pub uv: [[f32; 4]; 6],
+    /// Per face quarter turns of the picture (`FACE_CORNERS`).
+    pub turn: [u8; 6],
+    pub tilt: BoxTilt,
 }
-defaults!(ModelBox { min: [0.0; 3], max: [16.0; 3], textures: [Str::EMPTY; 6], uv: [[-1.0; 4]; 6] });
+defaults!(ModelBox { min: [0.0; 3], max: [16.0; 3], textures: [Str::EMPTY; 6], uv: [[-1.0; 4]; 6], turn: [0; 6], tilt: BoxTilt::NONE });
+
+/// A face's corners, in the order its picture goes around them (-X, +X, -Y, +Y, -Z, +Z).
+pub const FACE_CORNERS: [[[i32; 3]; 4]; 6] = [
+    [[0, 0, 0], [0, 0, 1], [0, 1, 1], [0, 1, 0]],
+    [[1, 0, 1], [1, 0, 0], [1, 1, 0], [1, 1, 1]],
+    [[0, 0, 0], [1, 0, 0], [1, 0, 1], [0, 0, 1]],
+    [[0, 1, 1], [1, 1, 1], [1, 1, 0], [0, 1, 0]],
+    [[1, 0, 0], [0, 0, 0], [0, 1, 0], [1, 1, 0]],
+    [[0, 0, 1], [1, 0, 1], [1, 1, 1], [0, 1, 1]],
+];
+
+/// What a block is to redstone.
+pub mod signal_kind {
+    pub const NONE: u32 = 0;
+    /// Lies on faces; its state is `first_state + mask of them`.
+    pub const WIRE: u32 = 1;
+    /// Gives its `power` all around, strongly into the block it is on (`attach`).
+    pub const SOURCE: u32 = 2;
+    /// On unless the block it is on (`attach`) has power.
+    pub const TORCH: u32 = 3;
+    /// Full power out of `front` after `delay` when what is behind it has any.
+    pub const REPEATER: u32 = 4;
+    /// Compares what is behind it with its sides; `mode` 1 subtracts.
+    pub const COMPARATOR: u32 = 5;
+    /// A pulse out of its back when the block at `front` changes.
+    pub const OBSERVER: u32 = 6;
+    /// `BlockDesc::signal_logic` works out what comes out of `front`.
+    pub const LOGIC: u32 = 7;
+    /// `power` and `BlockDesc::on_signal` follow the power around it.
+    pub const SINK: u32 = 8;
+    /// Pushes blocks at `front` with power from any other side; `mode` 1 pulls them back.
+    pub const PISTON: u32 = 9;
+    pub const PISTON_HEAD: u32 = 10;
+    /// With power it takes all it is stuck to and carries it along `front`, faster the more power;
+    /// without, that lands. `mode` 1 breaks what is in the way, instead of stopping at it.
+    pub const MOTOR: u32 = 11;
+}
+
+/// Per state. A property named `power` holds its level: two values are off and full.
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct SignalDesc {
+    pub kind: u32,
+    /// Direction of what holds it (-X, +X, -Y, +Y, -Z, +Z), 6 for none.
+    pub attach: u32,
+    /// Direction it gives or looks, 6 for none.
+    pub front: u32,
+    /// Game ticks.
+    pub delay: u32,
+    pub mode: u32,
+    /// A piston's head block.
+    pub head: Str,
+}
+defaults!(SignalDesc { kind: signal_kind::NONE, attach: 6, front: 6, delay: 2, mode: 0, head: Str::EMPTY });
+
+#[repr(C)]
+pub struct SignalArgs {
+    pub world: *mut WorldCtx,
+    pub pos: [i32; 3],
+    pub state: u32,
+    pub level: u32,
+    /// What it was before.
+    pub was: u32,
+}
+
+/// What a comparator behind this block reads, `BlockDesc::signal_read`: set `output`, 0..15.
+#[repr(C)]
+pub struct SignalReadArgs {
+    pub world: *mut WorldCtx,
+    pub pos: [i32; 3],
+    pub state: u32,
+    pub output: u32,
+}
+
+/// What came in on each side of a `signal_kind::LOGIC` block, and `output` to set: what it gives now.
+#[repr(C)]
+pub struct LogicArgs {
+    pub world: *mut WorldCtx,
+    pub pos: [i32; 3],
+    pub state: u32,
+    pub rear: u32,
+    pub sides: [u32; 2],
+    pub output: u32,
+}
 
 #[repr(C)]
 #[derive(Clone, Copy)]
@@ -413,6 +526,7 @@ pub struct StateDesc {
     /// Components of this state only, on top of the block's (hardness, light, support and tint
     /// are components too, `comp::HARDNESS` ...).
     pub components: Slice<CompValue>,
+    pub signal: SignalDesc,
 }
 defaults!(StateDesc {
     flags: block_flags::SOLID | block_flags::OPAQUE,
@@ -425,6 +539,7 @@ defaults!(StateDesc {
     collision: Slice::EMPTY,
     selection: Slice::EMPTY,
     components: Slice::EMPTY,
+    signal: SignalDesc::DEFAULT,
 });
 
 #[repr(C)]
@@ -446,6 +561,9 @@ pub struct BlockDesc {
     pub on_use: Callback,
     pub on_neighbor: Callback,
     pub on_scheduled: Callback,
+    /// On a moving body, it came to another cell of the world: `pos` that cell, `other` where it is
+    /// on the body, `entity` the body. In the world's coordinates, for what it does there.
+    pub on_pass: Callback,
     /// `PlaceArgs`: choose the state from the player's facing/hit face.
     pub placement: Callback,
     /// Non-zero: replaces a block of the same name registered by a mod this one depends on.
@@ -466,6 +584,12 @@ pub struct BlockDesc {
     /// A menu using the block opens (on its block entity, if it has one). A block opening a
     /// menu with recipe kinds is a station of those kinds in the recipe viewer.
     pub opens: Str,
+    /// `SignalArgs`: the power around a `signal_kind::SINK` changed.
+    pub on_signal: Callback,
+    /// `LogicArgs`, for a `signal_kind::LOGIC`.
+    pub signal_logic: Callback,
+    /// `SignalReadArgs`: what a comparator behind it reads, instead of how full it is.
+    pub signal_read: Callback,
 }
 defaults!(BlockDesc {
     name: Str::EMPTY,
@@ -477,6 +601,7 @@ defaults!(BlockDesc {
 
     on_neighbor: Callback::NONE,
     on_scheduled: Callback::NONE,
+    on_pass: Callback::NONE,
     placement: Callback::NONE,
     replace: 0,
     grow_seconds: 0.0,
@@ -485,6 +610,9 @@ defaults!(BlockDesc {
     own_states: 1,
     retexture: Slice::EMPTY,
     opens: Str::EMPTY,
+    on_signal: Callback::NONE,
+    signal_logic: Callback::NONE,
+    signal_read: Callback::NONE,
 });
 
 #[repr(C)]
@@ -1779,6 +1907,8 @@ pub struct Host {
     pub client_command_reply: unsafe extern "C" fn(client: *mut ClientCtx, id: u32, out: *mut Str) -> u32,
     /// Block the client has at `pos`, `u32::MAX` if that cube is not loaded there.
     pub client_block: unsafe extern "C" fn(client: *mut ClientCtx, pos: *const [i32; 3]) -> u32,
+    /// The block the client has at `pos` of moving structure `entity`, `u32::MAX` if it has none.
+    pub client_structure_block: unsafe extern "C" fn(client: *mut ClientCtx, entity: u64, pos: *const [i32; 3]) -> u32,
     /// 1 if the cube holding `pos` is here and has been drawn.
     pub client_cube_shown: unsafe extern "C" fn(client: *mut ClientCtx, pos: *const [i32; 3]) -> u32,
     /// Light the client has at `pos` (sky level in the low byte, then block red, green, blue),
@@ -1903,6 +2033,8 @@ pub struct Host {
     pub reg_sky: unsafe extern "C" fn(reg: *mut Registrar, desc: *const SkyDesc),
     /// Server: particles for every player that sees `burst.pos`.
     pub particles: unsafe extern "C" fn(world: *mut WorldCtx, burst: *const ParticleBurst),
+    /// The strongest redstone power coming into a cell.
+    pub signal_at: unsafe extern "C" fn(world: *mut WorldCtx, pos: *const [i32; 3]) -> u32,
     /// Client: particles only this client shows.
     pub client_particles: unsafe extern "C" fn(client: *mut ClientCtx, burst: *const ParticleBurst),
 
@@ -1994,6 +2126,15 @@ pub struct Host {
     /// Sets a block of moving structure `entity` like `set_block` (updates, callbacks); 0 if it
     /// is none.
     pub set_structure_block: unsafe extern "C" fn(world: *mut WorldCtx, entity: u64, pos: *const [i32; 3], state: u32) -> u32,
+    /// Takes blocks of the world out into a new moving structure: `center` is its block
+    /// (0, 0, 0), they keep their places around that. Returns its entity, 0 if nothing came.
+    pub lift_blocks: unsafe extern "C" fn(world: *mut WorldCtx, center: *const [i32; 3], cells: *const [i32; 3], count: usize) -> u64,
+    /// A moving structure's blocks go back into the world where it is, at the nearest whole block.
+    pub put_down_body: unsafe extern "C" fn(world: *mut WorldCtx, entity: u64),
+    /// A moving structure goes to `pos` in exactly `ticks`, whatever it was doing.
+    pub body_go: unsafe extern "C" fn(world: *mut WorldCtx, entity: u64, pos: *const [f64; 3], ticks: u32),
+    /// What a comparator would read of the block at `pos` may be different now.
+    pub signal_read_changed: unsafe extern "C" fn(world: *mut WorldCtx, pos: *const [i32; 3]),
     /// Adds `cb` (`UiArgs`) to place `area` of screen `screen` (`core:title` has `buttons` and
     /// `side`), lowest `order` first. Engine screens and mods' own build these places.
     pub reg_screen_part: unsafe extern "C" fn(reg: *mut Registrar, screen: Str, area: Str, order: i32, cb: Callback),

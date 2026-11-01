@@ -9,6 +9,7 @@ use rustc_hash::{FxHashMap, FxHashSet};
 use super::mesher::{self, Mesh, Neighborhood, PAD_VOLUME, pidx};
 use crate::content::{AIR, content};
 use crate::world::cube::{ALL_AROUND, around_mask};
+use crate::world::light::{CubeMap, Lighter};
 use crate::world::{Cube, cube_of, local_index};
 
 pub struct MeshResult {
@@ -19,6 +20,18 @@ pub struct MeshResult {
 
 /// What the client keeps per cube, in one record: a lookup found it all (it was five maps, each
 /// a cache miss among a million and a half cubes).
+struct LitCubes<'a>(&'a mut FxHashMap<IVec3, Slot>);
+
+impl CubeMap for LitCubes<'_> {
+    fn cube(&self, c: IVec3) -> Option<&Cube> {
+        self.0.get(&c).map(|s| &*s.cube)
+    }
+
+    fn cube_mut(&mut self, c: IVec3) -> Option<&mut Cube> {
+        self.0.get_mut(&c).map(|s| Arc::make_mut(&mut s.cube))
+    }
+}
+
 struct Slot {
     cube: Arc<Cube>,
     /// Of its newest mesh job (`next_version`).
@@ -56,6 +69,8 @@ pub struct ClientWorld {
     tx: Sender<MeshResult>,
     rx: Receiver<MeshResult>,
     pub removed: Vec<IVec3>,
+    /// Cubes to look at again for redstone wire (`wires.rs`).
+    wire_dirty: rustc_hash::FxHashSet<IVec3>,
     /// What left the world this batch, to be freed off the main thread.
     unloaded: Vec<Slot>,
     next_version: u32,
@@ -153,6 +168,7 @@ impl ClientWorld {
             unloaded: Vec::new(),
             next_version: 0,
             next_rev: 0,
+            wire_dirty: Default::default(),
             filler: content().states.iter().position(|s| s.flags & weft_abi::block_flags::OPAQUE != 0).unwrap_or(0) as u32,
             columns: FxHashMap::default(),
             tints_dirty: FxHashSet::default(),
@@ -365,6 +381,9 @@ impl ClientWorld {
 
     /// `around`: the cubes around it not to wait for.
     pub fn insert(&mut self, pos: IVec3, cube: Arc<Cube>, around: super::terrain::Around) {
+        if self.has_wire(&cube) || self.cubes.get(&pos).is_some_and(|s| self.has_wire(&s.cube)) || self.wire_around(pos) {
+            self.wire_dirty.insert(pos);
+        }
         let (hidden, sky) = (around.hidden, around.sky);
         let col = IVec2::new(pos.x, pos.z);
         let mut fresh = false;
@@ -413,7 +432,20 @@ impl ClientWorld {
         }
     }
 
+    fn has_wire(&self, cube: &Cube) -> bool {
+        let c = crate::content::content();
+        cube.palette().iter().any(|&s| c.states[s as usize].signal.kind == weft_abi::signal_kind::WIRE)
+    }
+
+    /// Whether this cube or one next to it has wire.
+    fn wire_around(&self, pos: IVec3) -> bool {
+        std::iter::once(IVec3::ZERO).chain(crate::world::DIRS).any(|d| self.cubes.get(&(pos + d)).is_some_and(|s| self.has_wire(&s.cube)))
+    }
+
     pub fn remove(&mut self, pos: IVec3) {
+        if self.wire_around(pos) {
+            self.wire_dirty.insert(pos);
+        }
         if let Some(slot) = self.cubes.remove(&pos) {
             self.unloaded.push(slot);
             let col = IVec2::new(pos.x, pos.z);
@@ -434,10 +466,27 @@ impl ClientWorld {
         }
     }
 
+    pub fn has_wire_dirty(&self) -> bool {
+        !self.wire_dirty.is_empty()
+    }
+
+    pub fn take_wire_dirty(&mut self) -> Vec<IVec3> {
+        self.wire_dirty.drain().collect()
+    }
+
     pub fn set_block(&mut self, p: IVec3, state: u32) {
         let cp = cube_of(p);
         let Some(slot) = self.cubes.get_mut(&cp) else { return };
-        Arc::make_mut(&mut slot.cube).set(local_index(p), state);
+        // The shape of wire near it may depend on it, if it is more than a gate going on or off.
+        let c = crate::content::content();
+        let (old, new) = (&c.states[slot.cube.get(local_index(p)) as usize], &c.states[state as usize]);
+        let same_shape = old.block == new.block && old.signal.kind != weft_abi::signal_kind::WIRE && old.signal.front == new.signal.front && old.signal.attach == new.signal.attach;
+        let wire = weft_abi::signal_kind::WIRE;
+        if !same_shape && (old.signal.kind == wire || new.signal.kind == wire || self.wire_around(cp)) {
+            self.wire_dirty.insert(cp);
+        }
+        let Some(slot) = self.cubes.get_mut(&cp) else { return };
+        let was = Arc::make_mut(&mut slot.cube).set(local_index(p), state);
         self.next_rev += 1;
         (slot.rev, slot.stamp) = (self.next_rev, self.next_rev);
         if let Some(b) = &mut self.open {
@@ -445,6 +494,23 @@ impl ClientWorld {
         }
         let l = p & 15;
         self.touch(cp, around_mask(l.x, l.y, l.z));
+        // Its light with it, not when the server's word on that comes: a block broken doesn't
+        // leave a dark hole for a moment. What the server says after is the same. A moving
+        // structure's light is its own.
+        if !self.bounded {
+            let sky = c.dims[self.dim as usize].sky_light;
+            let mut map = LitCubes(&mut self.cubes);
+            let mut lighter = Lighter::new(&mut map, c, sky);
+            lighter.block_changed(p, was);
+            let changed = std::mem::take(&mut lighter.changed);
+            for n in changed {
+                self.next_rev += 1;
+                if let Some(slot) = self.cubes.get_mut(&n) {
+                    (slot.rev, slot.stamp) = (self.next_rev, self.next_rev);
+                }
+                self.touch(n, ALL_AROUND);
+            }
+        }
     }
 
     /// Remeshes every cube, e.g. after textures were reloaded.

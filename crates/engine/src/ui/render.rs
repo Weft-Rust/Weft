@@ -581,20 +581,10 @@ impl UiRenderer {
 
     /// Item icon: flat sprite, or an isometric cube for block items.
     pub fn item_icon(&mut self, c: &Content, tex: &GameTextures, x: f32, y: f32, size: f32, item: u32) {
-        let Some(def) = c.items.get(item as usize) else { return };
-        if item == 0 {
-            return;
-        }
         let looks = crate::client::looks::current();
-        let look = looks.item(item);
-        let model = look.and_then(|l| l.model.as_deref()).unwrap_or(&def.model);
-        let icon = look.and_then(|l| l.icon).unwrap_or(def.icon);
-        if !model.is_empty() {
-            self.boxes_icon(tex, x, y, size, model, &c.states[0]);
-            return;
-        }
-        if icon != u32::MAX {
-            self.quads.push(Quad {
+        match looks.item_draw(c, item) {
+            crate::client::looks::ItemDraw::Model(model) => self.boxes_icon(tex, x, y, size, model, &c.states[0]),
+            crate::client::looks::ItemDraw::Icon(icon) => self.quads.push(Quad {
                 p0: [x, y],
                 u: [size, 0.0],
                 v: [0.0, size],
@@ -603,17 +593,17 @@ impl UiRenderer {
                 tex: tex.texture(icon),
                 mode: ui_mode::ICON,
                 ..Default::default()
-            });
-            return;
+            }),
+            crate::client::looks::ItemDraw::Block(state) => self.state_icon(c, tex, x, y, size, state),
+            crate::client::looks::ItemDraw::Nothing => {}
         }
-        let Some(state) = def.block else { return };
-        self.state_icon(c, tex, x, y, size, state);
     }
 
     /// A block state the way block items show: a sprite for flat blocks, else an isometric model.
     pub fn state_icon(&mut self, c: &Content, tex: &GameTextures, x: f32, y: f32, size: f32, state: u32) {
         let Some(s) = c.states.get(state as usize) else { return };
-        if let Some(t) = s.item_sprite() {
+        let looks = crate::client::looks::current();
+        if let Some(t) = looks.block_sprite(state, s) {
             let tint = if s.tint == 0 || s.tint_faces & 1 == 0 { 0xFFFFFFFF } else { crate::content::item_tint(s.tint) << 8 | 0xFF };
             self.quads.push(Quad {
                 p0: [x, y],
@@ -627,7 +617,7 @@ impl UiRenderer {
             });
             return;
         }
-        self.boxes_icon(tex, x, y, size, &s.item_shape(), s);
+        self.boxes_icon(tex, x, y, size, &looks.block_shape(state, s), s);
     }
 
     /// Model boxes drawn isometric, tinted like `s` (air for an item's own model).
@@ -648,21 +638,25 @@ impl UiRenderer {
         let (h, q, up) = (size * 0.625 * 0.707_106_8, size * 0.625 * 0.353_553_4, size * 0.625 * 0.866_025_4);
         let o = [x + size / 2.0, y + size / 2.0];
         let at = |p: [f32; 3]| [o[0] + (p[0] - p[2]) * h, o[1] + (p[0] + p[2] - 1.0) * q - (p[1] - 0.5) * up];
+        // Toward the one looking, from that same turn.
+        let toward = glam::Vec3::new(0.612_372_4, 0.5, 0.612_372_4);
         let grass = crate::content::item_tint(s.tint) << 8 | 0xFF;
         let mut shape = boxes.to_vec();
         // Back to front.
         shape.sort_by(|a, b| (a.min[0] + a.min[1] + a.min[2]).total_cmp(&(b.min[0] + b.min[1] + b.min[2])));
         for b in &shape {
-            let (n, m) = (b.min, b.max);
-            let (dx, dy, dz) = (m[0] - n[0], m[1] - n[1], m[2] - n[2]);
-            // (corner, u edge, v edge, face, shade, uv rect): the faces seen from the front, with
-            // the part of the texture the world mesher shows there.
-            let faces = [
-                (at([n[0], m[1], m[2]]), [dx * h, dx * q], [0.0, dy * up], 5, 0.8, [n[0], 1.0 - m[1], m[0], 1.0 - n[1]]),
-                (at([m[0], m[1], m[2]]), [dz * h, -dz * q], [0.0, dy * up], 1, 0.62, [1.0 - m[2], 1.0 - m[1], 1.0 - n[2], 1.0 - n[1]]),
-                (at([n[0], m[1], n[2]]), [dx * h, dx * q], [-dz * h, dz * q], 3, 1.0, [n[0], n[2], m[0], m[2]]),
-            ];
-            for (p0, u, v, face, k, uv) in faces {
+            for face in 0..6 {
+                let Some((corners, uv)) = crate::client::mesher::box_face(b, face) else { continue };
+                let (n, k) = crate::client::mesher::face_look(&corners);
+                if n.dot(toward) <= 0.0 {
+                    continue;
+                }
+                // A quad starts at the top left of its picture: the fourth corner of a face.
+                let [bottom_left, _, top_right, top_left] = corners.map(at);
+                let p0 = top_left;
+                let u = [top_right[0] - p0[0], top_right[1] - p0[1]];
+                let v = [bottom_left[0] - p0[0], bottom_left[1] - p0[1]];
+                let uv = uv.map(|t| t / 16.0);
                 self.quads.push(Quad { p0, u, v, uv, color: shade(tint(face), k), tex: tex.texture(b.textures[face]), mode: ui_mode::ICON, ..Default::default() });
                 // Tinted overlay on top of its face.
                 if let Some(&ov) = tex.overlays.get(b.textures[face] as usize).filter(|&&ov| ov != 0) {

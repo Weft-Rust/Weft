@@ -11,6 +11,7 @@ pub mod particles;
 pub mod sky;
 pub mod terrain;
 pub mod weather;
+pub mod wires;
 pub mod terrain_gpu;
 pub mod lod;
 pub mod textures;
@@ -75,10 +76,6 @@ pub struct LocalPlayer {
     pub support: Option<u64>,
     /// Its box standing (width, height, eye): the player kind's, or what a mod gave it.
     pub size: [f64; 3],
-    /// How far rides have carried it in all, now and at the previous tick: motion in the frame
-    /// of what it stands on is the position less this (walking, bobbing).
-    pub carried: DVec3,
-    pub carried_prev: DVec3,
     /// Riding a body: its id and the position relative to it at the previous and the last
     /// step. Drawn on the body as shown, so a rider and its deck never drift apart.
     pub riding: Option<(u64, DVec3, DVec3)>,
@@ -139,6 +136,8 @@ pub struct ClientEntity {
     pub rel_target: Option<DVec3>,
     /// A moving structure's blocks, in its own coordinates (meshed like the world's).
     pub structure: Option<Box<ClientWorld>>,
+    /// The world's light on a moving structure, by its cubes, as the server worked it out.
+    pub world_light: rustc_hash::FxHashMap<IVec3, u32>,
 }
 
 /// A picked up item reaches the taker's feet in three ticks (vanilla's pickup animation).
@@ -201,6 +200,13 @@ impl ClientEntity {
             before = (t, p);
         }
         last
+    }
+
+    /// `pose` for physics, which takes only what the server has said. It runs a step ahead of what
+    /// is drawn, past the newest position half the time; going on as last moved from there, it
+    /// overshoots every stop, and shoves whoever is next to where the body stops.
+    pub fn known(&self, tick: f64) -> DVec3 {
+        self.pose(self.track.back().map_or(tick, |t| tick.min(t.0)))
     }
 }
 
@@ -336,6 +342,8 @@ pub struct Client {
     walk_dist: f32,
     bob: f32,
     last_smooth: DVec3,
+    /// What that was relative to: the body it rode, if any.
+    last_frame: Option<u64>,
     /// How long the move since `last_smooth` took.
     moved_over: f32,
     /// Held item and when it became held: its name shows above the hotbar for a moment.
@@ -353,6 +361,7 @@ pub struct Client {
     /// Seconds left of the red screen flash after taking damage.
     pub hurt_flash: f32,
     pub particles: particles::Particles,
+    pub wires: wires::Wires,
     pub weather_render: weather::Weather,
     pub sky: sky::Sky,
     /// Scratch: taken items and where they fly to this frame.
@@ -480,6 +489,7 @@ impl Client {
         let render = WorldRenderer::new(gpu, c, textures, assets)?;
         let entity_render = EntityRenderer::new(gpu, assets)?;
         let particles = particles::Particles::new(gpu, assets);
+        let wires = wires::Wires::new(gpu, assets);
         let weather_render = weather::Weather::new(gpu, assets);
         let sky = sky::Sky::new(gpu, assets);
         conn.send(ToServer::Join { name: name.to_string(), key: key.to_string() });
@@ -516,8 +526,6 @@ impl Client {
                 can_sprint: true,
                 support: None,
                 size: { let k = &c.game.entities[c.game.player_kind as usize]; [k.width, k.height, k.eye].map(|v| v as f64) },
-                carried: DVec3::ZERO,
-                carried_prev: DVec3::ZERO,
                 riding: None,
                 flying: false,
                 noclip: false,
@@ -567,6 +575,7 @@ impl Client {
             max_health: 20.0,
             hurt_flash: 0.0,
             particles,
+            wires,
             sky,
             pulls: Vec::new(),
             frames: Vec::new(),
@@ -605,6 +614,7 @@ impl Client {
             walk_dist: 0.0,
             bob: 0.0,
             last_smooth: DVec3::ZERO,
+            last_frame: None,
             moved_over: 0.0,
             dead: false,
             permission: 0,
@@ -662,6 +672,7 @@ impl Client {
     /// Starts the terrain over for dimension `dim` (joined, or moved to another dimension).
     fn reset_terrain(&mut self, dim: u32, fwd: &mut Vec<terrain::In>) {
         self.world.clear();
+        self.wires.clear();
         self.meshes.clear();
         self.world.dim = dim;
         self.terrain_resets += 1;
@@ -790,10 +801,15 @@ impl Client {
     fn animate_player(&mut self, input: &Input, dt: f64) -> f32 {
         let spectator = self.mode == GameMode::Spectator;
         let t = (self.accum / STEP).clamp(0.0, 1.0);
-        let now = self.smooth_pos() - self.player.carried_prev.lerp(self.player.carried, t);
-        let moved = (now - self.last_smooth).with_y(0.0).length().min(2.0) as f32;
-        let walked_by = now - self.last_smooth;
-        self.last_smooth = now;
+        // Walking is how its place changes on what it stands on, not how that goes.
+        let (now, frame) = match self.player.riding {
+            Some((b, before, rel)) => (before.lerp(rel, t), Some(b)),
+            None => (self.smooth_pos(), None),
+        };
+        // Getting on or off isn't a step.
+        let walked_by = if frame == self.last_frame { now - self.last_smooth } else { DVec3::ZERO };
+        let moved = walked_by.with_y(0.0).length().min(2.0) as f32;
+        (self.last_smooth, self.last_frame) = (now, frame);
         self.self_body = turn_body(self.self_body, self.player.yaw, walked_by, dt as f32);
         // That move is the last frame's: physics runs after this. By this frame's time, uneven frames
         // made the speed jump up and down and the bob settle far too low.
@@ -870,11 +886,10 @@ impl Client {
                 ambient_steps += 1;
                 // A rider is where it is on its body: if moves arrived late and the body's past
                 // changed, the rider moves with it, not over the deck.
-                if let Some(e) = self.player.riding.and_then(|(b, _, now)| self.entities.get(&b).map(|e| e.pose(self.body_tick(self.body_clock)) + now)) {
+                if let Some(e) = self.player.riding.and_then(|(b, _, now)| self.entities.get(&b).map(|e| e.known(self.body_tick(self.body_clock)) + now)) {
                     self.player.pos = e;
                 }
                 self.player.prev = self.player.pos;
-                self.player.carried_prev = self.player.carried;
                 let flying = self.player.flying || self.player.noclip;
                 let gravity = c.dims[world.dim as usize].gravity as f64;
                 // Solid bodies at this step (predicted like the server moves them) and soft
@@ -886,18 +901,17 @@ impl Client {
                 for (&id, e) in &self.entities {
                     let k = &c.game.entities[e.kind as usize];
                     if k.is(weft_abi::entity_flags::SOLID) {
-                        let (now, delta) = (e.pose(at), e.pose(at) - e.pose(at - 1.0));
+                        let (now, delta) = (e.known(at), e.known(at) - e.known(at - 1.0));
                         let aabb = physics::Aabb::around(now, k.width as f64 / 2.0, k.height as f64);
                         let built = e.structure.as_deref();
                         let aabb = match built {
                             Some(s) => {
                                 let Some((lo, hi)) = s.bounds else { continue };
-                                let o = crate::server::structure_origin(now);
-                                physics::Aabb { min: o + lo.as_dvec3(), max: o + (hi + IVec3::ONE).as_dvec3() }
+                                physics::Transform::of(now).box_to_world(physics::Aabb { min: lo.as_dvec3(), max: (hi + IVec3::ONE).as_dvec3() })
                             }
                             None => aabb,
                         };
-                        let blocks = built.map(|s| (s as &dyn physics::Blocks, crate::server::structure_origin(now)));
+                        let blocks = built.map(|s| (s as &dyn physics::Blocks, physics::Transform::of(now)));
                         bodies.push(physics::Body { id, aabb, delta, carry: k.carry_height as f64, crushes: false, blocks });
                     } else if k.is(weft_abi::entity_flags::PUSHABLE) && e.item.is_empty() && e.dying.is_none() {
                         let d = self.player.pos - e.pos;
@@ -921,7 +935,7 @@ impl Client {
                 }
                 let entities = &self.entities;
                 let p = &self.player;
-                self.player.riding = p.support.and_then(|b| entities.get(&b).map(|e| (b, p.prev - e.pose(at - 1.0), p.pos - e.pose(at))));
+                self.player.riding = p.support.and_then(|b| entities.get(&b).map(|e| (b, p.prev - e.known(at - 1.0), p.pos - e.known(at))));
                 if crate::log::on(crate::log::Channel::Physics, log::Level::Trace) {
                     let p = &self.player;
                     let feet = p.pos.floor().as_ivec3() - glam::IVec3::Y;
@@ -1031,12 +1045,13 @@ impl Client {
                 let progress = if time <= 0.0 { 1.0 } else { done + dt as f32 / time };
                 if progress >= 1.0 && (input.pressed("core:attack") || self.break_delay <= 0.0) {
                     send_look.send(&mut self.conn);
-                    self.conn.send(ToServer::Break { pos: hit.block, frame: hit.frame });
+                    self.conn.send(ToServer::Break { pos: hit.block, face: hit.face, frame: hit.frame });
+                    let after = crate::wire::after_break(content(), hit.state, hit.face);
                     match hit.frame {
-                        0 => self.world.set_block(hit.block, crate::content::AIR),
+                        0 => self.world.set_block(hit.block, after),
                         f => {
                             if let Some(s) = self.entities.get_mut(&f).and_then(|e| e.structure.as_mut()) {
-                                s.set_block(hit.block, crate::content::AIR);
+                                s.set_block(hit.block, after);
                             }
                         }
                     }
@@ -1173,7 +1188,7 @@ impl Client {
                 self.hit_dust = 0.05;
                 if let Some(&kind) = c.game.particle_names.get(weft_abi::particle::BLOCK) {
                     let normal = crate::world::DIRS[hit.face as usize].as_vec3();
-                    let at = pos.as_dvec3() + self.frame_origin(frame) + DVec3::splat(0.5) + (normal * 0.55).as_dvec3();
+                    let at = self.frame_place(frame).to_world(pos.as_dvec3() + DVec3::splat(0.5) + (normal * 0.55).as_dvec3());
                     let spread = (glam::Vec3::splat(0.45) * (glam::Vec3::ONE - normal.abs())).to_array();
                     let velocity = [0.0, 2.0, 0.0];
                     self.particles.spawn(&weft_abi::ParticleBurst { kind, pos: at.to_array(), spread, velocity, speed: 0.72, count: 1, block: hit.state, ..weft_abi::ParticleBurst::DEFAULT }, &self.world);
@@ -1353,7 +1368,9 @@ impl Client {
             let p = center + IVec3::new((r % 33) as i32 - 16, ((r >> 8) % 33) as i32 - 16, ((r >> 16) % 33) as i32 - 16);
             let state = self.world.block(p);
             for &kind in kinds.get(state as usize).map_or(&[][..], |k| &k[..]) {
-                let pos = [p.x as f64 + 0.5, p.y as f64 + 0.9, p.z as f64 + 0.5];
+                // Vanilla's: over a torch, and out from the wall where it leans.
+                let wall = c.states[state as usize].support.map(|(f, _)| f as usize).filter(|f| f / 2 != 1).map(|f| crate::world::DIRS[f].as_dvec3());
+                let pos = (p.as_dvec3() + wall.map_or(DVec3::new(0.5, 0.7, 0.5), |d| DVec3::new(0.5, 0.92, 0.5) - d * 0.27)).to_array();
                 bursts.push(weft_abi::ParticleBurst { kind, pos, spread: [0.1, 0.1, 0.1], speed: 0.1, count: 1, ..weft_abi::ParticleBurst::DEFAULT });
             }
             // Water through a ceiling: a solid block under water, air under that.
@@ -1423,7 +1440,7 @@ impl Client {
                 // Vanilla knocks every four ticks while mining.
                 self.hit_sound = 0.2;
                 let sound = c.states[hit.state as usize].sounds[3];
-                self.sounds.push(Play { sound, pos: Some(hit.block.as_dvec3() + self.frame_origin(hit.frame) + DVec3::splat(0.5)), volume: 0.4, pitch: 0.0 });
+                self.sounds.push(Play { sound, pos: Some(self.frame_place(hit.frame).to_world(hit.block.as_dvec3() + DVec3::splat(0.5))), volume: 0.4, pitch: 0.0 });
             }
         }
         self.sounds.retain(|p| p.sound != u32::MAX);
@@ -1521,22 +1538,31 @@ impl Client {
         slots.iter().filter(|s| !s.is_empty() && c.worn(s.item).is_some()).map(|s| s.item).collect()
     }
 
-    /// Where the block (0, 0, 0) of `frame`'s space is drawn: a structure's pose, the world at 0.
-    pub fn frame_origin(&self, frame: u64) -> DVec3 {
-        match frame {
-            0 => DVec3::ZERO,
-            f => self.entities.get(&f).map_or(DVec3::ZERO, |e| crate::server::structure_origin(e.pos)),
+    /// Wire of the world and of bodies, before the frame's passes.
+    pub fn update_wires(&mut self, gpu: &mut dyn weft_render::Backend, textures: &textures::GameTextures) {
+        self.wires.update(gpu, 0, &mut self.world, textures);
+        for (&id, e) in &mut self.entities {
+            if let Some(s) = e.structure.as_deref_mut() {
+                self.wires.update(gpu, id, s, textures);
+            }
         }
+        let entities = &self.entities;
+        self.wires.keep_frames(gpu, |id| entities.get(&id).is_some_and(|e| e.structure.is_some()));
+    }
+
+    /// Where `frame`'s space is drawn: a structure's pose, the world as it is at 0.
+    pub fn frame_place(&self, frame: u64) -> physics::Transform {
+        self.entities.get(&frame).filter(|_| frame != 0).map_or(physics::Transform::default(), |e| physics::Transform::of(e.pos))
     }
 
     /// The block looked at: the world's or a structure's, whichever the ray enters first.
     fn raycast(&self, eye: DVec3, look: DVec3, reach: f64) -> Option<Hit> {
         let world = &self.world;
         let now = self.body_tick(self.body_clock - STEP + self.accum);
-        let structures: Vec<(u64, DVec3, &dyn physics::Blocks)> = self
+        let structures: Vec<(u64, physics::Transform, &dyn physics::Blocks)> = self
             .entities
             .iter()
-            .filter_map(|(&id, e)| e.structure.as_deref().map(|s| (id, crate::server::structure_origin(e.pose(now)), s as &dyn physics::Blocks)))
+            .filter_map(|(&id, e)| e.structure.as_deref().map(|s| (id, physics::Transform::of(e.pose(now)), s as &dyn physics::Blocks)))
             .collect();
         physics::pick(content(), &|p| world.block_or_air(p), &structures, eye, look, reach, false)
     }
@@ -1654,6 +1680,7 @@ impl Client {
             rel: DVec3::ZERO,
             rel_target: None,
             structure: None,
+            world_light: Default::default(),
         }
     }
 
@@ -1669,6 +1696,7 @@ impl Client {
         self.render.destroy(gpu);
         self.entity_render.destroy(gpu);
         self.particles.destroy(gpu);
+        self.wires.destroy(gpu);
         self.weather_render.destroy(gpu);
         self.sky.destroy(gpu);
         self.gpu_terrain.destroy(gpu);
@@ -1762,8 +1790,12 @@ impl Client {
         gpu.mapped(scene_buf)[..size_of::<Scene>()].copy_from_slice(bytemuck::bytes_of(&scene));
         // Opaque blocks, then entities and cutout particles, then what is seen through:
         // translucent blocks, cracks and gizmo fills, blended particles, and the hand.
-        let frames: Vec<(u64, DVec3)> = self.entities.iter().filter(|(_, e)| e.structure.is_some()).map(|(&id, e)| (id, crate::server::structure_origin(e.pos))).collect();
-        self.render.draw(gpu, list, frame, &cam, scene_buf, &frames);
+        let frames: Vec<(u64, DVec3)> = self.entities.iter().filter(|(_, e)| e.structure.is_some()).map(|(&id, e)| (id, physics::Transform::of(e.pos).origin())).collect();
+        // The world's light on each, as the server worked it out when it got there.
+        let lights: rustc_hash::FxHashMap<(u64, IVec3), u32> = self.entities.iter().flat_map(|(&id, e)| e.world_light.iter().map(move |(cp, l)| ((id, *cp), *l))).collect();
+        self.render.draw(gpu, list, frame, &cam, scene_buf, &frames, &lights);
+        let lit: Vec<u32> = frames.iter().map(|(id, _)| self.entities.get(id).map_or(crate::world::light::SKY_FULL as u32, |e| e.world_light.values().copied().max().unwrap_or(crate::world::light::SKY_FULL as u32))).collect();
+        self.wires.draw(list, &cam, scene_buf, &frames, &lit);
         list.push(weft_render::Cmd::Mark);
         let mut late = std::mem::take(&mut self.late);
         late.clear();
@@ -1786,8 +1818,8 @@ impl Client {
         let mut hand_late = std::mem::take(&mut self.hand_late);
         hand_late.clear();
         let mut cracks: Vec<(IVec3, f32, DVec3)> = self.others_mining.iter().map(|&(_, p, v)| (p, v, DVec3::ZERO)).collect();
-        cracks.extend(self.breaking.map(|(f, p, v)| (p, v, self.frame_origin(f))));
-        self.entity_render.draw(gpu, list, frame, &cam, &self.entities, me.as_ref(), hand, textures, &light, &scene, scene_buf, self.target.filter(|_| !self.hide_gui).map(|h| (h, self.frame_origin(h.frame))), &cracks, &self.gizmo_lines, &self.gizmo_fills, &mut hand_late);
+        cracks.extend(self.breaking.map(|(f, p, v)| (p, v, self.frame_place(f).origin())));
+        self.entity_render.draw(gpu, list, frame, &cam, &self.entities, me.as_ref(), hand, textures, &light, &scene, scene_buf, self.target.filter(|_| !self.hide_gui).map(|h| (h, self.frame_place(h.frame).origin())), &cracks, &self.gizmo_lines, &self.gizmo_fills, &mut hand_late);
         self.particles.draw(list, &mut late, scene_buf);
         let ticks = self.smooth_time();
         self.weather_render.draw(gpu, &mut late, frame, &cam, scene_buf, &self.world, self.rain, ticks, self.frame_dt);
@@ -1844,12 +1876,9 @@ fn step_player(p: &mut LocalPlayer, input: &Input, block: &impl Fn(IVec3) -> Opt
     let (hw, _, _) = p.dims();
     if !p.noclip {
         let h = p.dims().1;
-        let ride = physics::ride(p.pos, hw, &mut p.support, bodies);
+        let ride = physics::ride(c, p.pos, hw, p.on_ground, &mut p.support, bodies, 0);
         if ride.carry != DVec3::ZERO {
             let moved = physics::move_box(c, block, p.pos, hw, h, ride.carry, 0.0).pos;
-            // The carry is part of the step, so the camera glides along with the body (drawn a
-            // step behind, like the player).
-            p.carried += moved - p.pos;
             p.pos = moved;
         }
         if let Some(d) = ride.released {

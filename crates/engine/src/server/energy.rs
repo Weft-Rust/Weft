@@ -86,7 +86,7 @@ impl Grid {
         }
     }
 
-    fn rebuild(&mut self, e: &Entities, c: &Content) {
+    fn rebuild(&mut self, e: &Entities, frame: u64, c: &Content) {
         self.dirty = false;
         self.nets.clear();
         let mut seen: FxHashSet<IVec3> = FxHashSet::default();
@@ -105,7 +105,7 @@ impl Grid {
                         if seen.insert(n) {
                             stack.push(n);
                         }
-                    } else if let Some(&id) = e.anchors.get(&n) {
+                    } else if let Some(&id) = e.anchors.get(&(frame, n)) {
                         if e.comps.contains_key(&(id, c.game.energy)) {
                             ends.push(id);
                         }
@@ -122,9 +122,9 @@ impl Grid {
 
     /// `catch_up`: a part of a catch-up, the machines making up ticks and how many (their rates
     /// count that many times); the others sit it out.
-    pub fn tick(&mut self, e: &mut Entities, c: &Content, catch_up: Option<&FxHashMap<u64, u32>>) {
+    pub fn tick(&mut self, e: &mut Entities, frame: u64, c: &Content, catch_up: Option<&FxHashMap<u64, u32>>) {
         if self.dirty {
-            self.rebuild(e, c);
+            self.rebuild(e, frame, c);
         }
         for net in &self.nets {
             let mut offer: Vec<(u64, i64)> = Vec::new();

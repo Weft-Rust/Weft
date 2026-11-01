@@ -74,9 +74,11 @@ fn composite_name(parts: &[String; 4]) -> String {
 }
 
 impl GameTextures {
-    /// Also loads the connected texture rules, whose tiles become block textures.
+    /// Also loads the resource packs' models and the connected texture rules, whose textures and
+    /// tiles become block textures.
     pub fn new(gpu: &mut dyn Backend, c: &Content, assets: &Assets) -> GameTextures {
-        let (ctm, extra) = super::ctm::load(assets, c);
+        let (looks, names) = super::looks::load(assets, c);
+        let (ctm, extra) = super::ctm::load(assets, c, &looks, names);
         let overlays = ctm.overlay.clone();
         super::ctm::set(ctm);
         let mut entries: Vec<Entry> = Vec::new();
@@ -92,11 +94,6 @@ impl GameTextures {
             let parts = parts.map(|p| ids.get(p as usize).copied().unwrap_or(0));
             let name = composite_name(&parts.map(|i| entries[i as usize].name.clone()));
             ids.push(add(name, Source::Composite(parts), &mut entries));
-        }
-        // Resource packs' block and item models, with the textures they bring after the rest.
-        let (looks, names) = super::looks::load(assets, c, ids.len() as u32);
-        for n in names {
-            ids.push(add(n, Source::File, &mut entries));
         }
         super::looks::set(looks);
         let blank = gpu.create_texture(&TextureDesc { width: 1, height: 1, mips: 1, format: Format::Rgba8Srgb, render_target: false }, "blank texture");
@@ -276,7 +273,7 @@ impl GameTextures {
                 let Some(&o) = loaded.get(&n.entries[k].name) else { continue };
                 if same[k] {
                     let (oe, ne) = (&mut old.entries[o as usize], &mut n.entries[k]);
-                    (ne.frames, ne.glow, ne.images, ne.anim, ne.stamp) = (std::mem::take(&mut oe.frames), std::mem::take(&mut oe.glow), std::mem::take(&mut oe.images), oe.anim.take(), oe.stamp);
+                    (ne.frames, ne.glow, ne.images, ne.anim, ne.stamp, ne.size) = (std::mem::take(&mut oe.frames), std::mem::take(&mut oe.glow), std::mem::take(&mut oe.images), oe.anim.take(), oe.stamp, oe.size);
                     let pairs: Vec<(u32, u32)> = ne.frames.iter().copied().zip(ne.glow.iter().copied()).collect();
                     for (f, g) in pairs {
                         set_glow(&mut n.glow_map, f, g);

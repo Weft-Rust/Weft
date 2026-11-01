@@ -17,6 +17,34 @@ pub struct ModelBox {
     pub textures: [u32; 6],
     /// Per face texels (u0, v0, u1, v1, 0..16), negative: from the box's position.
     pub uv: [[f32; 4]; 6],
+    /// Per face quarter turns of the picture.
+    pub turn: [u8; 6],
+    /// Origin in block units.
+    pub tilt: weft_abi::BoxTilt,
+}
+
+impl ModelBox {
+    /// A whole cube showing these textures.
+    pub fn whole(textures: [u32; 6]) -> ModelBox {
+        ModelBox { min: [0.0; 3], max: [1.0; 3], textures, uv: [[-1.0; 4]; 6], turn: [0; 6], tilt: weft_abi::BoxTilt::NONE }
+    }
+}
+
+/// What a state is to redstone (`abi::SignalDesc`, worked out for quick reading).
+#[derive(Clone, Copy, Default)]
+pub struct Signal {
+    pub kind: u32,
+    /// What it gives now.
+    pub level: u8,
+    pub attach: u8,
+    pub front: u8,
+    pub delay: u8,
+    pub mode: u8,
+    /// How many values its `power` property has (0: none), and states between them.
+    pub levels: u8,
+    pub stride: u32,
+    /// A piston's head block.
+    pub head: Option<u32>,
 }
 
 pub struct StateInfo {
@@ -57,6 +85,7 @@ pub struct StateInfo {
     pub smother: Option<(u32, f64)>,
     /// Sound events break, place, step, hit (`u32::MAX` none), from its `sound` component.
     pub sounds: [u32; 4],
+    pub signal: Signal,
 }
 
 impl StateInfo {
@@ -67,17 +96,8 @@ impl StateInfo {
             return Some(self.textures[3]);
         }
         match self.model {
-            Model::Cross | Model::None => Some(self.textures[0]),
+            Model::Cross | Model::None | Model::Wire => Some(self.textures[0]),
             _ => None,
-        }
-    }
-
-    /// Boxes an item of this block is drawn with when it is not a sprite (block units).
-    pub fn item_shape(&self) -> Vec<ModelBox> {
-        if self.model == Model::Boxes && !self.boxes.is_empty() {
-            self.boxes.clone()
-        } else {
-            vec![ModelBox { min: [0.0; 3], max: [1.0; 3], textures: self.textures, uv: [[-1.0; 4]; 6] }]
         }
     }
 }
@@ -87,10 +107,14 @@ pub struct BlockCallbacks {
     pub on_use: Option<Callback>,
     pub on_neighbor: Option<Callback>,
     pub on_scheduled: Option<Callback>,
+    pub on_pass: Option<Callback>,
+    pub signal_read: Option<Callback>,
     pub placement: Option<Callback>,
     pub on_grow: Option<Callback>,
     /// Growth over time: (mean ticks per step, light needed).
     pub grow: Option<(f64, u32)>,
+    pub on_signal: Option<Callback>,
+    pub signal_logic: Option<Callback>,
 }
 
 pub struct BlockDef {
@@ -709,6 +733,16 @@ pub struct RawRegistrar {
 }
 
 #[derive(Clone)]
+pub struct RawSignal {
+    pub kind: u32,
+    pub attach: u8,
+    pub front: u8,
+    pub delay: u8,
+    pub mode: u8,
+    pub head: String,
+}
+
+#[derive(Clone)]
 pub struct RawState {
     pub flags: u32,
     pub filter: [u8; 3],
@@ -716,10 +750,11 @@ pub struct RawState {
     pub layer: Layer,
     pub model: Model,
     pub textures: [String; 6],
-    /// (min, max, textures, uv) per box, see `abi::ModelBox`.
-    pub boxes: Vec<([f32; 3], [f32; 3], [String; 6], [[f32; 4]; 6])>,
+    /// (min, max, textures, uv, turn, tilt) per box, see `abi::ModelBox`.
+    pub boxes: Vec<([f32; 3], [f32; 3], [String; 6], [[f32; 4]; 6], [u8; 6], weft_abi::BoxTilt)>,
     pub collision: Vec<[f32; 6]>,
     pub selection: Vec<[f32; 6]>,
+    pub signal: RawSignal,
     pub components: Vec<RawValue>,
 }
 
@@ -792,14 +827,14 @@ fn inherit_states(b: &mut RawBlock, old: &RawBlock) {
             let mut s = o.clone();
             s.components.extend(own.components.iter().cloned());
             s.textures.iter_mut().for_each(rename);
-            for (_, _, t, _) in &mut s.boxes {
+            for (_, _, t, _, _, _) in &mut s.boxes {
                 t.iter_mut().for_each(rename);
             }
             s
         })
         .collect();
     let (n, o) = (&mut b.cb, &old.cb);
-    for (mine, theirs) in [(&mut n.on_use, o.on_use), (&mut n.on_neighbor, o.on_neighbor), (&mut n.on_scheduled, o.on_scheduled), (&mut n.placement, o.placement), (&mut n.on_grow, o.on_grow)] {
+    for (mine, theirs) in [(&mut n.on_pass, o.on_pass), (&mut n.signal_read, o.signal_read), (&mut n.on_signal, o.on_signal), (&mut n.signal_logic, o.signal_logic), (&mut n.on_use, o.on_use), (&mut n.on_neighbor, o.on_neighbor), (&mut n.on_scheduled, o.on_scheduled), (&mut n.placement, o.placement), (&mut n.on_grow, o.on_grow)] {
         if mine.is_none() {
             *mine = theirs;
         }
@@ -827,7 +862,7 @@ fn apply_model(b: &mut RawBlock, m: &crate::block_model::FileModel) {
         if s.layer == Layer::Opaque {
             s.layer = Layer::Cutout;
         }
-        s.boxes = m.boxes.iter().map(|x| (x.min, x.max, x.textures.clone(), x.uv)).collect();
+        s.boxes = m.boxes.iter().map(|x| (x.min, x.max, x.textures.clone(), x.uv, x.turn, x.tilt)).collect();
     }
 }
 
@@ -836,7 +871,7 @@ pub(crate) unsafe fn copy_block(d: &abi::BlockDesc) -> RawBlock {
         let mut states = Vec::new();
         d.states.as_slice().iter().copied().for_each(|s| {
             let mut boxes = Vec::new();
-            s.boxes.as_slice().iter().copied().for_each(|b| boxes.push((b.min, b.max, std::array::from_fn(|i| b.textures[i].as_str().to_string()), b.uv)));
+            s.boxes.as_slice().iter().copied().for_each(|b| boxes.push((b.min, b.max, std::array::from_fn(|i| b.textures[i].as_str().to_string()), b.uv, b.turn, b.tilt)));
             states.push(RawState {
                 flags: s.flags,
                 filter: s.filter,
@@ -847,6 +882,7 @@ pub(crate) unsafe fn copy_block(d: &abi::BlockDesc) -> RawBlock {
                 boxes,
                 collision: s.collision.as_slice().to_vec(),
                 selection: s.selection.as_slice().to_vec(),
+                signal: RawSignal { kind: s.signal.kind, attach: s.signal.attach as u8, front: s.signal.front as u8, delay: s.signal.delay.min(31) as u8, mode: s.signal.mode as u8, head: s.signal.head.as_str().to_string() },
                 components: RawValue::list(s.components),
             })
         });
@@ -860,8 +896,12 @@ pub(crate) unsafe fn copy_block(d: &abi::BlockDesc) -> RawBlock {
                 on_use: cb(d.on_use),
                 on_neighbor: cb(d.on_neighbor),
                 on_scheduled: cb(d.on_scheduled),
+                on_pass: cb(d.on_pass),
+                signal_read: cb(d.signal_read),
                 placement: cb(d.placement),
                 on_grow: cb(d.on_grow),
+                on_signal: cb(d.on_signal),
+                signal_logic: cb(d.signal_logic),
                 grow: (d.grow_seconds > 0.0).then_some((d.grow_seconds as f64 * crate::world::TPS as f64, d.grow_light)),
             },
             replace: d.replace != 0,
@@ -1404,6 +1444,7 @@ fn check_unique(mods: &[ModMeta], blocks: &[(ModId, RawBlock)], items: &mut Vec<
 fn number_blocks(mods: &[ModMeta], blocks: Vec<(ModId, RawBlock)>, textures: &mut TextureList, errors: &mut Vec<String>) -> BlockTables {
     let mut tex = |name: &str| textures.intern(name);
     let mut states = vec![StateInfo {
+        signal: Signal::default(),
         block: 0,
         flags: abi::block_flags::REPLACEABLE | abi::block_flags::NOT_TARGETABLE,
         light: [0; 3],
@@ -1439,6 +1480,7 @@ fn number_blocks(mods: &[ModMeta], blocks: Vec<(ModId, RawBlock)>, textures: &mu
         opens: None,
         cb: BlockCallbacks::default(),
     }];
+    let mut heads: Vec<(usize, String)> = Vec::new();
     // Per block: (block components, per-state components) for the component pass.
     let mut block_values: Vec<(ModId, Vec<RawValue>, Vec<Vec<RawValue>>)> = vec![(ModId(u32::MAX), Vec::new(), vec![Vec::new()])];
     for (owner, b) in blocks {
@@ -1450,10 +1492,15 @@ fn number_blocks(mods: &[ModMeta], blocks: Vec<(ModId, RawBlock)>, textures: &mu
         }
         let mut state_values = Vec::new();
         for s in b.states {
+            if !s.signal.head.is_empty() {
+                heads.push((states.len(), s.signal.head.clone()));
+            }
             let mut boxes: Vec<ModelBox> = s
                 .boxes
                 .iter()
-                .map(|(min, max, t, uv)| ModelBox {
+                .map(|(min, max, t, uv, turn, tilt)| ModelBox {
+                    turn: *turn,
+                    tilt: weft_abi::BoxTilt { origin: tilt.origin.map(|v| v / 16.0), ..*tilt },
                     min: min.map(|v| v / 16.0),
                     max: max.map(|v| v / 16.0),
                     textures: std::array::from_fn(|i| tex(if t[i].is_empty() { &s.textures[i] } else { &t[i] })),
@@ -1498,6 +1545,7 @@ fn number_blocks(mods: &[ModMeta], blocks: Vec<(ModId, RawBlock)>, textures: &mu
                 level: 0,
                 model: s.model,
                 // A box model's faces default to these (the particles of breaking it show them too).
+                signal: Signal { kind: s.signal.kind, attach: s.signal.attach, front: s.signal.front, delay: s.signal.delay, mode: s.signal.mode, ..Signal::default() },
                 textures: if s.model == Model::None {
                     [0; 6]
                 } else {
@@ -1528,6 +1576,20 @@ fn number_blocks(mods: &[ModMeta], blocks: Vec<(ModId, RawBlock)>, textures: &mu
             stride *= values.len().max(1) as u32;
         }
         props.reverse();
+        // What a state gives, from its `power` property: two values are off and full.
+        let power = props.iter().find(|p: &&Prop| p.name == "power").map(|p| (p.values.len() as u32, p.stride));
+        for (i, st) in states[first as usize..].iter_mut().enumerate() {
+            match power {
+                Some((n, each)) if n > 0 => {
+                    let at = (i as u32 / each) % n;
+                    st.signal.levels = n.min(16) as u8;
+                    st.signal.stride = each;
+                    st.signal.level = if n == 2 { at as u8 * 15 } else { at.min(15) as u8 };
+                }
+                _ if st.signal.kind == weft_abi::signal_kind::SOURCE => st.signal.level = 15,
+                _ => {}
+            }
+        }
         if stride != count {
             errors.push(format!("{}: block {} has {count} states, its properties make {stride}", mods.get(owner.0 as usize).map_or("engine", |m| m.id.as_str()), b.name));
         }
@@ -1548,6 +1610,9 @@ fn number_blocks(mods: &[ModMeta], blocks: Vec<(ModId, RawBlock)>, textures: &mu
 
     let block_names: FxHashMap<String, u32> =
         block_defs.iter().enumerate().map(|(i, b)| (b.name.clone(), i as u32)).collect();
+    for (state, name) in heads {
+        states[state].signal.head = block_names.get(&name).copied();
+    }
     BlockTables { states, block_defs, block_values, opens_names, block_names }
 }
 
@@ -1598,16 +1663,7 @@ fn number_items(mods: &[ModMeta], items: Vec<(ModId, RawItem)>, blocks: &BlockTa
                         icon = textures.intern(&t);
                     }
                     let own = if icon == u32::MAX { 0 } else { icon };
-                    model = m
-                        .boxes
-                        .iter()
-                        .map(|b| ModelBox {
-                            min: b.min.map(|v| v / 16.0),
-                            max: b.max.map(|v| v / 16.0),
-                            textures: std::array::from_fn(|i| if b.textures[i].is_empty() { own } else { textures.intern(&b.textures[i]) }),
-                            uv: b.uv,
-                        })
-                        .collect();
+                    model = m.boxes.iter().map(|b| b.model_box(|t, _| if t.is_empty() { own } else { textures.intern(t) })).collect();
                 }
                 Ok(None) => {}
                 Err(e) => errors.push(e),

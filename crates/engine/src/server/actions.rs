@@ -64,6 +64,8 @@ impl Server {
         match msg {
             ToServer::Join { name, key } => self.join(c, pi, name, key),
             ToServer::StartBreak { pos, frame } => {
+                let Some((r, _)) = self.region(pi) else { return };
+                let (frame, pos) = r.landed_as(frame, pos);
                 self.players[pi].mining = Some((frame, pos, self.tick));
                 let Some((r, entity)) = self.region(pi) else { return };
                 let held = r.entities.held(entity).item;
@@ -106,7 +108,7 @@ impl Server {
                     e.jumped = e.on_ground && !on_ground && dy > 0.0;
                     e.moved = ((pos.x - e.pos.x).powi(2) + (pos.z - e.pos.z).powi(2)).sqrt() as f32;
                     e.pos = pos;
-                    e.support = on.map(|o| o.0);
+                    e.frame = on.map(|o| o.0);
                     e.yaw = yaw;
                     e.pitch = pitch;
                     e.on_ground = on_ground;
@@ -118,7 +120,9 @@ impl Server {
                 }
             }
 
-            ToServer::Break { pos, frame } => {
+            ToServer::Break { pos, face, frame } => {
+                let Some((r, _)) = self.region(pi) else { return };
+                let (frame, pos) = r.landed_as(frame, pos);
                 let mining = self.players[pi].mining.take();
                 let now = self.tick;
                 let Some((r, entity)) = self.region(pi) else { return };
@@ -136,18 +140,18 @@ impl Server {
                     let need = d.get(pos).map_or(0.0, |s| dim::mining_time(c, s, held.item, head_wet, on_ground, speed)) * crate::world::TPS as f32;
                     let too_soon = !creative && ((now - started) as f32 + 2.0) < need * 0.7;
                     let keeps = creative && c.no_creative_break(held.item);
-                    if !within(eye - o, pos, reach) || too_soon || keeps {
+                    if !within(o.to_local(eye), pos, reach) || too_soon || keeps {
                         // The client already shows air.
                         if let Some(state) = d.get(pos) {
-                            d.changes.push((pos, state));
+                            d.space.changes.push((pos, state));
                         }
                         return false;
                     }
                     let free = c.states.get(d.get(pos).unwrap_or(0) as usize).is_some_and(|s| s.hardness <= 0.0);
-                    let done = d.break_block(c, pos, held, entity, !creative);
+                    let done = d.break_face(c, pos, face, held, entity, !creative);
                     // The client already shows air: a refused break sends the block back.
                     if !done && let Some(state) = d.get(pos) {
-                        d.changes.push((pos, state));
+                        d.space.changes.push((pos, state));
                         refused = true;
                     }
                     done && !free
@@ -162,6 +166,8 @@ impl Server {
             }
 
             ToServer::Use { pos, face, look, sneak, frame } => {
+                let Some((r, _)) = self.region(pi) else { return };
+                let (frame, pos) = r.landed_as(frame, pos);
                 enum Did {
                     Used,
                     Placed,
@@ -174,7 +180,7 @@ impl Server {
                 let held = r.entities.held(entity);
                 let reach = r.attribute(c, entity, extend::BLOCK_REACH, false) + BLOCK_SLACK;
                 let did = r.with_space(c, frame, |d, o| {
-                    if !within(eye - o, pos, reach) {
+                    if !within(o.to_local(eye), pos, reach) {
                         return Did::Nothing;
                     }
                     if !sneak && d.player_use(c, pos, face, entity) {
@@ -188,9 +194,9 @@ impl Server {
                     };
                     let block_box = crate::physics::Aabb { min: target.as_dvec3(), max: target.as_dvec3() + DVec3::ONE };
                     let solid = c.states[state as usize].flags & abi::block_flags::SOLID != 0;
-                    if (!solid || !player_box.shifted(-o).intersects(&block_box)) && d.place(c, target, face, state, look, entity, held.item) {
+                    if (!solid || !o.box_to_local(player_box).intersects(&block_box)) && d.place(c, target, face, state, look, entity, held.item) {
                         // A named stack names the block entity it becomes (a renamed chest).
-                        if let (Some(name), Some(&id)) = (crate::stack::name(&held), d.entities.anchors.get(&target)) {
+                        if let (Some(name), Some(id)) = (crate::stack::name(&held), d.anchored(target)) {
                             d.entities.comps.insert((id, c.game.name_comp), name.into_bytes().into_boxed_slice());
                         }
                         Did::Placed

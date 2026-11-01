@@ -6,6 +6,7 @@ mod beds;
 mod blocks;
 mod items;
 mod machines;
+mod redstone;
 mod mobs;
 mod player;
 mod recipes;
@@ -29,6 +30,7 @@ fn init(r: &mut Registry) {
         (&tabs::COMBAT, &Item::named("iron_sword")),
         (&tabs::FOOD, &Item::named("apple")),
         (&tabs::INGREDIENTS, &items::IRON_INGOT),
+        (&tabs::REDSTONE, &Item::named("redstone")),
     ] {
         r.creative_tab(tab, icon);
     }
@@ -42,6 +44,7 @@ fn init(r: &mut Registry) {
     worldgen::register(r);
     advancements::register(r);
     beds::register(r);
+    redstone::register(r);
     // Its terrain is described in `worldgen`.
     r.dimension(&OVERWORLD)
         .player_spawn()

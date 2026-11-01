@@ -120,14 +120,18 @@ pub fn write(c: &Content, out: &mut Vec<u8>, list: &[ToSave<'_>]) {
         w.f32(e.health);
         w.u64(e.age);
         w.stack(c, e.item);
-        match e.anchor {
-            Some(a) => {
-                w.u8(1);
+        // 2: on a body, which it says.
+        match (e.anchor, e.block_frame()) {
+            (Some(a), frame) => {
+                w.u8(if frame != 0 { 2 } else { 1 });
                 for v in a.to_array() {
                     w.u32(v as u32);
                 }
+                if frame != 0 {
+                    w.u64(frame);
+                }
             }
-            None => w.u8(0),
+            (None, _) => w.u8(0),
         }
         match inv {
             Some(inv) => {
@@ -215,11 +219,13 @@ fn read_one(c: &Content, r: &mut R) -> Option<Option<Saved>> {
     let health = r.f32()?;
     let age = r.u64()?;
     let item = r.stack(c)?;
-    let anchor = if r.u8()? == 1 {
+    let anchor_kind = r.u8()?;
+    let anchor = if anchor_kind != 0 {
         Some(IVec3::new(r.u32()? as i32, r.u32()? as i32, r.u32()? as i32))
     } else {
         None
     };
+    let frame = if anchor_kind == 2 { Some(r.u64()?) } else { None };
     let inv_len = r.u16()?;
     let inv = if inv_len == u16::MAX {
         None
@@ -269,6 +275,7 @@ fn read_one(c: &Content, r: &mut R) -> Option<Option<Saved>> {
     e.age = age;
     e.item = item;
     e.anchor = anchor;
+    e.frame = frame;
     if kind == c.game.item_kind && item.is_empty() {
         return Some(None);
     }

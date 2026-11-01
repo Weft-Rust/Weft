@@ -714,7 +714,7 @@ pub async fn dimensions(t: T) -> R {
     t.cmd("/dim core:debug_blocks").await?;
     t.secs(0.5).await?;
     t.loaded().await?;
-    let at = t.op("find 40 base:water").await?;
+    let at = t.op("find 160 base:water").await?;
     let w: Vec<i32> = at.split_whitespace().filter_map(|v| v.parse().ok()).collect();
     let [x, y, z] = w[..] else { return Err(format!("no water among the debug blocks: {at}")) };
     t.secs(1.0).await?;
@@ -722,7 +722,7 @@ pub async fn dimensions(t: T) -> R {
     t.cmd(&format!("/setblock {} {y} {z} base:stone", x + 1)).await?;
     t.check_eq(t.block([x + 1, y, z]).await?, "core:air".to_string(), "debug blocks refuse /setblock");
     // Breaking is refused like placing, and nothing holds the grid up.
-    let at = t.op("find 40 base:stone").await?;
+    let at = t.op("find 160 base:stone").await?;
     let s: Vec<i32> = at.split_whitespace().filter_map(|v| v.parse().ok()).collect();
     let [sx, sy, sz] = s[..] else { return Err(format!("no stone among the debug blocks: {at}")) };
     // Refused, not just undone: a refused break sends the block back to the player's client.
