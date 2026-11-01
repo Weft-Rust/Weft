@@ -90,6 +90,21 @@ impl World {
     pub fn navigate(&self, id: u64, target: [f64; 3], speed: f32) -> bool {
         unsafe { (host().navigate)(self.raw(), id, &target, speed) != 0 }
     }
+    /// The world's seed, the one its terrain comes from. The same in every dimension.
+    pub fn seed(&self) -> u64 {
+        unsafe { (host().world_seed)(self.raw()) }
+    }
+    /// A random number that belongs to this block of this world and never changes: what a chest
+    /// should hold when first opened, a villager's trades. Several from one spot:
+    /// `noise::hash(w.position_seed(pos), 1, 0, 0)`, and so on. On a body `pos` is in the body's
+    /// coordinates, like anything there.
+    pub fn position_seed(&self, pos: [i32; 3]) -> u64 {
+        crate::noise::hash(self.seed(), pos[0] as i64, pos[1] as i64, pos[2] as i64)
+    }
+    /// The same for the whole cube (16 blocks each way) `pos` is in.
+    pub fn cube_seed(&self, pos: [i32; 3]) -> u64 {
+        crate::noise::hash(self.seed() ^ 0x5EED_C0BE, (pos[0] >> 4) as i64, (pos[1] >> 4) as i64, (pos[2] >> 4) as i64)
+    }
     /// Lowest corner of the nearest structure `name` (full name) within `radius` blocks of
     /// `pos`, generated yet or not.
     pub fn structure_near(&self, name: &str, pos: [i32; 3], radius: i32) -> Option<[i32; 3]> {
@@ -783,6 +798,17 @@ impl EntityBuilder<'_> {
     /// Behavior from goals (`ai::Goals`), run every tick; replaces `on_tick`.
     pub fn goals(self, goals: crate::ai::Goals) -> Self {
         self.on_tick(move |t| goals.tick(t))
+    }
+    /// Leaves a player alone while `calm(world, the mob, the player)` holds, unless they hit it
+    /// in the last 20 seconds: a spider by day, or one that only minds you within so many
+    /// blocks. The kind's goals go by it through `ai::melee`, `ai::follow_player` and `ai::target`.
+    pub fn neutral(self, calm: impl Fn(&World, &EntityState, &EntityState) -> bool + Send + Sync + 'static) -> Self {
+        let Some(kind) = self.handle else { return self };
+        if crate::ai::add_neutral(kind, Box::new(calm)) {
+            self.reg
+                .entity_component(&crate::ai::ANGER, crate::ai::Anger::default(), 0);
+        }
+        self.attach(&crate::ai::ANGER).on_hurt(crate::ai::provoked)
     }
     /// One of these was hurt: `ENTITY_HURT` for this kind, after the damage, with the other
     /// events at the end of the tick. Changing the damage is `r.modify(&chain::DAMAGE, ..)`,

@@ -327,6 +327,7 @@ command.tick.stepping = avancement de {0} ticks
 command.tick.sprinting = course de {0} ticks
 command.tick.sprinted = course de {0} ticks en {1} ms
 command.regions.done = régions {0}
+command.seed.done = graine: {0}
 command.rule.value = {0} = {1}
 command.rule.unknown = pas de règle {0}
 command.error.no_player = pas de joueu.r.se {0}

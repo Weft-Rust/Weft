@@ -46,6 +46,7 @@ pub fn all() -> Vec<TestDef> {
         world::persistence,
         world::missing_dimension,
         world::dimensions,
+        world::world_seed,
         world::virtual_menus,
         world::worldgen,
         world::plants_on_cube_tops,
@@ -230,6 +231,7 @@ pub fn all() -> Vec<TestDef> {
         redstone::body_walking,
         bodies::natural_spawning,
         bodies::zombie_chases,
+        bodies::neutral_mobs,
         bodies::morph,
     ]
 }

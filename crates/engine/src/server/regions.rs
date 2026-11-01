@@ -40,6 +40,10 @@ pub struct DimSet {
 }
 
 impl DimSet {
+    pub fn seed(&self) -> u64 {
+        self.seed
+    }
+
     pub fn new(id: u32, seed: u64, next_id: Arc<AtomicU64>) -> DimSet {
         DimSet {
             id,

@@ -266,6 +266,7 @@ Anywhere a block is named as text, `base:furnace[lit=true]` picks a state: in st
 - `sound("hurt")`, `sound("death")`, `sound("ambient")`: files from `sounds/entity/<name>/`
 - `animations(..)`
 - `goals(..)` for AI (see `weft_sdk::ai`); `ai::melee(reach)` with `.attack_damage(3.0)` makes it hit like a player does, so `question::ATTACK` and `chain::ATTACK_DAMAGE` (a strength effect, a peaceful zone) work on mobs too
+- `neutral(|w, mob, player| ..)`: leaves a player alone while that holds, unless they hit it in the last 20 seconds. A spider is calm in daylight, and a mob that only minds you up close is `|_, m, p| dist(m, p) > 16.0`. `ai::melee` and `ai::follow_player` go by it, `ai::target` is the same for goals of your own
 - `on_tick`: every entity of the kind at once, once per tick
 - `on_hurt(|w, hurt| ..)`, `on_death(|w, death| ..)`: the `ENTITY_HURT` and `ENTITY_DIED` events for this kind. The damage itself is the `chain::DAMAGE` chain and `question::HURT` can stop it, for any kind, yours or not
 - `on_interact`: a player right clicked one (after `question::INTERACT_ENTITY`)
@@ -369,6 +370,7 @@ The callback gets a `ServerCommand`: `cmd.world()` is where it runs, and what it
 ## World API
 
 Inside any callback you get a `World` (`w`):
+- the world's seed (`seed`, and `position_seed(pos)`, `cube_seed(pos)` for a number that belongs to a place: what a chest holds when first opened, a villager's trades)
 - blocks (`get`, `set`, `schedule`); for anything big, `w.fill_sphere(center, radius, block, keep_unbreakable)` fills a whole ball in one call (a crater with air): the engine does it at the end of the tick on every core, a cube at a time, lights each cube once, loads what it opens up in players' views right away and gives the rest the change when it loads. Players see it appear whole. Hundreds of blocks of radius take well under a second, where `set` per block costs about 1.6 µs each. Testmod's dynamite uses it
 - entities (`spawn`, `entity`, `set_entity`, `damage`, `near`, `near_bodies` for what can be hit, `navigate`, `walk`, `push` for a trampoline or a blast, players too). Speed and jump are attributes (`attribute::MOVEMENT_SPEED`, `JUMP_STRENGTH`) for mobs and players alike: `w.add_modifier(player, &MOVEMENT_SPEED, ..)` is a speed effect Reach and mining speed are attributes too (`attribute::BLOCK_REACH`, `ENTITY_REACH`, `MINING_SPEED`), and the client reads them: a modifier is all a long tool or a haste effect takes. `w.in_liquid(pos)` knows a liquid's surface, which the block alone doesn't tell.
 - inventories (`inventory(id).get/set/insert`, `inventory(id).group("fuel")`); a player's by the groups its inventory was declared with (`r.player_inventory().group("hotbar", Slots::row(9).hotbar())..`), `core:equipment` for all equipment slots

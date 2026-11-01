@@ -287,6 +287,7 @@ command.tick.stepping = шагов: {0}
 command.tick.sprinting = ускорение на {0} тиков
 command.tick.sprinted = {0} тиков пройдено за {1} мс
 command.regions.done = регионы {0}
+command.seed.done = сид: {0}
 command.rule.value = {0} = {1}
 command.rule.unknown = нет правила {0}
 command.error.no_player = нет игрока {0}

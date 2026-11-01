@@ -215,6 +215,11 @@ pub fn in_own_folder(w: &WorldMeta) -> bool {
 }
 
 /// Seed from user text: numbers are used as is, anything else is hashed.
+/// A seed the way `parse_seed` takes it back.
+pub fn shown_seed(seed: u64) -> String {
+    (seed as i64).to_string()
+}
+
 pub fn parse_seed(s: &str) -> u64 {
     let s = s.trim();
     if s.is_empty() {
@@ -764,6 +769,13 @@ impl Screen for CreateWorld {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_shown_seed_makes_the_same_world() {
+        for seed in [0, 5, u64::MAX, 1 << 63, 0x9E37_79B9_7F4A_7C15] {
+            assert_eq!(parse_seed(&shown_seed(seed)), seed);
+        }
+    }
 
     #[test]
     fn a_renamed_copy_is_not_its_own_folder() {

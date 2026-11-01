@@ -206,6 +206,7 @@ pub static HOST: Host = Host {
     reg_template,
     ref_list,
     world_place,
+    world_seed,
     structure_near,
     fall_block,
     reg_attach_value,
@@ -292,6 +293,10 @@ unsafe extern "C" fn reg_structure(r: *mut abi::Registrar, d: *const abi::Struct
             sink: d.sink,
         });
     }
+}
+
+unsafe extern "C" fn world_seed(w: *mut abi::WorldCtx) -> u64 {
+    unsafe { dim(w).seed }
 }
 
 unsafe extern "C" fn structure_near(w: *mut abi::WorldCtx, name: Str, pos: *const [i32; 3], radius: i32, out: *mut [i32; 3]) -> u32 {

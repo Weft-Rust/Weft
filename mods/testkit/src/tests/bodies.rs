@@ -525,6 +525,57 @@ pub async fn morph(t: T) -> R {
     Ok(())
 }
 
+/// A neutral mob: a spider by day minds its own business until hit, then fights back for a while;
+/// in the dark it comes by itself. And a condition by distance, like a warden's.
+pub async fn neutral_mobs(t: T) -> R {
+    t.flat().await?;
+    t.op("time 6000").await?;
+    t.cmd("/weather clear").await?;
+    let f = t.feet();
+    let health = |t: T| async move { Ok::<f32, String>(t.op("health").await?.parse().unwrap_or(0.0)) };
+    let spider = spawn(&t, "spider", add(f, [3, 0, 0])).await?;
+    t.secs(3.0).await?;
+    t.check_eq(health(t.clone()).await?, 20.0, "by day a spider leaves you alone");
+    t.op(&format!("hurt {spider} 1")).await?;
+    t.until("the spider fights back", std::time::Duration::from_secs(6), |t| t.c().entity(0).is_some_and(|e| e.health < 20.0))
+        .await?;
+    // Away for longer than it holds a grudge, and back.
+    t.cmd(&format!("/tp {} {} {}", f[0], f[1], f[2] + 60))
+        .await?;
+    t.cmd("/tick sprint 450").await?;
+    t.secs(1.0).await?;
+    let at = pos_of(&t, &format!("{spider}")).await?;
+    t.cmd(&format!("/tp {} {} {}", at[0] + 2.0, at[1], at[2]))
+        .await?;
+    t.op("heal").await?;
+    t.secs(3.0).await?;
+    t.check_eq(health(t.clone()).await?, 20.0, "it calms down");
+    t.op(&format!("remove {spider}")).await?;
+
+    // In the dark it needs no reason (this dimension's time stands still, so under a roof).
+    t.fill(add(f, [-16, 3, -16]), add(f, [16, 3, 16]), "stone")
+        .await?;
+    let dark = spawn(&t, "spider", add(f, [3, 0, 0])).await?;
+    t.cmd(&format!("/tp {} {} {}", f[0], f[1], f[2])).await?;
+    t.until("a spider in the dark comes by itself", std::time::Duration::from_secs(8), |t| {
+        t.c().entity(0).is_some_and(|e| e.health < 20.0)
+    })
+    .await?;
+    t.op(&format!("remove {dark}")).await?;
+    t.op("heal").await?;
+
+    let sentry = spawn(&t, "testkit:sentry", add(f, [10, 0, 0])).await?;
+    t.secs(2.5).await?;
+    t.check_eq(health(t.clone()).await?, 20.0, "out of its distance it does nothing");
+    let at = pos_of(&t, &format!("{sentry}")).await?;
+    t.check((at[0] - (f[0] as f64 + 10.5)).abs() < 1.0, format!("nor does it come: {at:?}"));
+    t.cmd(&format!("/tp {} {} {}", at[0] + 3.0, at[1], at[2]))
+        .await?;
+    t.until("within it, it attacks", std::time::Duration::from_secs(5), |t| t.c().entity(0).is_some_and(|e| e.health < 20.0))
+        .await?;
+    Ok(())
+}
+
 /// A zombie's goals: it finds its way around a wall to the player and hits it.
 pub async fn zombie_chases(t: T) -> R {
     t.flat().await?;

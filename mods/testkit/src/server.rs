@@ -51,6 +51,22 @@ fn count(i: usize, n: usize) {
 }
 
 pub fn register(r: &mut Registry) {
+    // Neutral as long as you keep your distance.
+    static SENTRY: Entity = Entity::named("sentry");
+    r.entity(&SENTRY)
+        .size(0.6, 1.95)
+        .health(20.0)
+        .speed(2.6)
+        .hostile()
+        .texture("base:zombie")
+        .model(biped(true))
+        .attack_damage(1.0)
+        .goals(
+            weft_sdk::ai::Goals::new()
+                .then(weft_sdk::ai::melee(1.6))
+                .then(weft_sdk::ai::follow_player(20.0, 1.0)),
+        )
+        .neutral(|_, mob, player| (mob.pos[0] - player.pos[0]).hypot(mob.pos[2] - player.pos[2]) > 5.0);
     // A random `.ctm` with tiles of two colors, on what isn't a cube.
     static VARIED_PLANT: Block = Block::named("varied_plant");
     static VARIED_BOX: Block = Block::named("varied_box");
@@ -415,6 +431,10 @@ const OPS: &[(&str, &str, Run)] = &[
         }
     }),
     ("light", "<pos:pos>", |w, cmd, _, _| Ok(w.light(pos(cmd, "pos")?).to_string())),
+    ("seed", "<pos:pos>", |w, cmd, _, _| {
+        let p = pos(cmd, "pos")?;
+        Ok(format!("{} {} {}", w.seed(), w.position_seed(p), w.cube_seed(p)))
+    }),
     ("skip", "<ticks:int>", |w, cmd, _, _| {
         w.skip_ticks(int(cmd, "ticks")?);
         Ok(String::new())

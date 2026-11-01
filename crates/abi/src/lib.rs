@@ -2125,6 +2125,8 @@ pub struct Host {
     /// Places template `name` with its lowest corner at `pos`; 0 if it doesn't exist or part of
     /// it isn't loaded (nothing is placed then).
     pub world_place: unsafe extern "C" fn(world: *mut WorldCtx, name: Str, pos: *const [i32; 3]) -> u32,
+    /// The world's seed, the one terrain is generated from.
+    pub world_seed: unsafe extern "C" fn(world: *mut WorldCtx) -> u64,
     /// The nearest structure `name` within `radius` blocks of `pos` (whether generated yet or
     /// not): its lowest corner in `out`. Returns 0 if none.
     pub structure_near: unsafe extern "C" fn(world: *mut WorldCtx, name: Str, pos: *const [i32; 3], radius: i32, out: *mut [i32; 3]) -> u32,

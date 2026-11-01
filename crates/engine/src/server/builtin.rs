@@ -69,6 +69,7 @@ pub const COMMANDS: &[(&str, &str, Handler, u32)] = &[
     ("heal", "[who:targets]", heal, p::GAME_MASTER),
     ("tick", "query | rate <tps:int> | freeze | unfreeze | step [ticks:int] | sprint <ticks:int>", tick, p::ADMIN),
     ("regions", "", regions, p::GAME_MASTER),
+    ("seed", "", seed, p::GAME_MASTER),
     ("weather", "clear [ticks:int] | rain [ticks:int] | thunder [ticks:int]", weather, p::GAME_MASTER),
     ("op", "<who:targets> [level:int]", op, p::ADMIN),
     ("deop", "<who:targets>", deop, p::ADMIN),
@@ -107,6 +108,10 @@ fn short_usage(usage: &str) -> String {
         out.push_str(alt);
     }
     out
+}
+
+fn seed(s: &mut Server, x: &Ctx) -> Vec<Msg> {
+    say("seed.done", vec![text(&crate::saves::shown_seed(s.dims[x.me.0 as usize].seed()))])
 }
 
 fn tp(s: &mut Server, x: &Ctx) -> Vec<Msg> {

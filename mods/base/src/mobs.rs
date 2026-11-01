@@ -1,6 +1,6 @@
 //! Mobs: zombies and spiders at night or in the dark, pigs and cows on grass by day.
 
-use weft_sdk::ai::{self, Goal};
+use weft_sdk::ai;
 use weft_sdk::*;
 
 value! {
@@ -187,7 +187,7 @@ pub fn register(r: &mut Registry) {
         .model(biped(true))
         .attach(&BRAIN)
         .attack_damage(3.0)
-        .goals(hostile(false));
+        .goals(hostile(1.6));
     r.entity(&SPIDER)
         .tag("hostile")
         .sound("ambient")
@@ -200,7 +200,9 @@ pub fn register(r: &mut Registry) {
         .model(spider())
         .attach(&BRAIN)
         .attack_damage(2.0)
-        .goals(hostile(true));
+        // Vanilla's reach goes by a mob's width: a body this wide stops further off.
+        .goals(hostile(2.7))
+        .neutral(in_daylight);
     r.entity_component(&FUSE, 0u32, 0);
     r.entity_component(&SHOOTER, 0u64, 0);
     r.entity(&CREEPER)
@@ -484,18 +486,20 @@ fn panic(w: &World, h: &Hurt) {
     }
 }
 
-/// Monsters chase the nearest player and hit it when in reach (`ai::melee`, once a second);
-/// spiders only in the dark (by day they leave players alone). Otherwise they wander.
-fn hostile(only_dark: bool) -> ai::Goals {
-    let angry = move |w: &World, st: &EntityState| {
-        let feet = [st.pos[0].floor() as i32, (st.pos[1] + 0.5).floor() as i32, st.pos[2].floor() as i32];
-        !only_dark || w.daylight() < 0.5 || w.sky_light(feet) < 10
-    };
+/// Monsters chase the player they are after and hit it when in reach (`ai::melee`, once a
+/// second). Otherwise they wander.
+fn hostile(reach: f64) -> ai::Goals {
     ai::Goals::new()
         .then(ai::watch_player(8.0))
-        .then(move |w: &World, id: u64, st: &EntityState| angry(w, st) && ai::melee(1.6).run(w, id, st))
-        .then(move |w: &World, id: u64, st: &EntityState| angry(w, st) && ai::follow_player(35.0, 1.0).run(w, id, st))
+        .then(ai::melee(reach))
+        .then(ai::follow_player(35.0, 1.0))
         .then(ai::wander(0.6, 10.0))
+}
+
+/// A spider's peace: out in daylight.
+fn in_daylight(w: &World, st: &EntityState, _player: &EntityState) -> bool {
+    let feet = [st.pos[0].floor() as i32, (st.pos[1] + 0.5).floor() as i32, st.pos[2].floor() as i32];
+    w.daylight() >= 0.5 && w.sky_light(feet) >= 10
 }
 
 /// Animals run about for three seconds after being hurt, otherwise wander.

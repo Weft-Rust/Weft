@@ -327,6 +327,7 @@ command.tick.stepping = stepping {0} ticks
 command.tick.sprinting = sprinting {0} ticks
 command.tick.sprinted = sprinted {0} ticks in {1} ms
 command.regions.done = regions {0}
+command.seed.done = seed: {0}
 command.rule.value = {0} = {1}
 command.rule.unknown = no rule {0}
 command.error.no_player = no player {0}

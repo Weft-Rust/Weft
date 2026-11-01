@@ -779,6 +779,31 @@ fn value(s: &str) -> f64 {
 
 /// Dimensions: each mod's own one is reached and drawn as itself; the engine's void is empty,
 /// without gravity and refuses blocks; the debug dimension shows every state and never updates.
+/// What a mod reads of the world's seed, and `/seed`.
+pub async fn world_seed(t: T) -> R {
+    t.world(5).await?;
+    let seeds = |t: T, p: [i32; 3]| async move {
+        let line = t.op(&format!("seed {}", at(p))).await?;
+        let v: Vec<u64> = line
+            .split_whitespace()
+            .filter_map(|w| w.parse().ok())
+            .collect();
+        Ok::<[u64; 3], String>([v[0], v[1], v[2]])
+    };
+    let a = seeds(t.clone(), [1, 70, 2]).await?;
+    t.check_eq(a[0], 5, "the seed the world was made with");
+    t.check_eq(a[1], weft_sdk::noise::hash(5, 1, 70, 2), "a block's own number");
+    t.check_eq(seeds(t.clone(), [1, 70, 2]).await?[1], a[1], "the same each time");
+    let b = seeds(t.clone(), [2, 70, 2]).await?;
+    t.check(b[1] != a[1], "another block has another");
+    t.check_eq(b[2], a[2], "one cube, one number");
+    t.check(seeds(t.clone(), [16, 70, 2]).await?[2] != a[2], "the next cube has another");
+    t.check(seeds(t.clone(), [-1, 70, 2]).await?[2] != a[2], "also the other way, past zero");
+    let said = t.cmd("/seed").await?;
+    t.check(said.contains('5'), format!("/seed says it: {said}"));
+    Ok(())
+}
+
 pub async fn dimensions(t: T) -> R {
     t.world(11).await?;
     type Look = Option<fn(&crate::runner::Shot) -> (f32, bool)>;
