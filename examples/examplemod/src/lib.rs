@@ -159,7 +159,8 @@ fn events(r: &mut Registry) {
         }
         let w = batch.world();
         for joined in batch.iter() {
-            w.inventory(joined.player).insert(ItemStack::new(EXAMPLE_ITEM.id(), 1));
+            w.inventory(joined.player)
+                .insert(ItemStack::new(EXAMPLE_ITEM.id(), 1));
             info!("gave player {} an example item", joined.player);
         }
     });
