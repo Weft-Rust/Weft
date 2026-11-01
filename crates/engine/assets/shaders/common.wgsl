@@ -35,7 +35,10 @@ fn lightmap(light: vec4<f32>, day: f32, ambient: f32, bright: f32) -> vec3<f32> 
     if any(block > vec3(0.0)) {
         let p = (2.0 * block - 1.0) * (2.0 * block - 1.0);
         let tint = mix(vec3(1.0, 0.847, 0.549), vec3(1.0), 0.9 * p);
-        c += tint * vec3(brightness_curve(block.x), brightness_curve(block.y), brightness_curve(block.z)) * 1.4;
+        // No lamp is as bright as the sun, and over the sun it still shows: the sum comes back
+        // down as a whole, keeping its color, where clamping it would give plain white by day.
+        c += min(tint * vec3(brightness_curve(block.x), brightness_curve(block.y), brightness_curve(block.z)) * 1.4, vec3(0.85));
+        c /= max(1.0, max(max(c.x, c.y), c.z));
     }
     c = clamp(c, vec3(0.0), vec3(1.0));
     let m = max(max(c.x, c.y), c.z);

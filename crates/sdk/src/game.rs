@@ -79,6 +79,11 @@ impl World {
     pub fn set_look(&self, id: u64, kind: Option<&str>) {
         unsafe { (host().set_entity_look)(self.raw(), id, Str::new(kind.unwrap_or(""))) }
     }
+    /// The box entities of a kind have (width, height, eye height).
+    pub fn kind_size(&self, kind: &str) -> Option<[f32; 3]> {
+        let mut out = [0.0; 3];
+        (unsafe { (host().entity_kind_size)(Str::new(kind), &mut out) } != 0).then_some(out)
+    }
     /// `id` walks to `target` by itself, around obstacles, at `speed` times its walking speed
     /// (0 stops it). Call it again as the target moves. The path is found later in the tick;
     /// `navigating` turns false when the walk ends (arrived, or stuck for two seconds).

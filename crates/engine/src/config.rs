@@ -386,6 +386,11 @@ pub fn engine_configs(keys: &[(String, String)]) -> Vec<ConfigDef> {
         ConfigDef::number("core:lod_distance", ck::INT, 256.0, 0.0, 2048.0, 16.0),
         // Blocks clouds float above where their dimension puts them.
         ConfigDef::number("core:cloud_height", ck::INT, 0.0, 0.0, 512.0, 8.0),
+        // Vanilla's: in GUI pixels, and percent of the dark behind the text.
+        ConfigDef::number("core:chat_width", ck::INT, 320.0, 40.0, 1000.0, 10.0),
+        ConfigDef::number("core:chat_height", ck::INT, 180.0, 20.0, 1000.0, 10.0),
+        ConfigDef::number("core:chat_height_closed", ck::INT, 110.0, 20.0, 1000.0, 10.0),
+        ConfigDef::number("core:chat_opacity", ck::INT, 50.0, 0.0, 100.0, 5.0),
         ConfigDef::number("core:vsync", ck::BOOL, 1.0, 0.0, 1.0, 0.0),
         ConfigDef::number("core:fullscreen", ck::BOOL, 0.0, 0.0, 1.0, 0.0),
         ConfigDef::number("core:terrain_gpu", ck::BOOL, 1.0, 0.0, 1.0, 0.0),

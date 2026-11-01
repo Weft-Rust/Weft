@@ -184,7 +184,7 @@ struct Placed {
 #[derive(Default)]
 pub struct Hud {
     pub ui: Ui,
-    key: Option<(bool, usize, usize, bool, u32, u8, (i32, i32), (u32, u32, u8))>,
+    key: Option<(bool, usize, [u32; 3], usize, bool, u32, u8, (i32, i32), (u32, u32, u8))>,
     /// Player overrides from `config/hud.txt` by element name.
     layout: rustc_hash::FxHashMap<String, Placement>,
     file: std::path::PathBuf,
@@ -303,9 +303,11 @@ impl Hud {
         let size = (self.ui.size.x as i32, self.ui.size.y as i32);
         // Tab, and only over the game: in the chat it completes.
         let list_shown = input.captured && input.held("core:player_list");
+        let chat = crate::settings::chat_look();
         let key = (
             debug,
             chat_visible,
+            [chat.width as u32, chat.closed_height as u32, chat.dim as u32],
             client.chat.len() | (list_shown as usize) << 32,
             client.dead,
             groups,

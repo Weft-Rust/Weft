@@ -87,9 +87,26 @@ fn help(s: &mut Server, x: &Ctx) -> Vec<Msg> {
             .commands
             .iter()
             .filter(|d| d.level <= s.permission_of(x.pi))
-            .flat_map(|d| say("usage_line", vec![text(&d.name), text(&d.usage)]))
+            .flat_map(|d| say("usage_line", vec![text(&d.name), text(&short_usage(&d.usage))]))
             .collect(),
     }
+}
+
+/// A command's usage for the list of them: a line. `/help <command>` has it all.
+fn short_usage(usage: &str) -> String {
+    const ROOM: usize = 80;
+    let mut out = String::new();
+    for alt in usage.split(" | ") {
+        if !out.is_empty() && out.len() + alt.len() + 3 > ROOM {
+            out.push_str(" | ...");
+            break;
+        }
+        if !out.is_empty() {
+            out.push_str(" | ");
+        }
+        out.push_str(alt);
+    }
+    out
 }
 
 fn tp(s: &mut Server, x: &Ctx) -> Vec<Msg> {

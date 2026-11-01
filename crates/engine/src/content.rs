@@ -639,6 +639,12 @@ impl Content {
         (v + 1 < p.values.len() as u32).then(|| b.with_value(state, pi, v + 1))
     }
 
+    /// The spawn egg of an entity kind.
+    pub fn spawn_egg_of(&self, kind: u32) -> Option<u32> {
+        let (name, egg) = (&self.game.entities.get(kind as usize)?.name, self.ids.spawn_egg?);
+        (1..self.items.len() as u32).find(|&i| self.components.text(comps::ITEM, i, egg) == Some(name.as_str()))
+    }
+
     /// The item a middle click on this block picks: the block's own item, else the first its
     /// loot table names.
     pub fn pick_item(&self, state: u32) -> Option<u32> {

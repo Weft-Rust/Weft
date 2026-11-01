@@ -200,6 +200,8 @@ pub unsafe extern "C" fn ui_open(u: *mut abi::UiCtx, node: *const abi::UiNode) {
             },
             self_align: (n.self_align != u32::MAX).then(|| align(n.self_align)),
             scroll: flag(abi::ui_flags::SCROLL),
+            fill: None,
+            max_h: f32::INFINITY,
             at: None,
         };
         let (lang, input) = (b.lang, b.input);

@@ -66,10 +66,12 @@ fn init(r: &mut Registry) {
         r.sky_clouds(dim, &CLOUDS).texture("clouds");
         r.sky_body(dim, &SUN)
             .texture("sun")
+            .additive()
             .size(33.0)
             .glow(0xFFE633);
         r.sky_body(dim, &MOON)
             .texture("moon_phases")
+            .additive()
             .frames(4, 2)
             .size(23.0)
             .phase(0.5);

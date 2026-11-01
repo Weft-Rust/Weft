@@ -351,6 +351,7 @@ impl Sky {
         eye_y: f64,
         in_liquid: bool,
         rain: f32,
+        thunder: f32,
         overlays: &[Overlay],
     ) {
         self.overlay = None;
@@ -420,7 +421,10 @@ impl Sky {
                     * 1.5;
                 let lifted = s.height as f64 + setting("core:cloud_height");
                 let (x, z) = ((cam.pos.x + time * s.drift as f64) / CELL, cam.pos.z / CELL);
-                let brightness = (light * 0.9 + 0.1).max(0.1);
+                // Vanilla's: rain grays them, the time of day colors them, thunder darkens the rest.
+                let day = if d.sky_light { (height * 2.0 + 0.5).clamp(0.0, 1.0) } else { 1.0 };
+                let color = rained(rgb(s.color), rain, 0.95) * Vec3::new(day * 0.9 + 0.1, day * 0.9 + 0.1, day * 0.85 + 0.15);
+                let color = color.lerp(Vec3::splat((color.x * 0.3 + color.y * 0.59 + color.z * 0.11) * 0.2), thunder * 0.95);
                 clouds = Some(self.list.len() as u32);
                 self.list.push(GpuSky {
                     axes: [[0.0; 4]; 3],
@@ -430,10 +434,7 @@ impl Sky {
                         x.floor().rem_euclid(4096.0) as f32,
                         z.floor().rem_euclid(4096.0) as f32,
                     ],
-                    color: rained(rgb(s.color) * brightness, rain, 0.75)
-                        .powf(2.2)
-                        .extend(1.0)
-                        .to_array(),
+                    color: color.powf(2.2).extend(0.8).to_array(),
                     ids: [index, kind::CLOUDS, w, h],
                     extra: [CELL as f32, 4.0, (lifted - cam.pos.y) as f32, reach as f32],
                 });

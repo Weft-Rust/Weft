@@ -948,6 +948,9 @@ impl UiRenderer {
         let r = Rect { x: n.rect.x * scale, y: n.rect.y * scale, w: n.rect.w * scale, h: n.rect.h * scale };
         let (quad_start, icon_start) = (self.quads.len(), icons.len());
         let hovered = ui.hovered == Some(id);
+        if let Some(color) = n.style.fill {
+            self.rect(r, color);
+        }
         let mut background = |me: &mut UiRenderer, class: &str, state: &str| me.class_background(gpu, assets, look, class, state, r, scale);
         match &n.kind {
             Kind::Container { class: Some(class) } => background(self, class, ""),

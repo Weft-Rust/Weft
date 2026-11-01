@@ -162,6 +162,24 @@ fn build(jar: &Path, version: &str, maps: &[(String, PathBuf, String)], out: &Pa
                 continue;
             };
             let (ours, theirs) = (ours.trim(), theirs.trim());
+            // Newer versions keep in separate files what ours has on one sheet.
+            if let Some(rest) = theirs.strip_prefix("sheet ") {
+                let mut words = rest.split_whitespace();
+                let columns = words.next().and_then(|w| w.parse().ok()).unwrap_or(1);
+                let pictures: Option<Vec<_>> = words
+                    .map(|s| read(&format!("{T}{s}.png")).and_then(|b| crate::assets::decode_png(&b)))
+                    .collect();
+                let Some((w, h, mut px)) = pictures.and_then(|p| sheet(&p, columns)) else {
+                    log::debug!("{ns}/minecraft.txt:{}: not all of it in this version", n + 1);
+                    continue;
+                };
+                light_to_alpha(&mut px);
+                let dst = base.join(format!("{ours}.png"));
+                std::fs::create_dir_all(dst.parent().unwrap_or(&base)).map_err(|e| e.to_string())?;
+                crate::assets::encode_png(&dst, w, h, &px).map_err(|e| e.to_string())?;
+                files += 1;
+                continue;
+            }
             let mut words = theirs.split_whitespace();
             let (mode, src) = match words.next() {
                 Some("glow") => ("glow", words.next().unwrap_or("")),
@@ -350,6 +368,25 @@ fn put_together(img: &crate::assets::Image, numbers: &[u32]) -> Option<(u32, u32
     Some((w, h, out))
 }
 
+/// Pictures of one size in rows of `columns`, for a sheet of them.
+fn sheet(pictures: &[crate::assets::Image], columns: u32) -> Option<(u32, u32, Vec<u8>)> {
+    let (w, h) = (pictures.first()?.width, pictures.first()?.height);
+    if columns == 0 || pictures.iter().any(|p| (p.width, p.height) != (w, h)) {
+        return None;
+    }
+    let rows = (pictures.len() as u32).div_ceil(columns);
+    let mut out = vec![0u8; (w * columns * h * rows * 4) as usize];
+    for (i, p) in pictures.iter().enumerate() {
+        let (cx, cy) = (i as u32 % columns * w, i as u32 / columns * h);
+        for y in 0..h {
+            let from = (y * w * 4) as usize;
+            let to = (((cy + y) * w * columns + cx) * 4) as usize;
+            out[to..to + w as usize * 4].copy_from_slice(&p.rgba[from..from + w as usize * 4]);
+        }
+    }
+    Some((w * columns, h * rows, out))
+}
+
 /// A square picture turned clockwise `quarters` times.
 fn turn(px: &[u8], size: u32, quarters: u32) -> Vec<u8> {
     let mut out = px.to_vec();
@@ -401,8 +438,21 @@ mod tests {
             .join("base/textures");
         let sun = crate::assets::decode_png(&std::fs::read(sky.join("sky/sun.png")).unwrap()).unwrap();
         assert_eq!(sun.rgba[3], 0, "the corner of the sun is transparent");
+        assert!(sky.join("sky/moon_phases.png").is_file(), "the moon, on one sheet or in separate files in the jar");
         assert!(sky.join("gui/attack_bar_fill.png").is_file());
         assert!(sky.join("entity/armor/leather_1.png").is_file(), "worn armor comes from the pack too");
+    }
+
+    #[test]
+    fn a_sheet_of_pictures() {
+        let one = |v: u8| crate::assets::Image { width: 2, height: 1, rgba: vec![v, 0, 0, 255, v, 1, 0, 255] };
+        let (w, h, px) = super::sheet(&[one(1), one(2), one(3)], 2).unwrap();
+        assert_eq!((w, h), (4, 2));
+        let at = |x: usize, y: usize| (px[(y * 4 + x) * 4], px[(y * 4 + x) * 4 + 1]);
+        assert_eq!([at(0, 0), at(1, 0), at(2, 0), at(3, 0)], [(1, 0), (1, 1), (2, 0), (2, 1)]);
+        assert_eq!([at(0, 1), at(3, 1)], [(3, 0), (0, 0)], "and the next row, as far as it goes");
+        let tall = crate::assets::Image { width: 2, height: 2, rgba: vec![0; 16] };
+        assert!(super::sheet(&[one(1), tall], 2).is_none(), "of one size only");
     }
 
     #[test]

@@ -855,7 +855,7 @@ impl Running {
             // Pressing with a stack on the cursor starts a drag; releasing over one slot is
             // a plain click, over several it spreads the stack.
             let holding = g.client.menu.as_ref().is_some_and(|m| !m.cursor.is_empty());
-            use crate::server::menu::{GATHER, HOTBAR_SWAP};
+            use crate::server::menu::{CLONE, GATHER, HOTBAR_SWAP};
             for button in [0u8, 1] {
                 if self.input.pressed_button(button) {
                     let inside = ui
@@ -890,6 +890,10 @@ impl Running {
                         None => {}
                     }
                 }
+            }
+            if let Some(s) = slot.filter(|_| self.input.pressed_button(2)) {
+                g.client
+                    .send(net::ToServer::Click { slot: s, button: CLONE, shift: false });
             }
             // Shift with the left button held: every slot swept over is shift-clicked.
             if shift && self.input.held_button(0) && !holding {
@@ -940,6 +944,11 @@ impl Running {
                     if self.input.pressed_button(button) {
                         g.client.send(net::ToServer::CreativeTake { item, button });
                     }
+                }
+                // A stack, like a slot.
+                if self.input.pressed_button(2) {
+                    g.client
+                        .send(net::ToServer::CreativeTake { item, button: 0 });
                 }
             }
             // Tooltip with the hovered item's name.

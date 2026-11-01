@@ -186,26 +186,45 @@ impl Screen for Death {
 /// seconds old (the HUD).
 pub fn chat_lines(ui: &mut Ui, client: &crate::client::Client, lang: &crate::ui::lang::Lang, input: &crate::input::Input, open: bool) {
     let now = std::time::Instant::now();
-    ui.container(
-        Style::default()
+    let look = crate::settings::chat_look();
+    let said: Vec<_> = client
+        .chat
+        .iter()
+        .filter(|(_, at)| open || now.duration_since(*at).as_secs() < 10)
+        .collect();
+    // Over the game, only what fits; a line is about this tall.
+    let room = if open { usize::MAX } else { (look.closed_height / 11.0).max(1.0) as usize };
+    let fill = (look.dim > 0 && !said.is_empty()).then_some(look.dim as u32);
+    let shown = Style {
+        fill,
+        ..Style::default()
             .gap(1.0)
             .pad(2.0)
             .align(crate::ui::Align::Start)
-            .self_align(crate::ui::Align::Start),
-        |ui| {
-            for (line, at) in client
-                .chat
-                .iter()
-                .rev()
-                .take(if open { 20 } else { 10 })
-                .rev()
-            {
-                if open || now.duration_since(*at).as_secs() < 10 {
-                    ui.text(line.spans(lang, Some(input)), "chat");
-                }
-            }
-        },
-    );
+            .w(look.width)
+    };
+    // Open it is all there, what doesn't fit going up out of sight for the wheel to bring back.
+    // What is below it never moves.
+    let style = if open {
+        // Room for its bar, for the text to wrap before it.
+        let pad = [2.0, 2.0, 2.0 + crate::ui::Scrollbar::ROOM, 2.0];
+        Style {
+            max_h: look.open_height,
+            pad,
+            ..shown
+                .scroll()
+                .justify(crate::ui::Justify::End)
+                .self_align(crate::ui::Align::Start)
+        }
+    } else {
+        shown.self_align(crate::ui::Align::Start)
+    };
+    let lines = ui.container(style, |ui| {
+        for (line, _) in said.iter().rev().take(room).rev() {
+            ui.text(line.spans(lang, Some(input)), "chat");
+        }
+    });
+    ui.set_id(lines, "chat_lines");
 }
 
 /// Chat input with the recent messages above it and, for commands, completions of the word being
@@ -265,8 +284,8 @@ impl Screen for Chat {
         let st = self.state.borrow();
         ui.root_style(Style::default().stretch());
         ui.container(
-            Style::default()
-                .grow()
+            // The screen's height, however much is in it: what doesn't fit gives way above the line.
+            Style { h: crate::ui::Len::Pct(100.0), ..Style::default() }
                 .pad(4.0)
                 .gap(1.0)
                 .justify(crate::ui::Justify::End)

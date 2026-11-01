@@ -179,6 +179,11 @@ fn tick_furnaces(b: &mut SystemBatch<Smelting>) {
         if s.burn > 0 {
             s.burn -= 1;
         }
+        // Another item in the input starts over, before this tick counts for it.
+        if input.item != s.cooking_item {
+            s.cooking_item = input.item;
+            s.cook = 0;
+        }
         let recipe = (!input.is_empty())
             .then(|| recipe_process(&crate::recipes::SMELTING, input.item))
             .flatten();
@@ -208,11 +213,6 @@ fn tick_furnaces(b: &mut SystemBatch<Smelting>) {
             s.cook = 0;
         } else {
             s.cook = s.cook.saturating_sub(2);
-        }
-        // Another item in the input starts over too.
-        if input.item != s.cooking_item {
-            s.cooking_item = input.item;
-            s.cook = 0;
         }
         let lit = s.burn > 0;
         if lit != was_lit && FURNACE.is(w.get(pos)) {

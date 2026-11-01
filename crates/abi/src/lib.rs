@@ -2168,6 +2168,8 @@ pub struct Host {
     /// Draws an entity with another kind's model, texture and animations (it stays what it is);
     /// empty goes back to its own.
     pub set_entity_look: unsafe extern "C" fn(world: *mut WorldCtx, entity: u64, kind: Str),
+    /// Writes a kind's box (width, height, eye height); 0 if there is no such kind.
+    pub entity_kind_size: unsafe extern "C" fn(kind: Str, out: *mut [f32; 3]) -> u32,
     /// A block of moving structure `entity` (its own coordinates); `u32::MAX` if it is none.
     pub structure_block: unsafe extern "C" fn(world: *mut WorldCtx, entity: u64, pos: *const [i32; 3]) -> u32,
     /// Sets a block of moving structure `entity` like `set_block` (updates, callbacks); 0 if it

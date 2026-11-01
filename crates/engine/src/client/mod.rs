@@ -404,6 +404,7 @@ pub struct Client {
     weather: (bool, bool),
     /// How much of it there is by now, 0..1 over about five seconds.
     rain: f32,
+    thunder: f32,
     frame_dt: f32,
     /// Seconds left of a lightning's flash.
     lightning: f32,
@@ -504,7 +505,7 @@ impl Client {
     /// Shows a line in the chat as if the server had sent it.
     pub fn chat_line(&mut self, line: Msg) {
         self.chat.push((line, Instant::now()));
-        let extra = self.chat.len().saturating_sub(50);
+        let extra = self.chat.len().saturating_sub(100);
         self.chat.drain(..extra);
     }
 
@@ -662,6 +663,7 @@ impl Client {
             permission: 0,
             weather: (false, false),
             rain: 0.0,
+            thunder: 0.0,
             lightning: 0.0,
             using: None,
             burning: false,
@@ -1046,7 +1048,13 @@ impl Client {
             self.target = None;
         }
         if input.captured && !spectator && input.pressed("core:pick") {
-            if let Some(item) = self.target.and_then(|h| c.pick_item(h.state)) {
+            // In creative a mob gives its egg, there being no other way to get what stands there.
+            let egg = || {
+                self.target_entity
+                    .filter(|_| self.mode == GameMode::Creative)
+                    .and_then(|e| c.spawn_egg_of(self.entities.get(&e)?.kind))
+            };
+            if let Some(item) = self.target.and_then(|h| c.pick_item(h.state)).or_else(egg) {
                 let hotbar = &self.inventory[..content().game.player_layout.hotbar as usize];
                 // Already in the hotbar: select it. Otherwise creative fills an empty slot first.
                 let slot = hotbar
@@ -2020,6 +2028,8 @@ impl Client {
     fn weather_effects(&mut self, dt: f32) {
         let target = if self.weather.0 { 1.0 } else { 0.0 };
         self.rain += (target - self.rain).clamp(-dt / 5.0, dt / 5.0);
+        let target = if self.weather.0 && self.weather.1 { 1.0 } else { 0.0 };
+        self.thunder += (target - self.thunder).clamp(-dt / 5.0, dt / 5.0);
         self.lightning = (self.lightning - dt).max(0.0);
         if self.weather.1 && self.chance() < dt / 12.0 {
             self.lightning = 0.15;
@@ -2149,6 +2159,7 @@ impl Client {
             self.camera().pos.y,
             self.eye_liquid().is_some(),
             self.rain,
+            self.thunder,
             &overlays,
         );
         self.render.draw_translucent(&mut late);

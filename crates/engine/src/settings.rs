@@ -27,6 +27,26 @@ fn number(name: &str) -> f64 {
     config::get(id(name))
 }
 
+/// How the chat is shown, as its settings have it.
+#[derive(Clone, Copy, PartialEq)]
+pub struct ChatLook {
+    pub width: f32,
+    /// The most it takes up open, and shown over the game.
+    pub open_height: f32,
+    pub closed_height: f32,
+    /// Of the dark behind it, 0..255.
+    pub dim: u8,
+}
+
+pub fn chat_look() -> ChatLook {
+    ChatLook {
+        width: number("core:chat_width") as f32,
+        open_height: number("core:chat_height") as f32,
+        closed_height: number("core:chat_height_closed") as f32,
+        dim: (number("core:chat_opacity") * 2.55) as u8,
+    }
+}
+
 fn list(name: &str) -> Vec<String> {
     config::text(id(name))
         .split(',')

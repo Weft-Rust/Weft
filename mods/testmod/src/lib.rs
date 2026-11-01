@@ -357,9 +357,12 @@ fn morph(r: &mut Registry) {
         let (w, me) = (cmd.world(), cmd.player());
         match cmd.text("kind").map(str::to_string) {
             Some(kind) => {
-                let (width, height) = (cmd.float("width").unwrap_or(0.9) as f32, cmd.float("height").unwrap_or(0.9) as f32);
+                // The size of what it turns into, unless told otherwise.
+                let own = w.kind_size(&kind).unwrap_or([0.9, 0.9, 0.765]);
+                let (width, height) = (cmd.float("width").map_or(own[0], |v| v as f32), cmd.float("height").map_or(own[1], |v| v as f32));
+                let eye = if cmd.float("height").is_some() { height * 0.85 } else { own[2] };
                 w.set_look(me, Some(&kind));
-                w.set_size(me, Some([width, height, height * 0.85]));
+                w.set_size(me, Some([width, height, eye]));
                 cmd.reply("command.testmod.morph", &[Arg::Text(&kind), Arg::Float(width as f64, 2), Arg::Float(height as f64, 2)]);
             }
             None => {

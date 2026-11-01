@@ -66,6 +66,14 @@ pub async fn sprint_and_sneak_modes(t: T) -> R {
     t.frames(4).await?;
     let d = walk().await?;
     t.probe("toggled off, against walking", (d / plain) as f32, !fast(d));
+    // It switches as it goes down, not as it comes up.
+    t.hold("core:sprint", 1.5);
+    t.frames(4).await?;
+    let d = walk().await?;
+    t.probe("sprinting with the key still down, against walking", (d / plain) as f32, fast(d));
+    t.secs(0.8).await?;
+    t.press("core:sprint");
+    t.secs(0.3).await?;
     // Held for a stack drop, the same key switches nothing.
     t.hold("core:sprint", 0.3);
     t.frames(3).await?;
@@ -1078,6 +1086,66 @@ pub async fn creative_and_invulnerable(t: T) -> R {
 
 /// Every creative click breaks a block, also at over 1000 frames a second (instant breaks once
 /// needed a frame longer than 1 ms), and a held button keeps breaking.
+/// One coal is eight items whatever else happens, none of its ticks lost to starting on an item.
+pub async fn furnace_one_coal(t: T) -> R {
+    t.flat().await?;
+    let furnace = add(t.feet(), [-3, 0, 0]);
+    t.set(furnace, "furnace").await?;
+    t.frames(4).await?;
+    // The coal first: it lights on the tick the first item goes in.
+    t.op(&format!("put {} 1 base:coal 1", at(furnace))).await?;
+    t.frames(4).await?;
+    t.op(&format!("put {} 0 base:raw_iron 10", at(furnace)))
+        .await?;
+    t.cmd("/tick sprint 1700").await?;
+    t.secs(2.0).await?;
+    t.check_eq(t.slot(&at(furnace), 2).await?, ("base:iron_ingot".into(), 8, 0), "what its coal allows");
+    t.check_eq(t.slot(&at(furnace), 0).await?, ("base:raw_iron".into(), 2, 0), "and the rest stays");
+    Ok(())
+}
+
+/// In creative the middle button picks a mob's egg, and in the inventory a stack of what is in a
+/// slot; out of creative neither.
+pub async fn creative_middle_click(t: T) -> R {
+    t.flat().await?;
+    t.op("mode creative").await?;
+    t.until("creative", Duration::from_secs(5), |t| t.state().mode == 1)
+        .await?;
+    let f = t.feet();
+    t.op(&format!("spawn base:pig {} {} {}", f[0], f[1], f[2] - 2))
+        .await?;
+    t.secs(0.3).await?;
+    t.look_at(add(f, [0, 0, -2]));
+    t.frames(3).await?;
+    t.press("core:pick");
+    t.secs(0.3).await?;
+    let held = t.op("inv me").await?;
+    t.check(held.contains("pig"), format!("the pig's egg: {held}"));
+
+    t.op("put me 0 base:stone 3").await?;
+    t.press("core:inventory");
+    t.screen("core:menu").await?;
+    t.frames(2).await?;
+    t.click_ui("slot:36", 2);
+    t.until("a whole stack on the cursor", Duration::from_secs(2), |t| t.c().cursor_stack().count == 64)
+        .await?;
+    t.check_eq(t.c().inventory_slot(0).count, 3, "and the slot keeps what it had");
+    t.c().close_screen();
+    t.no_screen().await?;
+
+    t.op("mode survival").await?;
+    t.until("survival", Duration::from_secs(5), |t| t.state().mode == 0)
+        .await?;
+    t.press("core:inventory");
+    t.screen("core:menu").await?;
+    t.frames(2).await?;
+    t.click_ui("slot:36", 2);
+    t.secs(0.3).await?;
+    t.check(t.c().cursor_stack().is_empty(), "nothing out of creative");
+    t.c().close_screen();
+    t.no_screen().await
+}
+
 pub async fn creative_clicks(t: T) -> R {
     t.flat().await?;
     t.op("mode creative").await?;

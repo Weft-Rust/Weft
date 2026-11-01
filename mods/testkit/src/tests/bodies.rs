@@ -511,6 +511,17 @@ pub async fn morph(t: T) -> R {
     t.secs(1.1).await?;
     let z = t.state().pos[2];
     t.check(z > f[2] as f64 - 1.6, format!("as a player again it does not fit (z {z:.2})"));
+    // Without a size, the size of what it turns into, out in the open.
+    t.cmd(&format!("/tp {} {} {}", f[0], f[1], f[2] + 8))
+        .await?;
+    t.secs(0.3).await?;
+    for (kind, want) in [("core:player", [0.6, 1.8]), ("base:pig", [0.9, 0.9]), ("base:arrow", [0.5, 0.5])] {
+        t.cmd(&format!("/morph {kind}")).await?;
+        t.secs(0.2).await?;
+        let size = t.c().entity(0).map_or([0.0; 3], |e| e.size);
+        t.check((size[0] - want[0]).abs() < 0.01 && (size[1] - want[1]).abs() < 0.01, format!("{kind}: {size:?}, want {want:?}"));
+    }
+    t.cmd("/morph").await?;
     Ok(())
 }
 

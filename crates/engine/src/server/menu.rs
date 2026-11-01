@@ -237,8 +237,10 @@ fn takeable(s: &SlotRef) -> bool {
 pub const HOTBAR_SWAP: u8 = 2;
 /// Double click: gathers matching items from every slot onto the cursor, up to a full stack.
 pub const GATHER: u8 = 11;
+/// Middle click in creative: a full stack of what is in the slot onto an empty cursor.
+pub const CLONE: u8 = 12;
 
-/// `button`: 0 left, 1 right, or `HOTBAR_SWAP + n`, `GATHER`. `slot == u32::MAX` means outside
+/// `button`: 0 left, 1 right, or `HOTBAR_SWAP + n`, `GATHER`, `CLONE`. `slot == u32::MAX` means outside
 /// the window (drop the cursor).
 pub fn click(m: &mut OpenMenu, dim: &mut Dim, c: &'static Content, player: u64, slot: u32, button: u8, shift: bool) {
     if (HOTBAR_SWAP..HOTBAR_SWAP + 9).contains(&button) {
@@ -277,6 +279,17 @@ pub fn click(m: &mut OpenMenu, dim: &mut Dim, c: &'static Content, player: u64, 
         }
         call(m, dim, c, player, slot, |d| d.on_change);
         call(m, dim, c, player, h, |d| d.on_change);
+        return;
+    }
+    if button == CLONE {
+        let creative = dim
+            .entities
+            .get(player)
+            .is_some_and(|e| e.mode == crate::world::GameMode::Creative);
+        let there = if (slot as usize) < m.slots.len() { get(m, dim, player, slot) } else { ItemStack::EMPTY };
+        if creative && m.cursor.is_empty() && !there.is_empty() {
+            m.cursor = ItemStack { count: c.max_stack(there.item), ..there };
+        }
         return;
     }
     if button == GATHER {

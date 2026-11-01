@@ -109,6 +109,7 @@ pub fn named(name: &str) -> Option<Box<dyn Screen>> {
         "core:resource_packs" => Box::new(crate::packs::ResourcePacks::default()),
         "core:shader_packs" => Box::new(crate::packs::ShaderPacks),
         "core:sound" => Box::new(ConfigScreen { ns: None }),
+        "core:chat_settings" => Box::new(ChatSettings),
         "core:hud_editor" => Box::new(crate::hud_editor::HudEditor::default()),
         "core:debug_options" => Box::new(crate::hud_editor::DebugOptions),
         "core:tags" => Box::new(crate::game_screens::TagList::default()),
@@ -624,9 +625,49 @@ impl Screen for SettingsScreen {
                         });
                     }
                     if cx.in_game {
-                        d.button("settings.hud", &[], 300.0, false, screen("core:hud_editor"));
+                        d.open(&row, |d| {
+                            d.button("settings.chat", &[], 147.0, true, screen("core:chat_settings"));
+                            d.button("settings.hud", &[], 147.0, true, screen("core:hud_editor"));
+                        });
+                    } else {
+                        d.button("settings.chat", &[], 300.0, false, screen("core:chat_settings"));
                     }
                     d.parts("core:settings", "buttons");
+                });
+                d.button("menu.done", &[], 200.0, false, |r| r.handle(vec![Request::Close]));
+            });
+        });
+    }
+}
+
+/// How big the chat is and how dark behind it.
+pub struct ChatSettings;
+
+impl Screen for ChatSettings {
+    fn name(&self) -> &str {
+        "core:chat_settings"
+    }
+
+    fn pauses(&self) -> bool {
+        true
+    }
+
+    fn build(&mut self, ui: &mut Ui, cx: &BuildCx) {
+        desc::build(ui, cx, |d| {
+            desc::frame(d, cx.in_game, "settings.chat", |d| {
+                let panel = abi::UiNode {
+                    class: abi::Str::new("panel"),
+                    pad: [8.0; 4],
+                    gap: 6.0,
+                    align: abi::ui_align::STRETCH,
+                    width: 320.0,
+                    ..desc::node(abi::ui_kind::PANEL)
+                };
+                d.open(&panel, |d| {
+                    d.slider("settings.chat_width", "core:chat_width", 1.0);
+                    d.slider("settings.chat_height", "core:chat_height", 1.0);
+                    d.slider("settings.chat_height_closed", "core:chat_height_closed", 1.0);
+                    d.slider("settings.chat_opacity", "core:chat_opacity", 1.0);
                 });
                 d.button("menu.done", &[], 200.0, false, |r| r.handle(vec![Request::Close]));
             });

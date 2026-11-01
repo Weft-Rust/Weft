@@ -221,6 +221,7 @@ pub static HOST: Host = Host {
     reg_words,
     set_entity_size,
     set_entity_look,
+    entity_kind_size,
     structure_block,
     set_structure_block,
     lift_blocks,
@@ -2007,6 +2008,16 @@ unsafe extern "C" fn set_entity_look(w: *mut abi::WorldCtx, id: u64, kind: Str) 
         if let Some(e) = d.entities.get_mut(id) {
             e.look = look;
         }
+    }
+}
+
+unsafe extern "C" fn entity_kind_size(kind: Str, out: *mut [f32; 3]) -> u32 {
+    unsafe {
+        let g = &content().game;
+        let Some(&k) = g.entity_names.get(kind.as_str()) else { return 0 };
+        let e = &g.entities[k as usize];
+        *out = [e.width, e.height, e.eye];
+        1
     }
 }
 

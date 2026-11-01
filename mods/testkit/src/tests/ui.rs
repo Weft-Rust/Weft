@@ -345,6 +345,82 @@ pub async fn creative_inventory(t: T) -> R {
     Ok(())
 }
 
+/// However much there is in the chat and however big the interface, its line stays on the screen;
+/// the wheel goes back through what was said, and `/help` gives a line per command.
+pub async fn chat_overflow(t: T) -> R {
+    t.world(3).await?;
+    for i in 0..40 {
+        t.cmd(&format!("/help line{i}")).await?;
+    }
+    t.cmd("/help").await?;
+    t.frames(4).await?;
+    weft_sdk::settings::GUI_SCALE.set(4);
+    t.frames(2).await?;
+    t.press("core:chat");
+    t.screen("core:chat").await?;
+    t.frames(4).await?;
+    let out = async {
+        let line = t.c().ui_rect("id:chat").ok_or("no chat line")?;
+        t.check(line[1] + line[3] <= 1.0 && line[1] > 0.5, format!("its line at the bottom of the screen: {line:?}"));
+        t.shot("full").await?;
+        // With the completions up, it stays there.
+        t.c().type_text("/setblock 0 0 0 ");
+        t.frames(4).await?;
+        let shown = t.c().ui_rect("id:chat").ok_or("no chat line")?;
+        t.check(shown[1] == line[1], format!("it doesn't move for completions: {shown:?}"));
+        t.shot("completing").await?;
+        for _ in 0.."/setblock 0 0 0 ".len() {
+            t.c().key("Backspace", 0.0);
+            t.frames(1).await?;
+        }
+        // As narrow as set, and dark behind the text.
+        let area = t.c().ui_rect("id:chat_lines").ok_or("no chat lines")?;
+        let window = t.state().window[0] as f32 / t.state().gui_scale;
+        t.check((area[2] - 320.0 / window).abs() < 0.01, format!("as wide as the setting: {area:?}"));
+        let beside = t.shot("dark").await?;
+        // A spot right of the text, inside the chat and outside it.
+        let (right, y) = (area[0] + area[2], area[1] + area[3] / 2.0);
+        let (dark, plain) = (beside.avg(right - 0.02, y, right - 0.01, y + 0.01), beside.avg(right + 0.01, y, right + 0.02, y + 0.01));
+        t.check(crate::runner::lum(dark) < crate::runner::lum(plain) * 0.8, format!("dark behind it: {dark:?} beside {plain:?}"));
+        // The first thing said is out of sight, then scrolled to.
+        let area = t.c().ui_rect("id:chat_lines").ok_or("no chat lines")?;
+        t.c()
+            .cursor(area[0] + area[2] / 2.0, area[1] + area[3] / 2.0);
+        t.frames(1).await?;
+        let first = "line39";
+        let last = t.c().ui_rect(&format!("text:{first}"));
+        for _ in 0..200 {
+            t.c().scroll(1.0);
+            t.frames(1).await?;
+        }
+        t.frames(2).await?;
+        t.check(t.c().ui_rect(&format!("text:{first}")).map(|r| r[1]) != last.map(|r| r[1]), "the wheel moves what was said");
+        t.check(t.c().ui_rect("id:chat").is_some_and(|r| r[1] == line[1]), "and not its line");
+        t.shot("scrolled").await?;
+        Ok::<(), String>(())
+    }
+    .await;
+    weft_sdk::settings::GUI_SCALE.set(2);
+    t.c().close_screen();
+    t.no_screen().await?;
+    out?;
+    // The settings for it, reached from the settings.
+    t.c().open_screen(&screens::SETTINGS);
+    t.screen("core:settings").await?;
+    t.frames(2).await?;
+    t.c().cursor(0.5, 0.5);
+    t.frames(1).await?;
+    t.c().scroll(-40.0);
+    t.frames(3).await?;
+    t.check(t.click_ui("text:Chat", 0), "a button for the chat's settings");
+    t.screen("core:chat_settings").await?;
+    t.frames(2).await?;
+    t.laid_out(&["text:Chat width: 320", "text:Open chat height: 180", "text:Dark behind the chat: 50%"]);
+    t.shot("settings").await?;
+    t.c().close_screen();
+    Ok(())
+}
+
 /// The chat: `/` opens it with the command list shown; Tab completes items, client commands,
 /// word sets and other mods' branches; commands run.
 pub async fn chat(t: T) -> R {

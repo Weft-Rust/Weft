@@ -729,6 +729,39 @@ pub async fn translucent_order(t: T) -> R {
     Ok(())
 }
 
+/// By day a lamp's color still shows on what is around it, white light takes nothing away, and
+/// at night light alone is less than the sun.
+pub async fn light_by_day(t: T) -> R {
+    t.flat().await?;
+    t.op("time 6000").await?;
+    t.cmd("/weather clear").await?;
+    let f = t.feet();
+    t.op("mode spectator").await?;
+    t.fill(add(f, [-9, 0, -8]), add(f, [9, 0, -2]), "base:snow")
+        .await?;
+    t.c()
+        .teleport([f[0] as f64 + 0.5, f[1] as f64 + 7.0, f[2] as f64 - 2.0]);
+    t.c().look(0.0, -60.0);
+    t.secs(0.4).await?;
+    let spot = t
+        .on_screen([f[0] as f64 + 0.5, f[1] as f64 + 1.0, f[2] as f64 - 5.5])
+        .ok_or("not in view")?;
+    let at = |s: &crate::runner::Shot| s.avg(spot.0 - 0.01, spot.1 - 0.01, spot.0 + 0.01, spot.1 + 0.01);
+    let plain = at(&t.shot("plain").await?);
+    t.set(add(f, [0, 1, -5]), "base:blue_lamp").await?;
+    t.frames(4).await?;
+    // Beside the lamp, on the snow.
+    let spot2 = t
+        .on_screen([f[0] as f64 + 1.5, f[1] as f64 + 1.0, f[2] as f64 - 4.5])
+        .ok_or("not in view")?;
+    let beside = |s: &crate::runner::Shot| s.avg(spot2.0 - 0.01, spot2.1 - 0.01, spot2.0 + 0.01, spot2.1 + 0.01);
+    t.secs(0.4).await?;
+    let lit = beside(&t.shot("lamp").await?);
+    t.note(format!("snow {plain:?}, beside a blue lamp {lit:?}"));
+    t.probe("how much bluer the snow is than red, by a blue lamp at noon", lit[2] - lit[0], lit[2] - lit[0] > 25.0);
+    Ok(())
+}
+
 /// A random `.ctm` varies plants and box models too: red and blue tiles of a green texture, each
 /// row in front of a white wall.
 pub async fn ctm_off_the_cube(t: T) -> R {

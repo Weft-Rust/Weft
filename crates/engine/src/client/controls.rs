@@ -60,7 +60,7 @@ pub(super) struct Controls {
     double_tap_sprint: bool,
     sneak_toggle: bool,
     sprint_toggle: bool,
-    /// The sprint key down with toggle sprint on, and whether it was used for dropping a stack.
+    /// The sprint key down with toggle sprint on, and whether drop took it for a whole stack.
     sprint_key: Option<bool>,
 }
 
@@ -75,13 +75,21 @@ impl Controls {
             if !k.toggle_sneak {
                 self.sneak_toggle = false;
             }
-            // Switches when let go: the same key held with drop throws a whole stack instead.
+            // Switches as it goes down. Held with drop it throws a whole stack instead, which
+            // takes the switch back.
             if !k.toggle_sprint {
                 (self.sprint_toggle, self.sprint_key) = (false, None);
             } else if k.sprint {
-                *self.sprint_key.get_or_insert(false) |= k.drop_pressed;
-            } else if self.sprint_key.take() == Some(false) {
-                self.sprint_toggle = !self.sprint_toggle;
+                if self.sprint_key.is_none() {
+                    self.sprint_toggle = !self.sprint_toggle;
+                }
+                if k.drop_pressed && self.sprint_key != Some(true) {
+                    self.sprint_toggle = !self.sprint_toggle;
+                    self.sprint_key = Some(true);
+                }
+                self.sprint_key.get_or_insert(false);
+            } else {
+                self.sprint_key = None;
             }
             // Sneaking ends a sprint, toggled or not.
             if k.sneak_pressed {
@@ -180,14 +188,20 @@ mod tests {
     }
 
     #[test]
-    fn toggle_sprint_switches_on_release_unless_the_key_dropped_a_stack() {
+    fn toggle_sprint_switches_on_press_unless_the_key_drops_a_stack() {
         let (mut c, t) = (Controls::default(), Instant::now());
         let on = Keys { toggle_sprint: true, ..KEYS };
         let down = Keys { sprint: true, ..on };
-        assert!(!c.read(&down, false, false, t).sprint, "not yet while it is down");
-        assert!(c.read(&on, false, false, t).sprint, "on when let go");
-        c.read(&Keys { drop_pressed: true, ..down }, false, false, t);
-        assert!(c.read(&on, false, false, t).sprint, "dropping a stack switches nothing");
+        assert!(c.read(&down, false, false, t).sprint, "on as it goes down");
+        assert!(c.read(&down, false, false, t).sprint, "held, that is all");
+        assert!(c.read(&on, false, false, t).sprint, "letting go changes nothing");
+        c.read(&down, false, false, t);
+        assert!(
+            c.read(&Keys { drop_pressed: true, ..down }, false, false, t)
+                .sprint,
+            "dropping a stack takes back the switch"
+        );
+        assert!(c.read(&on, false, false, t).sprint, "so it is as it was");
         c.read(&Keys { sneak_pressed: true, sneak: true, ..on }, false, false, t);
         assert!(!c.read(&on, false, false, t).sprint, "sneaking ends it");
     }

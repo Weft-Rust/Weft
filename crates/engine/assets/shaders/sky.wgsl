@@ -174,7 +174,7 @@ fn fs_clouds(in: CloudOut) -> CloudPixel {
     let rel = dir * t;
     let dist = length(rel.xz) / reach;
     let color = mix(s.color.rgb * shade, scene.fog_color.rgb, smoothstep(0.5, 1.0, dist));
-    let alpha = 1.0 - smoothstep(0.8, 1.0, dist);
+    let alpha = s.color.a * (1.0 - smoothstep(0.8, 1.0, dist));
     let clip = scene.view_proj * vec4(rel, 1.0);
     return CloudPixel(vec4(color * alpha, alpha), clip.z / clip.w);
 }

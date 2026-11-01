@@ -59,12 +59,15 @@ pub struct Style {
     pub h: Len,
     pub min: [f32; 2],
     pub max_w: f32,
+    pub max_h: f32,
     pub grow: f32,
     pub align: Align,
     pub justify: Justify,
     pub self_align: Option<Align>,
     /// Children scroll inside this node (mouse wheel) and are clipped to it.
     pub scroll: bool,
+    /// A plain color behind the node, RGBA.
+    pub fill: Option<u32>,
     /// Placed at a point instead of in the flow: (x, y) in GUI pixels from the parent's inner
     /// corner, and which point of the node goes there (0..1 of its width and height).
     pub at: Option<[f32; 4]>,
@@ -80,11 +83,13 @@ impl Default for Style {
             h: Len::Auto,
             min: [0.0; 2],
             max_w: f32::INFINITY,
+            max_h: f32::INFINITY,
             grow: 0.0,
             align: Align::Start,
             justify: Justify::Start,
             self_align: None,
             scroll: false,
+            fill: None,
             at: None,
         }
     }
@@ -392,9 +397,11 @@ impl Ui {
         else {
             return false;
         };
+        // Held to its end, a node counts from there: up is further from it.
+        let by = if self.nodes[id].style.justify == Justify::End { lines } else { -lines };
         let key = self.scroll_key(id);
         let v = self.scroll.entry(key).or_default();
-        *v = (*v - lines * 20.0).max(0.0);
+        *v = (*v + by * 20.0).max(0.0);
         self.dirty = true;
         true
     }
@@ -419,7 +426,9 @@ impl Ui {
             return false;
         };
         let key = self.scroll_key(id);
-        self.scroll.insert(key, bar.offset_at(p.y));
+        let at = bar.offset_at(p.y);
+        let at = if self.nodes[id].style.justify == Justify::End { bar.max - at } else { at };
+        self.scroll.insert(key, at);
         self.dirty = true;
         true
     }
@@ -645,7 +654,10 @@ impl Ui {
             .unwrap_or(content[0] + pad_w)
             .max(style.min[0])
             .min(style.max_w);
-        let h = fixed_h.unwrap_or(content[1] + pad_h).max(style.min[1]);
+        let h = fixed_h
+            .unwrap_or(content[1] + pad_h)
+            .max(style.min[1])
+            .min(style.max_h);
         self.nodes[id].measured = [w, h];
         [w, h]
     }
@@ -705,6 +717,16 @@ impl Ui {
                 }
             }
             free = 0.0;
+        } else if free < 0.0 && !style.row {
+            // Too tall: what scrolls gives way, the rest keeps its place.
+            let scrolling: Vec<usize> = (0..children.len())
+                .filter(|&i| self.nodes[children[i]].style.scroll && self.nodes[children[i]].style.h == Len::Auto)
+                .collect();
+            for i in scrolling {
+                let take = (-free).min(sizes[i][1]);
+                sizes[i][1] -= take;
+                free += take;
+            }
         } else if free < 0.0 && style.row {
             // Too wide: squeeze wrapping text children, they re-measure with less width.
             let texts: Vec<usize> = (0..children.len())
@@ -722,6 +744,7 @@ impl Ui {
             }
         }
         let mut scrolled = 0.0;
+        let mut past_end = 0.0;
         self.nodes[id].scrollbar = None;
         if style.scroll {
             // Content longer than the node scrolls; the offset stays within the content.
@@ -730,18 +753,21 @@ impl Ui {
             let v = self.scroll.entry(key).or_default();
             *v = v.min(max);
             scrolled = *v;
+            past_end = max - scrolled;
             free = free.max(0.0);
             if max > 0.0 && !style.row && cross_size > Scrollbar::ROOM * 2.0 {
                 cross_size -= Scrollbar::ROOM;
                 let track = Rect { x: inner.x + inner.w - Scrollbar::HANDLE[0], y: inner.y, w: Scrollbar::HANDLE[0], h: inner.h };
-                self.nodes[id].scrollbar = Some(Scrollbar { track, offset: scrolled, max });
+                let offset = if style.justify == Justify::End { max - scrolled } else { scrolled };
+                self.nodes[id].scrollbar = Some(Scrollbar { track, offset, max });
             }
         }
         let (mut pos, spacing) = match style.justify {
             Justify::Start => (-scrolled, style.gap),
             Justify::Center => (free.max(0.0) / 2.0, style.gap),
-            // Overflowing content sticks out at the start, the end edge stays put.
-            Justify::End => (free, style.gap),
+            // Overflowing content sticks out at the start, the end edge stays put. Scrolling goes
+            // from there.
+            Justify::End => (free - past_end, style.gap),
             Justify::Between if children.len() > 1 => (0.0, style.gap + free.max(0.0) / (children.len() - 1) as f32),
             Justify::Between => (free.max(0.0) / 2.0, style.gap),
         };
