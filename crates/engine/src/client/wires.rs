@@ -1,4 +1,4 @@
-﻿//! Redstone wire on the screen. It is not part of a cube's mesh: its power changes all the time and
+//! Redstone wire on the screen. It is not part of a cube's mesh: its power changes all the time and
 //! a mesh would be made again for each change. A quad per piece or arm of one, a number per piece
 //! for its power: when only power changes, only those numbers go to the GPU.
 
@@ -106,20 +106,22 @@ impl Wires {
     }
 
     pub fn reload(&mut self, gpu: &mut dyn Backend, assets: &crate::assets::Assets) {
-        let made = crate::packs::compose(assets, "wire.wgsl", &[]).map_err(|e| e.0).and_then(|(shader, _)| {
-            gpu.create_pipeline(&PipelineDesc {
-                label: "wire",
-                shader: &shader,
-                vertex: "vs",
-                fragment: Some("fs"),
-                color: Some(Format::Surface),
-                depth: Some(DepthState { write: true, compare: Compare::GreaterEqual }),
-                blend: Blend::None,
-                cull_back: false,
-                topology: Topology::Triangles,
-            })
+        let made = crate::packs::compose(assets, "wire.wgsl", &[])
             .map_err(|e| e.0)
-        });
+            .and_then(|(shader, _)| {
+                gpu.create_pipeline(&PipelineDesc {
+                    label: "wire",
+                    shader: &shader,
+                    vertex: "vs",
+                    fragment: Some("fs"),
+                    color: Some(Format::Surface),
+                    depth: Some(DepthState { write: true, compare: Compare::GreaterEqual }),
+                    blend: Blend::None,
+                    cull_back: false,
+                    topology: Topology::Triangles,
+                })
+                .map_err(|e| e.0)
+            });
         match made {
             Ok(pipe) => {
                 if let Some(old) = self.pipe.replace(pipe) {
@@ -167,7 +169,10 @@ impl Wires {
         if !self.sets.contains_key(&frame) && !blocks.has_wire_dirty() {
             return;
         }
-        self.sets.entry(frame).or_default().update(gpu, blocks, textures);
+        self.sets
+            .entry(frame)
+            .or_default()
+            .update(gpu, blocks, textures);
     }
 
     /// What is on bodies that are gone goes with them.
@@ -226,7 +231,11 @@ impl WireSet {
         for &cp in &dirty {
             let mut cells = Vec::new();
             if let Some((cube, _)) = world.cube_rev(cp) {
-                if cube.palette().iter().any(|&s| c.states[s as usize].signal.kind == sk::WIRE) {
+                if cube
+                    .palette()
+                    .iter()
+                    .any(|&s| c.states[s as usize].signal.kind == sk::WIRE)
+                {
                     for i in 0..4096usize {
                         if c.states[cube.get(i) as usize].signal.kind == sk::WIRE {
                             cells.push(cp * 16 + crate::world::cube::offset(i));
@@ -289,7 +298,9 @@ impl WireSet {
                 let (u, v) = axes(f);
                 let side = |axis: u8, positive: u8| reach(axis * 2 + positive);
                 let (up, un, vp, vn) = (side(u, 1), side(u, 0), side(v, 1), side(v, 0));
-                let mut push = |mode: u32, tex: u32| quads.push(GpuWireQuad { pos: [cell.x, cell.y, cell.z, f as i32 | (mode as i32) << 3], data: [tex, light, piece, 0] });
+                let mut push = |mode: u32, tex: u32| {
+                    quads.push(GpuWireQuad { pos: [cell.x, cell.y, cell.z, f as i32 | (mode as i32) << 3], data: [tex, light, piece, 0] })
+                };
                 // A straight run is a line; anything else a dot with arms.
                 let any_u = up || un;
                 let any_v = vp || vn;
@@ -311,9 +322,13 @@ impl WireSet {
         if quads.is_empty() {
             return;
         }
-        let q = self.quads.fit(gpu, (quads.len() * size_of::<GpuWireQuad>()) as u64, "wire quads");
+        let q = self
+            .quads
+            .fit(gpu, (quads.len() * size_of::<GpuWireQuad>()) as u64, "wire quads");
         gpu.write_buffer(q, 0, bytemuck::cast_slice(&quads));
-        let l = self.levels.fit(gpu, (self.numbers.len() * 4) as u64, "wire power");
+        let l = self
+            .levels
+            .fit(gpu, (self.numbers.len() * 4) as u64, "wire power");
         gpu.write_buffer(l, 0, bytemuck::cast_slice(&self.numbers));
     }
 
@@ -329,7 +344,10 @@ impl WireSet {
         list.bind(crate::gpu_layout::bind::wire::QUADS, q);
         list.bind(crate::gpu_layout::bind::wire::LEVELS, l);
         list.bind(crate::gpu_layout::bind::wire::SCENE, scene);
-        list.push_constants(&Push { origin: [origin.x as i32, origin.y as i32, origin.z as i32, lit.unwrap_or(0) as i32], frac: [frac.x as f32, frac.y as f32, frac.z as f32, lit.is_some() as u32 as f32] });
+        list.push_constants(&Push {
+            origin: [origin.x as i32, origin.y as i32, origin.z as i32, lit.unwrap_or(0) as i32],
+            frac: [frac.x as f32, frac.y as f32, frac.z as f32, lit.is_some() as u32 as f32],
+        });
         list.push(Cmd::Draw { vertices: 6, instances: self.count, first_vertex: 0, first_instance: 0 });
     }
 }

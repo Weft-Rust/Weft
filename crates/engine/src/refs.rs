@@ -38,14 +38,22 @@ impl<'a> Ref<'a> {
 
 /// Ids of the tags `pattern` matches (`*` any text), an error when there is none.
 pub fn tags(c: &Components, pattern: &str) -> Result<Vec<u32>, String> {
-    let found: Vec<u32> = c.names.iter().enumerate().filter(|(i, n)| c.is_tag(*i as u32) && comps::matches(pattern, n)).map(|(i, _)| i as u32).collect();
+    let found: Vec<u32> = c
+        .names
+        .iter()
+        .enumerate()
+        .filter(|(i, n)| c.is_tag(*i as u32) && comps::matches(pattern, n))
+        .map(|(i, _)| i as u32)
+        .collect();
     if found.is_empty() { Err(format!("no tag matches #{pattern}")) } else { Ok(found) }
 }
 
 /// One tag (no pattern): conditions and filters that test a single tag.
 pub fn tag(c: &Components, text: &str) -> Result<u32, String> {
     let name = tag_name(text)?;
-    c.id(name).filter(|&t| c.is_tag(t)).ok_or_else(|| format!("no tag #{name}"))
+    c.id(name)
+        .filter(|&t| c.is_tag(t))
+        .ok_or_else(|| format!("no tag #{name}"))
 }
 
 /// The name in `#name`, for calls that only take a tag; a bare name is an error since it would
@@ -60,10 +68,15 @@ pub fn tag_name(text: &str) -> Result<&str, String> {
 /// The block states a reference stands for.
 pub fn states(r: &Ref, names: &FxHashMap<String, u32>, blocks: &[BlockDef], c: &Components, state_count: u32) -> Result<Vec<u32>, String> {
     match r {
-        Ref::Name(name, props) => blocks[*names.get(*name).ok_or_else(|| format!("unknown block {name}"))? as usize].matching(props),
+        Ref::Name(name, props) => blocks[*names
+            .get(*name)
+            .ok_or_else(|| format!("unknown block {name}"))? as usize]
+            .matching(props),
         Ref::Tags(p) => {
             let t = tags(c, p)?;
-            Ok((0..state_count).filter(|&s| t.iter().any(|&t| c.has(comps::BLOCK, s, t))).collect())
+            Ok((0..state_count)
+                .filter(|&s| t.iter().any(|&t| c.has(comps::BLOCK, s, t)))
+                .collect())
         }
     }
 }
@@ -71,8 +84,20 @@ pub fn states(r: &Ref, names: &FxHashMap<String, u32>, blocks: &[BlockDef], c: &
 /// The blocks (definition index) a reference stands for.
 pub fn blocks(r: &Ref, names: &FxHashMap<String, u32>, blocks: &[BlockDef], c: &Components, state_count: u32) -> Result<Vec<u32>, String> {
     let mut out: Vec<u32> = match r {
-        Ref::Name(name, props) if props.is_empty() => vec![*names.get(*name).ok_or_else(|| format!("unknown block {name}"))?],
-        _ => states(r, names, blocks, c, state_count)?.into_iter().map(|s| blocks.iter().position(|b| s >= b.first_state && s < b.first_state + b.states).unwrap_or(0) as u32).collect(),
+        Ref::Name(name, props) if props.is_empty() => vec![
+            *names
+                .get(*name)
+                .ok_or_else(|| format!("unknown block {name}"))?,
+        ],
+        _ => states(r, names, blocks, c, state_count)?
+            .into_iter()
+            .map(|s| {
+                blocks
+                    .iter()
+                    .position(|b| s >= b.first_state && s < b.first_state + b.states)
+                    .unwrap_or(0) as u32
+            })
+            .collect(),
     };
     out.sort_unstable();
     out.dedup();
@@ -83,10 +108,17 @@ pub fn blocks(r: &Ref, names: &FxHashMap<String, u32>, blocks: &[BlockDef], c: &
 /// tag its preferred block's first state.
 pub fn state(r: &Ref, names: &FxHashMap<String, u32>, blocks: &[BlockDef], c: &Components) -> Result<u32, String> {
     match r {
-        Ref::Name(name, props) => blocks[*names.get(*name).ok_or_else(|| format!("unknown block {name}"))? as usize].state_of(props),
+        Ref::Name(name, props) => blocks[*names
+            .get(*name)
+            .ok_or_else(|| format!("unknown block {name}"))? as usize]
+            .state_of(props),
         Ref::Tags(p) => {
             let t = tags(c, p)?;
-            blocks.iter().find(|b| t.iter().any(|&t| c.has(comps::BLOCK, b.first_state, t))).map(|b| b.first_state).ok_or_else(|| format!("no block has #{p}"))
+            blocks
+                .iter()
+                .find(|b| t.iter().any(|&t| c.has(comps::BLOCK, b.first_state, t)))
+                .map(|b| b.first_state)
+                .ok_or_else(|| format!("no block has #{p}"))
         }
     }
 }
@@ -94,11 +126,17 @@ pub fn state(r: &Ref, names: &FxHashMap<String, u32>, blocks: &[BlockDef], c: &C
 /// The biomes a reference stands for: a biome by name, or every biome with the tags.
 pub fn biomes(r: &Ref, names: &FxHashMap<String, u32>, c: &Components, count: u32) -> Result<Vec<u32>, String> {
     match r {
-        Ref::Name(name, props) if props.is_empty() => Ok(vec![*names.get(*name).ok_or_else(|| format!("unknown biome {name}"))?]),
+        Ref::Name(name, props) if props.is_empty() => Ok(vec![
+            *names
+                .get(*name)
+                .ok_or_else(|| format!("unknown biome {name}"))?,
+        ]),
         Ref::Name(name, _) => Err(format!("{name}: a biome has no properties")),
         Ref::Tags(p) => {
             let t = tags(c, p)?;
-            Ok((0..count).filter(|&b| t.iter().any(|&t| c.has(comps::BIOME, b, t))).collect())
+            Ok((0..count)
+                .filter(|&b| t.iter().any(|&t| c.has(comps::BIOME, b, t)))
+                .collect())
         }
     }
 }
@@ -118,10 +156,17 @@ pub fn tag_items(c: &Components, ordered: &[u32]) -> FxHashMap<u32, Vec<u32>> {
 /// The items a reference stands for (a name with properties is no item).
 pub fn items(r: &Ref, names: &FxHashMap<String, u32>, c: &Components, by_tag: &FxHashMap<u32, Vec<u32>>) -> Result<Vec<u32>, String> {
     match r {
-        Ref::Name(name, props) if props.is_empty() => Ok(vec![*names.get(*name).ok_or_else(|| format!("unknown item {name}"))?]),
+        Ref::Name(name, props) if props.is_empty() => Ok(vec![
+            *names
+                .get(*name)
+                .ok_or_else(|| format!("unknown item {name}"))?,
+        ]),
         Ref::Name(name, _) => Err(format!("{name}: an item has no properties")),
         Ref::Tags(p) => {
-            let mut out: Vec<u32> = tags(c, p)?.iter().flat_map(|t| by_tag.get(t).cloned().unwrap_or_default()).collect();
+            let mut out: Vec<u32> = tags(c, p)?
+                .iter()
+                .flat_map(|t| by_tag.get(t).cloned().unwrap_or_default())
+                .collect();
             out.dedup();
             if out.is_empty() { Err(format!("no item has #{p}")) } else { Ok(out) }
         }
@@ -140,7 +185,9 @@ mod tests {
     #[test]
     fn one_syntax() {
         assert!(matches!(Ref::parse("base:stone"), Ok(Ref::Name("base:stone", ref p)) if p.is_empty()));
-        assert!(matches!(Ref::parse("base:furnace[lit=true, facing=east]"), Ok(Ref::Name("base:furnace", ref p)) if p == &[("lit", "true"), ("facing", "east")]));
+        assert!(
+            matches!(Ref::parse("base:furnace[lit=true, facing=east]"), Ok(Ref::Name("base:furnace", ref p)) if p == &[("lit", "true"), ("facing", "east")])
+        );
         assert!(matches!(Ref::parse("#ingots/*"), Ok(Ref::Tags("ingots/*"))));
         assert!(Ref::parse("#").is_err());
         assert!(Ref::parse("base:furnace[lit").is_err());

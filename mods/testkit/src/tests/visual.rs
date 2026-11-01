@@ -22,7 +22,8 @@ fn avg_around(t: &T, shot: &Shot, p: [f64; 3], r: f32) -> [f32; 3] {
 
 /// Share of pixels that changed in a box between two grabs of the same size.
 fn changed(a: &[u8], b: &[u8], w: u32, h: u32, x0: f32, y0: f32, x1: f32, y1: f32) -> f32 {
-    let (ax, ay, bx, by) = ((x0 * w as f32) as u32, (y0 * h as f32) as u32, ((x1 * w as f32) as u32).min(w), ((y1 * h as f32) as u32).min(h));
+    let (ax, ay, bx, by) =
+        ((x0 * w as f32) as u32, (y0 * h as f32) as u32, ((x1 * w as f32) as u32).min(w), ((y1 * h as f32) as u32).min(h));
     let (mut n, mut all) = (0.0f32, 0.0f32);
     for y in ay..by {
         for x in ax..bx {
@@ -50,7 +51,8 @@ pub async fn hide_hud(t: T) -> R {
     t.press("core:hide_hud");
     t.frames(4).await?;
     let again = t.shot("again").await?;
-    let parts = [("hotbar", [0.35, 0.92, 0.65, 1.0], 0.1), ("crosshair", [0.49, 0.48, 0.51, 0.52], 0.05), ("hand", [0.7, 0.6, 1.0, 1.0], 0.01)];
+    let parts =
+        [("hotbar", [0.35, 0.92, 0.65, 1.0], 0.1), ("crosshair", [0.49, 0.48, 0.51, 0.52], 0.05), ("hand", [0.7, 0.6, 1.0, 1.0], 0.01)];
     for (name, [x0, y0, x1, y1], min) in parts {
         let gone = changed(&shown.px, &hidden.px, shown.w, shown.h, x0, y0, x1, y1);
         t.probe(&format!("{name} gone with F1"), gone, gone > min);
@@ -65,17 +67,30 @@ pub async fn held_items(t: T) -> R {
     // Tools by being tools, the rest by asking.
     static HANDHELD: Tag = Tag::named("handheld");
     let handheld = |name: &str| Item::lookup(name).is_some_and(|i| HANDHELD.on_item(i));
-    t.check(handheld("base:diamond_sword") && handheld("base:wood_pickaxe") && handheld("base:stick") && handheld("testmod:steel_pickaxe"), "tools and the stick are held like tools");
+    t.check(
+        handheld("base:diamond_sword") && handheld("base:wood_pickaxe") && handheld("base:stick") && handheld("testmod:steel_pickaxe"),
+        "tools and the stick are held like tools",
+    );
     t.check(!handheld("base:apple") && !handheld("base:stone"), "the rest are not");
     t.flat().await?;
-    for (i, name) in ["wood_pickaxe", "diamond_sword", "glass", "rose", "torch"].iter().enumerate() {
+    for (i, name) in ["wood_pickaxe", "diamond_sword", "glass", "rose", "torch"]
+        .iter()
+        .enumerate()
+    {
         t.op(&format!("put me {i} {name} 1")).await?;
     }
     t.c().look(0.0, -10.0);
-    let looks: [(&str, fn([u8; 3]) -> bool, f32); 5] = [("pickaxe", probe::brown, 0.03), ("sword", probe::cyan, 0.03), ("block", probe::light, 0.03), ("flower", probe::red, 0.02), ("torch", probe::dark, 0.03)];
+    let looks: [(&str, fn([u8; 3]) -> bool, f32); 5] = [
+        ("pickaxe", probe::brown, 0.03),
+        ("sword", probe::cyan, 0.03),
+        ("block", probe::light, 0.03),
+        ("flower", probe::red, 0.02),
+        ("torch", probe::dark, 0.03),
+    ];
     for (i, (name, color, min)) in looks.into_iter().enumerate() {
         t.c().select(i as u32);
-        t.until("selected", Duration::from_secs(5), |t| t.state().selected == i as u32).await?;
+        t.until("selected", Duration::from_secs(5), |t| t.state().selected == i as u32)
+            .await?;
         // The hand lowers and comes back up on a switch.
         t.secs(0.6).await?;
         let shot = t.shot(name).await?;
@@ -120,15 +135,24 @@ pub async fn tooltips(t: T) -> R {
             _ => c[0] > 150 && c[1] > 70 && c[1] < 150 && c[2] < 90,
         };
         if matches!(name, "sword" | "bread" | "chestplate") {
-            let share = t.shot(&format!("{name}_lines")).await?.share(cx + 0.015, cy - 0.06, cx + 0.3, cy + 0.12, line);
+            let share = t
+                .shot(&format!("{name}_lines"))
+                .await?
+                .share(cx + 0.015, cy - 0.06, cx + 0.3, cy + 0.12, line);
             t.probe(&format!("{name}'s line from its tag"), share, share > 0.0005);
         }
         // Another mod's line under coal's own (`item.base.coal.tooltip.testmod`), in red.
         if name == "coal" {
-            let red = t.shot("coal_lines").await?.share(cx + 0.02, cy - 0.05, cx + 0.3, cy + 0.12, probe::red);
+            let red = t
+                .shot("coal_lines")
+                .await?
+                .share(cx + 0.02, cy - 0.05, cx + 0.3, cy + 0.12, probe::red);
             t.probe("the test mod's red line under coal's tooltip", red, red > 0.002);
             // `{block:..}` in a tooltip draws the block, not an item icon.
-            let block = t.shot("coal_block_icon").await?.share(cx + 0.02, cy - 0.05, cx + 0.3, cy + 0.12, probe::cyan);
+            let block = t
+                .shot("coal_block_icon")
+                .await?
+                .share(cx + 0.02, cy - 0.05, cx + 0.3, cy + 0.12, probe::cyan);
             t.probe("diamond block icon in the tooltip", block, block > 0.0008);
         }
     }
@@ -141,9 +165,12 @@ pub async fn tooltips(t: T) -> R {
 pub async fn night_light(t: T) -> R {
     t.flat().await?;
     let f = t.feet();
-    t.fill(add(f, [-5, -1, -9]), add(f, [5, 4, 2]), "stone").await?;
-    t.fill(add(f, [-4, 0, -8]), add(f, [4, 3, 1]), "air").await?;
-    t.fill(add(f, [-4, -1, -8]), add(f, [4, -1, 1]), "birch_planks").await?;
+    t.fill(add(f, [-5, -1, -9]), add(f, [5, 4, 2]), "stone")
+        .await?;
+    t.fill(add(f, [-4, 0, -8]), add(f, [4, 3, 1]), "air")
+        .await?;
+    t.fill(add(f, [-4, -1, -8]), add(f, [4, -1, 1]), "birch_planks")
+        .await?;
     t.c().look(0.0, -35.0);
     t.secs(0.5).await?;
     let dark = t.shot("dark").await?;
@@ -191,7 +218,9 @@ pub async fn player_skin(t: T) -> R {
     let mut enc = png::Encoder::new(std::io::BufWriter::new(file), 64, 64);
     enc.set_color(png::ColorType::Rgba);
     let px: Vec<u8> = (0..64 * 64).flat_map(|_| [220u8, 30, 30, 255]).collect();
-    enc.write_header().and_then(|mut w| w.write_image_data(&px)).map_err(|e| e.to_string())?;
+    enc.write_header()
+        .and_then(|mut w| w.write_image_data(&px))
+        .map_err(|e| e.to_string())?;
     let result = async {
         t.flat().await?;
         t.press("core:perspective");
@@ -226,8 +255,17 @@ pub async fn crouch_pose(t: T) -> R {
     // from the top of its hair (below the sky) to the bottom of its trousers in the middle column.
     let height = |s: &Shot| {
         let rows: Vec<f32> = (0..s.h).map(|y| y as f32 / s.h as f32).collect();
-        let top = rows.iter().copied().find(|&y| !probe::light(s.at(0.5, y))).unwrap_or(1.0);
-        let bottom = rows.iter().copied().filter(|&y| probe::blue(s.at(0.5, y))).last().unwrap_or(top);
+        let top = rows
+            .iter()
+            .copied()
+            .find(|&y| !probe::light(s.at(0.5, y)))
+            .unwrap_or(1.0);
+        let bottom = rows
+            .iter()
+            .copied()
+            .filter(|&y| probe::blue(s.at(0.5, y)))
+            .last()
+            .unwrap_or(top);
         bottom - top
     };
     let ratio = height(&crouching) / height(&standing).max(1e-3);
@@ -244,10 +282,14 @@ pub async fn liquid_layers(t: T) -> R {
     t.op("time 6000").await?;
     let f = t.feet();
     // A pool dug into the ground, half of it under ice, and a lava pit beside it.
-    t.fill(add(f, [-3, -3, -7]), add(f, [1, -1, -3]), "water").await?;
-    t.fill(add(f, [-3, -1, -7]), add(f, [-2, -1, -3]), "ice").await?;
-    t.fill(add(f, [3, -2, -6]), add(f, [4, -1, -4]), "lava").await?;
-    t.op(&format!("spawn pig {} {} {}", f[0], f[1] - 3, f[2] - 5)).await?;
+    t.fill(add(f, [-3, -3, -7]), add(f, [1, -1, -3]), "water")
+        .await?;
+    t.fill(add(f, [-3, -1, -7]), add(f, [-2, -1, -3]), "ice")
+        .await?;
+    t.fill(add(f, [3, -2, -6]), add(f, [4, -1, -4]), "lava")
+        .await?;
+    t.op(&format!("spawn pig {} {} {}", f[0], f[1] - 3, f[2] - 5))
+        .await?;
     t.c().look(0.0, -40.0);
     t.frames(30).await?;
     let pool = t.shot("pool").await?;
@@ -257,14 +299,16 @@ pub async fn liquid_layers(t: T) -> R {
     t.probe("the lava pit is drawn orange", lava, lava > 0.5);
     // Over the pool, looking down at the pig under the water.
     t.c().look(0.0, -70.0);
-    t.cmd(&format!("/tp {} {} {}", f[0] as f64 - 0.5, f[1], f[2] as f64 - 4.0)).await?;
+    t.cmd(&format!("/tp {} {} {}", f[0] as f64 - 0.5, f[1], f[2] as f64 - 4.0))
+        .await?;
     t.frames(20).await?;
     let over = t.shot("outline_water").await?;
     let violet = over.share(0.2, 0.2, 0.8, 0.9, probe::under_water);
     let pink = over.share(0.2, 0.2, 0.8, 0.9, |c| c[0] > 200 && c[1] > 120 && c[2] > 120 && c[0] as i32 > c[2] as i32 + 30);
     t.probe("the pig under water is tinted violet", violet, violet > 0.005);
     t.probe("and not drawn pink", pink, pink < 0.002);
-    t.cmd(&format!("/tp {} {} {}", f[0] as f64 + 2.5, f[1], f[2] as f64 - 4.5)).await?;
+    t.cmd(&format!("/tp {} {} {}", f[0] as f64 + 2.5, f[1], f[2] as f64 - 4.5))
+        .await?;
     t.c().look(270.0, -55.0);
     t.frames(20).await?;
     let pit = t.shot("outline_lava").await?;
@@ -292,10 +336,14 @@ pub async fn break_overlay(t: T) -> R {
     t.hold("core:attack", 2.0);
     t.secs(1.0).await?;
     let cracked = t.shot("ladder").await?.px;
-    let face = t.block_on_screen(ladder, [0.0, 0.0, -0.45]).unwrap_or((0.5, 0.5));
+    let face = t
+        .block_on_screen(ladder, [0.0, 0.0, -0.45])
+        .unwrap_or((0.5, 0.5));
     let v = changed(&before, &cracked, w, h, face.0 - 0.04, face.1 - 0.06, face.0 + 0.04, face.1 + 0.06);
     t.probe("cracks on the ladder", v, v > 0.05);
-    let above = t.block_on_screen(add(wall, [0, 1, 0]), [0.0, 0.0, 0.5]).unwrap_or((0.5, 0.2));
+    let above = t
+        .block_on_screen(add(wall, [0, 1, 0]), [0.0, 0.0, 0.5])
+        .unwrap_or((0.5, 0.2));
     let v = changed(&before, &cracked, w, h, above.0 - 0.04, above.1 - 0.04, above.0 + 0.04, above.1 + 0.04);
     t.probe("none on the wall above it", v, v < 0.02);
     t.secs(1.2).await?;
@@ -307,7 +355,8 @@ pub async fn break_overlay(t: T) -> R {
     t.look_at(wall);
     t.frames(3).await?;
     t.hold("core:attack", 0.5);
-    t.until("the first block broken", Duration::from_secs(2), |t| t.c().block(wall) == Some(0)).await?;
+    t.until("the first block broken", Duration::from_secs(2), |t| t.c().block(wall) == Some(0))
+        .await?;
     let held = t.shot("creative").await?.px;
     // The same with a click, no button held when it is seen: the next block as it looks clean.
     // Broken the same way, for the light on it to be just as late: a block goes at once here, the
@@ -316,9 +365,12 @@ pub async fn break_overlay(t: T) -> R {
     t.fill(wall, add(next, [0, 1, 0]), "dirt").await?;
     t.secs(0.5).await?;
     t.press("core:attack");
-    t.until("the first block broken again", Duration::from_secs(2), |t| t.c().block(wall) == Some(0)).await?;
+    t.until("the first block broken again", Duration::from_secs(2), |t| t.c().block(wall) == Some(0))
+        .await?;
     let clean = t.grab().await?;
-    let p = t.block_on_screen(next, [0.0, 0.0, 0.5]).unwrap_or((0.5, 0.45));
+    let p = t
+        .block_on_screen(next, [0.0, 0.0, 0.5])
+        .unwrap_or((0.5, 0.45));
     let v = changed(&held, &clean, w, h, p.0 - 0.05, p.1 - 0.05, p.0 + 0.05, p.1 + 0.05);
     t.probe("no cracks on the next block of an instant break", v, v < 0.03);
     Ok(())
@@ -330,7 +382,8 @@ pub async fn inventory_figure(t: T) -> R {
     t.flat().await?;
     let f = t.feet();
     for dz in -2..=2 {
-        t.op(&format!("spawn testmod:idol {} {} {}", f[0] + 4, f[1], f[2] + dz)).await?;
+        t.op(&format!("spawn testmod:idol {} {} {}", f[0] + 4, f[1], f[2] + dz))
+            .await?;
     }
     t.look_at(add(f, [4, 1, 0]));
     t.secs(0.5).await?;
@@ -362,7 +415,8 @@ pub async fn use_swing(t: T) -> R {
     // Past the use cooldown of the first click.
     t.secs(0.3).await?;
     t.press("core:use");
-    t.until("placed", Duration::from_secs(3), |t| t.c().inventory_slot(0).count == 3).await?;
+    t.until("placed", Duration::from_secs(3), |t| t.c().inventory_slot(0).count == 3)
+        .await?;
     t.frames(2).await?;
     t.shot("placed").await?;
     Ok(())
@@ -380,7 +434,8 @@ pub async fn ladder_placement(t: T) -> R {
     t.frames(3).await?;
     t.press("core:use");
     let at = add(wall, [0, 0, 1]);
-    t.until("ladder placed", Duration::from_secs(5), |t| t.c().inventory_slot(0).count == 7).await?;
+    t.until("ladder placed", Duration::from_secs(5), |t| t.c().inventory_slot(0).count == 7)
+        .await?;
     // States face away from the wall, in face order (west, east, north, south): on a wall to
     // its north it faces south.
     t.check_eq(t.block(at).await?, "base:ladder[facing=south]".into(), "ladder on the north wall");
@@ -399,7 +454,8 @@ pub async fn wall_torch(t: T) -> R {
     t.frames(3).await?;
     t.press("core:use");
     let at = add(wall, [0, 0, 1]);
-    t.until("torch placed", Duration::from_secs(5), |t| t.c().inventory_slot(0).count == 7).await?;
+    t.until("torch placed", Duration::from_secs(5), |t| t.c().inventory_slot(0).count == 7)
+        .await?;
     // West, east, up (the floor), north, south: on a wall to its north it faces south.
     t.check_eq(t.block(at).await?, "base:torch[facing=south]".into(), "torch on the north wall");
     t.frames(5).await?;
@@ -413,14 +469,16 @@ pub async fn wall_torch(t: T) -> R {
 pub async fn pick_block(t: T) -> R {
     t.flat().await?;
     t.op("mode creative").await?;
-    t.until("creative", Duration::from_secs(5), |t| t.state().mode == 1).await?;
+    t.until("creative", Duration::from_secs(5), |t| t.state().mode == 1)
+        .await?;
     let f = t.feet();
     let b = add(f, [0, -1, -1]);
     t.set(b, "bricks").await?;
     t.look_at(b);
     t.frames(3).await?;
     t.c().click(2, 0.0);
-    t.until("bricks picked", Duration::from_secs(5), |t| t.c().inventory_slot(t.state().selected).item == item("base:bricks")).await
+    t.until("bricks picked", Duration::from_secs(5), |t| t.c().inventory_slot(t.state().selected).item == item("base:bricks"))
+        .await
 }
 
 /// The cube and light gizmos draw their lines and numbers.
@@ -444,14 +502,19 @@ pub async fn gizmos(t: T) -> R {
 pub async fn multiplayer(t: T) -> R {
     t.world(13).await?;
     t.c().host_world();
-    t.until("hosting", Duration::from_secs(60), |t| t.flag(client::client_flags::HOSTING)).await?;
+    t.until("hosting", Duration::from_secs(60), |t| t.flag(client::client_flags::HOSTING))
+        .await?;
     let run = t.c().run_dir();
     let dir = format!("{run}/test-mp");
     let _ = std::fs::create_dir_all(&dir);
     let ticket = format!("{dir}/ticket.txt");
     let script = format!("{dir}/join.txt");
     std::fs::write(&ticket, t.c().ticket()).map_err(|e| e.to_string())?;
-    std::fs::write(&script, format!("join {ticket}\nloaded\nchat hello from the second player\nwait 3\nsay_config testmod:wisp_sparks\nwait 1\nquit\n")).map_err(|e| e.to_string())?;
+    std::fs::write(
+        &script,
+        format!("join {ticket}\nloaded\nchat hello from the second player\nwait 3\nsay_config testmod:wisp_sparks\nwait 1\nquit\n"),
+    )
+    .map_err(|e| e.to_string())?;
     static SPARKS: weft_sdk::Config<i32> = weft_sdk::Config::named("testmod:wisp_sparks");
     let sparks = SPARKS.get();
     let exe = std::env::current_exe().map_err(|e| e.to_string())?;
@@ -460,19 +523,39 @@ pub async fn multiplayer(t: T) -> R {
         .spawn()
         .map_err(|e| format!("cannot start the second client: {e}"))?;
     let heard = t
-        .until("the second player's chat", Duration::from_secs(90), |t| (0..5).any(|i| t.c().chat_line(i).contains("hello from the second player")))
+        .until("the second player's chat", Duration::from_secs(90), |t| {
+            (0..5).any(|i| t.c().chat_line(i).contains("hello from the second player"))
+        })
         .await;
-    let seen = t.c().entities().iter().filter_map(|&id| t.c().entity(id)).any(|e| name_of(abi::entry_kind::ENTITY, e.kind) == "core:player");
+    let seen = t
+        .c()
+        .entities()
+        .iter()
+        .filter_map(|&id| t.c().entity(id))
+        .any(|e| name_of(abi::entry_kind::ENTITY, e.kind) == "core:player");
     // What they hold reaches the others, to draw it in their hand.
     static HELD: weft_sdk::Component<u32> = weft_sdk::Component::named("core:held");
-    if let Some(other) = t.c().entities().iter().copied().find(|&id| t.c().entity(id).is_some_and(|e| name_of(abi::entry_kind::ENTITY, e.kind) == "core:player")) {
+    if let Some(other) = t.c().entities().iter().copied().find(|&id| {
+        t.c()
+            .entity(id)
+            .is_some_and(|e| name_of(abi::entry_kind::ENTITY, e.kind) == "core:player")
+    }) {
         t.op(&format!("put {other} 0 stone 1")).await?;
         let stone = Item::lookup("base:stone").unwrap_or(u32::MAX);
-        t.until("what the other player holds", Duration::from_secs(5), |t| t.c().view().component_of(other, &HELD) == Some(stone)).await?;
+        t.until("what the other player holds", Duration::from_secs(5), |t| t.c().view().component_of(other, &HELD) == Some(stone))
+            .await?;
     }
     // A synced setting the host changes while the other player is in reaches them.
     SPARKS.set(7);
-    let synced = t.until("the second player's config", Duration::from_secs(30), |t| (0..5).any(|i| t.c().chat_line(i).contains("config testmod:wisp_sparks = 7"))).await;
+    let synced = t
+        .until("the second player's config", Duration::from_secs(30), |t| {
+            (0..5).any(|i| {
+                t.c()
+                    .chat_line(i)
+                    .contains("config testmod:wisp_sparks = 7")
+            })
+        })
+        .await;
     SPARKS.set(sparks);
     if heard.is_err() || synced.is_err() {
         let _ = child.kill();
@@ -500,7 +583,8 @@ pub async fn client_hooks(t: T) -> R {
     t.flat().await?;
     let before = crate::runner::PROBES.with(|p| p.get());
     t.c().key("F9", 0.0);
-    t.until("probe key seen", Duration::from_secs(3), |_| crate::runner::PROBES.with(|p| p.get()) > before).await?;
+    t.until("probe key seen", Duration::from_secs(3), |_| crate::runner::PROBES.with(|p| p.get()) > before)
+        .await?;
     t.c().open_screen(&screens::CONTROLS);
     t.screen("core:controls").await?;
     for _ in 0..40 {
@@ -520,16 +604,24 @@ pub async fn client_hooks(t: T) -> R {
     static DRAWN: weft_sdk::GizmoGroup = weft_sdk::GizmoGroup::named("drawn");
     let green = |shot: &crate::runner::Shot| shot.share(0.0, 0.0, 1.0, 0.9, |c| c[1] > 200 && c[0] < 80 && c[2] < 80);
     for _ in 0..3 {
-        t.c().draw_fill(Some(&DRAWN), [b[0] - 3.0, b[1], b[2]], [b[0] - 2.0, b[1] + 1.0, b[2] + 1.0], 0x20FF20FF);
-        t.c().draw_box(None, b, [b[0] + 1.0, b[1] + 2.0, b[2] + 1.0], 0xFF4040FF);
-        t.c().draw_text(None, [b[0] + 0.5, b[1] + 2.5, b[2] + 0.5], "testkit.drawn", &[], 0xFFFF80FF, 2.0);
-        t.c().screen_text(0.5, 0.3, "testkit.screen_text", &[], 0x80FFFFFF, 1.0);
+        t.c()
+            .draw_fill(Some(&DRAWN), [b[0] - 3.0, b[1], b[2]], [b[0] - 2.0, b[1] + 1.0, b[2] + 1.0], 0x20FF20FF);
+        t.c()
+            .draw_box(None, b, [b[0] + 1.0, b[1] + 2.0, b[2] + 1.0], 0xFF4040FF);
+        t.c()
+            .draw_text(None, [b[0] + 0.5, b[1] + 2.5, b[2] + 0.5], "testkit.drawn", &[], 0xFFFF80FF, 2.0);
+        t.c()
+            .screen_text(0.5, 0.3, "testkit.screen_text", &[], 0x80FFFFFF, 1.0);
         t.frames(1).await?;
     }
-    t.c().draw_fill(Some(&DRAWN), [b[0] - 3.0, b[1], b[2]], [b[0] - 2.0, b[1] + 1.0, b[2] + 1.0], 0x20FF20FF);
-    t.c().draw_box(None, b, [b[0] + 1.0, b[1] + 2.0, b[2] + 1.0], 0xFF4040FF);
-    t.c().draw_text(None, [b[0] + 0.5, b[1] + 2.5, b[2] + 0.5], "testkit.drawn", &[], 0xFFFF80FF, 2.0);
-    t.c().screen_text(0.5, 0.3, "testkit.screen_text", &[], 0x80FFFFFF, 1.0);
+    t.c()
+        .draw_fill(Some(&DRAWN), [b[0] - 3.0, b[1], b[2]], [b[0] - 2.0, b[1] + 1.0, b[2] + 1.0], 0x20FF20FF);
+    t.c()
+        .draw_box(None, b, [b[0] + 1.0, b[1] + 2.0, b[2] + 1.0], 0xFF4040FF);
+    t.c()
+        .draw_text(None, [b[0] + 0.5, b[1] + 2.5, b[2] + 0.5], "testkit.drawn", &[], 0xFFFF80FF, 2.0);
+    t.c()
+        .screen_text(0.5, 0.3, "testkit.screen_text", &[], 0x80FFFFFF, 1.0);
     let shot = t.shot("drawn").await?;
     let hidden = green(&shot);
     t.probe("a shape of a group that is off is not drawn", hidden, hidden < 0.0005);
@@ -541,20 +633,24 @@ pub async fn client_hooks(t: T) -> R {
     t.probe("the text drawn in the world", yellow, yellow > 0.001);
     t.cmd("/gizmo testkit:drawn").await?;
     for _ in 0..3 {
-        t.c().draw_fill(Some(&DRAWN), [b[0] - 3.0, b[1], b[2]], [b[0] - 2.0, b[1] + 1.0, b[2] + 1.0], 0x20FF20FF);
+        t.c()
+            .draw_fill(Some(&DRAWN), [b[0] - 3.0, b[1], b[2]], [b[0] - 2.0, b[1] + 1.0, b[2] + 1.0], 0x20FF20FF);
         t.frames(1).await?;
     }
-    t.c().draw_fill(Some(&DRAWN), [b[0] - 3.0, b[1], b[2]], [b[0] - 2.0, b[1] + 1.0, b[2] + 1.0], 0x20FF20FF);
+    t.c()
+        .draw_fill(Some(&DRAWN), [b[0] - 3.0, b[1], b[2]], [b[0] - 2.0, b[1] + 1.0, b[2] + 1.0], 0x20FF20FF);
     let shot = t.shot("drawn_group").await?;
     t.cmd("/gizmo testkit:drawn").await?;
     let shown = green(&shot);
     t.probe("the same shape once its group is on", shown, shown > 0.001);
     // Screen text is text like any other: icons of blocks and items show in it.
     for _ in 0..3 {
-        t.c().screen_text(0.5, 0.7, "testkit.rich_label", &[], 0xFFFFFFFF, 2.0);
+        t.c()
+            .screen_text(0.5, 0.7, "testkit.rich_label", &[], 0xFFFFFFFF, 2.0);
         t.frames(1).await?;
     }
-    t.c().screen_text(0.5, 0.7, "testkit.rich_label", &[], 0xFFFFFFFF, 2.0);
+    t.c()
+        .screen_text(0.5, 0.7, "testkit.rich_label", &[], 0xFFFFFFFF, 2.0);
     let rich = t.shot("rich_label").await?;
     let diamond = rich.share(0.35, 0.65, 0.65, 0.8, probe::cyan);
     t.probe("a block icon in screen text", diamond, diamond > 0.002);

@@ -192,7 +192,12 @@ pub struct SetDesc {
     pub value: CompValue,
     pub remove: u32,
 }
-defaults!(SetDesc { target_kind: 0, target: Str::EMPTY, value: CompValue { name: Str::EMPTY, schema: Str::EMPTY, value: Slice::EMPTY }, remove: 0 });
+defaults!(SetDesc {
+    target_kind: 0,
+    target: Str::EMPTY,
+    value: CompValue { name: Str::EMPTY, schema: Str::EMPTY, value: Slice::EMPTY },
+    remove: 0
+});
 
 /// Frozen components of one entry kind, readable directly by mods: whether entry `e` has
 /// component `c` is bit `c % 64` of `bits[e * words + c / 64]`; its value (if the component has
@@ -322,7 +327,6 @@ pub mod comp {
     /// Block: a particle kind (`str`) clients show around it now and then, near the player only
     /// (vanilla's torch smoke); nothing of it reaches the server.
     pub const AMBIENT_PARTICLE: &str = "ambient_particle";
-
 }
 
 /// Harvest levels (`tool_level` of a tool, `harvest_level` of a block) of the vanilla tiers.
@@ -636,7 +640,14 @@ pub struct ItemDesc {
     /// `ItemUseArgs`.
     pub on_use: Callback,
 }
-defaults!(ItemDesc { name: Str::EMPTY, cell: core::ptr::null(), texture: Str::EMPTY, block: Str::EMPTY, components: Slice::EMPTY, on_use: Callback::NONE });
+defaults!(ItemDesc {
+    name: Str::EMPTY,
+    cell: core::ptr::null(),
+    texture: Str::EMPTY,
+    block: Str::EMPTY,
+    components: Slice::EMPTY,
+    on_use: Callback::NONE
+});
 
 #[repr(C)]
 #[derive(Clone, Copy)]
@@ -1262,7 +1273,14 @@ pub struct RecipeKindDesc {
     /// `RecipeUiArgs`, client: builds one recipe instead of the default layout.
     pub display: Callback,
 }
-defaults!(RecipeKindDesc { name: Str::EMPTY, input_grid: [0; 2], output_grid: [0; 2], info: Str::EMPTY, info_values: Slice::EMPTY, display: Callback::NONE });
+defaults!(RecipeKindDesc {
+    name: Str::EMPTY,
+    input_grid: [0; 2],
+    output_grid: [0; 2],
+    info: Str::EMPTY,
+    info_values: Slice::EMPTY,
+    display: Callback::NONE
+});
 
 /// A recipe the viewer shows with a kind's own `display`.
 #[repr(C)]
@@ -1756,13 +1774,23 @@ pub struct Host {
     /// its state + 1 (0 = nothing), position and face hit.
     /// The block entity `id` looks at within `max` (the world's or a moving structure's: `frame`
     /// is its entity, 0 for the world, `pos` in its blocks); state + 1, or 0 for none.
-    pub entity_look_at: unsafe extern "C" fn(world: *mut WorldCtx, id: u64, max: f64, liquids: u32, pos: *mut [i32; 3], face: *mut u32, frame: *mut u64) -> u32,
+    pub entity_look_at: unsafe extern "C" fn(
+        world: *mut WorldCtx,
+        id: u64,
+        max: f64,
+        liquids: u32,
+        pos: *mut [i32; 3],
+        face: *mut u32,
+        frame: *mut u64,
+    ) -> u32,
     /// Fills `out` with ids near `pos` (all kinds if `kind` is u32::MAX), returns how many matched.
     /// Like `entities_near`, only what can be hit: no dropped items, block entities, spectators or the dead.
-    pub entities_near_bodies: unsafe extern "C" fn(world: *mut WorldCtx, pos: *const [f64; 3], radius: f64, out: *mut u64, max: usize) -> usize,
+    pub entities_near_bodies:
+        unsafe extern "C" fn(world: *mut WorldCtx, pos: *const [f64; 3], radius: f64, out: *mut u64, max: usize) -> usize,
     pub in_liquid: unsafe extern "C" fn(world: *mut WorldCtx, pos: *const [f64; 3]) -> u32,
     pub entity_swing_strength: unsafe extern "C" fn(world: *mut WorldCtx, id: u64) -> f32,
-    pub entities_near: unsafe extern "C" fn(world: *mut WorldCtx, pos: *const [f64; 3], radius: f64, kind: u32, out: *mut u64, max: usize) -> usize,
+    pub entities_near:
+        unsafe extern "C" fn(world: *mut WorldCtx, pos: *const [f64; 3], radius: f64, kind: u32, out: *mut u64, max: usize) -> usize,
     /// An entity's component bytes, null if it has none. Changes are found by comparing with
     /// what was last sent, so writing through the pointer is enough.
     pub component: unsafe extern "C" fn(world: *mut WorldCtx, id: u64, comp: u32) -> *mut u8,
@@ -1840,7 +1868,17 @@ pub struct Host {
     /// Debug shape for players showing `group`: `kind` 0 line from `a` to `b`, 1 box between
     /// corners `a` and `b`, 2 the translation `key` with `args` at `a`, 3 filled box; `color` is
     /// 0xRRGGBBAA, kept for `ticks`.
-    pub gizmo: unsafe extern "C" fn(world: *mut WorldCtx, group: Str, kind: u32, a: *const [f64; 3], b: *const [f64; 3], color: u32, ticks: u32, key: Str, args: Slice<UiArg>),
+    pub gizmo: unsafe extern "C" fn(
+        world: *mut WorldCtx,
+        group: Str,
+        kind: u32,
+        a: *const [f64; 3],
+        b: *const [f64; 3],
+        color: u32,
+        ticks: u32,
+        key: Str,
+        args: Slice<UiArg>,
+    ),
 
     // ------------------------------------------------ client side and mod channels
     /// Client callback, see `client_hook`.
@@ -1932,7 +1970,16 @@ pub struct Host {
     /// window), 4 filled box (see-through by its alpha: range previews, blueprints); color
     /// 0xRRGGBBAA.
     /// A `gizmo_kind` shape for this frame; with a `group` only while the player shows it.
-    pub client_draw: unsafe extern "C" fn(client: *mut ClientCtx, group: Str, kind: u32, a: *const [f64; 3], b: *const [f64; 3], color: u32, key: Str, args: Slice<UiArg>),
+    pub client_draw: unsafe extern "C" fn(
+        client: *mut ClientCtx,
+        group: Str,
+        kind: u32,
+        a: *const [f64; 3],
+        b: *const [f64; 3],
+        color: u32,
+        key: Str,
+        args: Slice<UiArg>,
+    ),
     /// Client: sends `data` on channel `name` to the server.
     pub client_send_packet: unsafe extern "C" fn(client: *mut ClientCtx, name: Str, schema: Str, data: Slice<u8>),
 
@@ -2193,7 +2240,9 @@ pub mod light {
     }
     /// The strongest block light channel.
     pub fn block(l: u32) -> u32 {
-        ((l >> 8) & 0xFF).max((l >> 16) & 0xFF).max((l >> 24) & 0xFF)
+        ((l >> 8) & 0xFF)
+            .max((l >> 16) & 0xFF)
+            .max((l >> 24) & 0xFF)
     }
     /// What spawning and growth go by: sky light dimmed by the daylight (0..1), or block light,
     /// whichever is more.
@@ -2275,7 +2324,15 @@ pub struct SoundDesc {
     /// `Host::reg_sound_category`.
     pub category_name: Str,
 }
-defaults!(SoundDesc { name: Str::EMPTY, cell: core::ptr::null(), files: Slice::EMPTY, volume: 1.0, pitch: [1.0, 1.0], range: 16.0, category_name: Str::EMPTY });
+defaults!(SoundDesc {
+    name: Str::EMPTY,
+    cell: core::ptr::null(),
+    files: Slice::EMPTY,
+    volume: 1.0,
+    pitch: [1.0, 1.0],
+    range: 16.0,
+    category_name: Str::EMPTY
+});
 
 /// When background music may play; 0 = always.
 pub mod music_when {
@@ -2346,7 +2403,19 @@ pub struct ConfigDesc {
     /// The default of a `TEXT` setting.
     pub text: Str,
 }
-defaults!(ConfigDesc { name: Str::EMPTY, cell: core::ptr::null(), kind: config_kind::BOOL, default: 0.0, min: 0.0, max: 1.0, step: 0.0, choices: Slice::EMPTY, flags: 0, scope: config_scope::CLIENT, text: Str::EMPTY });
+defaults!(ConfigDesc {
+    name: Str::EMPTY,
+    cell: core::ptr::null(),
+    kind: config_kind::BOOL,
+    default: 0.0,
+    min: 0.0,
+    max: 1.0,
+    step: 0.0,
+    choices: Slice::EMPTY,
+    flags: 0,
+    scope: config_scope::CLIENT,
+    text: Str::EMPTY
+});
 
 #[repr(C)]
 pub struct TextConditionArgs {
@@ -2919,7 +2988,20 @@ pub struct LiquidDesc {
     pub overlay: Str,
     pub overlay_opacity: f32,
 }
-defaults!(LiquidDesc { name: Str::EMPTY, delay: 5, drop_off: 1, slope_find: 4, renewable: u32::MAX, density: 1000, temperature: 300, swimmable: 1, fog_color: u32::MAX, fog_distance: 96.0, overlay: Str::EMPTY, overlay_opacity: 0.1 });
+defaults!(LiquidDesc {
+    name: Str::EMPTY,
+    delay: 5,
+    drop_off: 1,
+    slope_find: 4,
+    renewable: u32::MAX,
+    density: 1000,
+    temperature: 300,
+    swimmable: 1,
+    fog_color: u32::MAX,
+    fog_distance: 96.0,
+    overlay: Str::EMPTY,
+    overlay_opacity: 0.1
+});
 
 /// What another mod's liquid should change, without touching its flow. Everything starts out "not
 /// set": `u32::MAX`, NaN, empty.
@@ -2933,7 +3015,14 @@ pub struct LiquidChange {
     pub overlay: Str,
     pub overlay_opacity: f32,
 }
-defaults!(LiquidChange { name: Str::EMPTY, swimmable: u32::MAX, fog_color: u32::MAX, fog_distance: f32::NAN, overlay: Str::EMPTY, overlay_opacity: f32::NAN });
+defaults!(LiquidChange {
+    name: Str::EMPTY,
+    swimmable: u32::MAX,
+    fog_color: u32::MAX,
+    fog_distance: f32::NAN,
+    overlay: Str::EMPTY,
+    overlay_opacity: f32::NAN
+});
 
 /// What happens where two liquids meet. `liquid` and `touching` are block names or `#tags` of
 /// liquid blocks. When `liquid` has `touching` beside or above it, it turns into `source` (if
@@ -3186,7 +3275,17 @@ pub struct PlayerControl {
     /// With `LYING`.
     pub lying: f32,
 }
-defaults!(PlayerControl { lying: 0.0, mask: 0, pos: [0.0; 3], vel: [0.0; 3], yaw: 0.0, pitch: 0.0, flying: 0, fly_speed: 1.0, selected: 0 });
+defaults!(PlayerControl {
+    lying: 0.0,
+    mask: 0,
+    pos: [0.0; 3],
+    vel: [0.0; 3],
+    yaw: 0.0,
+    pitch: 0.0,
+    flying: 0,
+    fly_speed: 1.0,
+    selected: 0
+});
 
 /// `Host::client_command` operations.
 pub mod client_op {
@@ -3258,7 +3357,16 @@ pub struct OreDesc {
     /// Only in biomes with this tag (the block's own column of its cube), empty: anywhere.
     pub biome: Str,
 }
-defaults!(OreDesc { dimensions: Str::EMPTY, block: Str::EMPTY, replace: Str::EMPTY, min_y: i32::MIN, max_y: i32::MAX, veins: 4, blocks: 8, biome: Str::EMPTY });
+defaults!(OreDesc {
+    dimensions: Str::EMPTY,
+    block: Str::EMPTY,
+    replace: Str::EMPTY,
+    min_y: i32::MIN,
+    max_y: i32::MAX,
+    veins: 4,
+    blocks: 8,
+    biome: Str::EMPTY
+});
 
 /// Surface height and biome of one column of a terrain.
 #[repr(C)]

@@ -106,7 +106,9 @@ fn start(c: &Client) {
                 return;
             }
         };
-        let name = std::path::Path::new(path).file_stem().map_or("script".into(), |s| s.to_string_lossy().into_owned());
+        let name = std::path::Path::new(path)
+            .file_stem()
+            .map_or("script".into(), |s| s.to_string_lossy().into_owned());
         runner::start(vec![runner::TestDef { name, run: Box::new(move |t| Box::pin(script::run(t, src.clone()))) }]);
         return;
     }
@@ -135,18 +137,29 @@ fn start(c: &Client) {
             c.quit(2);
             return;
         }
-        all.into_iter().filter(|t| names.contains(&t.name.as_str())).collect()
+        all.into_iter()
+            .filter(|t| names.contains(&t.name.as_str()))
+            .collect()
     };
     // One of several processes running them all (see the game's `--jobs`): every Nth.
     let shard = launch_option("test-shard");
     let warm = shard.is_some();
     let mut queue: Vec<runner::TestDef> = match shard {
-        Some(s) if s == "alone" => queue.into_iter().filter(|t| ALONE.contains(&t.name.as_str())).collect(),
+        Some(s) if s == "alone" => queue
+            .into_iter()
+            .filter(|t| ALONE.contains(&t.name.as_str()))
+            .collect(),
         Some(s) => {
             let part = |w: Option<&str>| w.and_then(|w| w.parse::<usize>().ok()).unwrap_or(1);
             let mut w = s.split('/');
             let (i, n) = (part(w.next()), part(w.next()));
-            queue.into_iter().filter(|t| !ALONE.contains(&t.name.as_str())).enumerate().filter(|(k, _)| k % n == i).map(|(_, t)| t).collect()
+            queue
+                .into_iter()
+                .filter(|t| !ALONE.contains(&t.name.as_str()))
+                .enumerate()
+                .filter(|(k, _)| k % n == i)
+                .map(|(_, t)| t)
+                .collect()
         }
         None => queue,
     };

@@ -1,4 +1,4 @@
-﻿//! Redstone. The engine runs it like liquids, blocks only say what they are (`abi::SignalDesc`).
+//! Redstone. The engine runs it like liquids, blocks only say what they are (`abi::SignalDesc`).
 //!
 //! A connected wire is one network, its power worked out from what feeds it when that changes, so
 //! a wire costs nothing per block and a circuit nothing while it isn't changing. Gates act after a
@@ -114,14 +114,30 @@ struct Net {
 
 /// One tick's outcome of a sink or piston, applied once everything has been read.
 enum Effect {
-    Sink { p: IVec3, level: u8 },
-    Piston { p: IVec3, extend: bool },
+    Sink {
+        p: IVec3,
+        level: u8,
+    },
+    Piston {
+        p: IVec3,
+        extend: bool,
+    },
     /// Mods run with the rest of the world in place: rear, sides.
-    Logic { p: IVec3, inputs: [u8; 3] },
+    Logic {
+        p: IVec3,
+        inputs: [u8; 3],
+    },
     /// A comparator reading a block that has its own idea of it, and what is at its sides.
-    Compare { p: IVec3, behind: IVec3, side: u8 },
+    Compare {
+        p: IVec3,
+        behind: IVec3,
+        side: u8,
+    },
     /// What power a floater has.
-    Floater { p: IVec3, level: u8 },
+    Floater {
+        p: IVec3,
+        level: u8,
+    },
 }
 
 #[derive(Default)]
@@ -284,7 +300,9 @@ pub fn with_level(s: &Signal, state: u32, level: u8) -> u32 {
 
 impl Signals {
     fn device_signal<'c>(&self, c: &'c Content, p: IVec3) -> Option<&'c Signal> {
-        self.devices.get(&p).map(|d| &c.states[d.state as usize].signal)
+        self.devices
+            .get(&p)
+            .map(|d| &c.states[d.state as usize].signal)
     }
 
     /// Power a block `b` was given strongly.
@@ -316,15 +334,29 @@ impl Signals {
     }
 
     fn net_cut(&self, id: u32) -> bool {
-        id != NO_NET && self.nets.get(id as usize).is_some_and(|n| n.as_ref().is_some_and(|n| n.cut))
+        id != NO_NET
+            && self
+                .nets
+                .get(id as usize)
+                .is_some_and(|n| n.as_ref().is_some_and(|n| n.cut))
     }
 
     fn outside_gives(&self, n: IVec3, dir: u8) -> u8 {
-        self.outside.values().filter_map(|m| m.get(&n)).map(|g| g.all[dir as usize]).max().unwrap_or(0)
+        self.outside
+            .values()
+            .filter_map(|m| m.get(&n))
+            .map(|g| g.all[dir as usize])
+            .max()
+            .unwrap_or(0)
     }
 
     fn outside_gives_wire(&self, n: IVec3, dir: u8) -> u8 {
-        self.outside.values().filter_map(|m| m.get(&n)).map(|g| g.to_wire[dir as usize]).max().unwrap_or(0)
+        self.outside
+            .values()
+            .filter_map(|m| m.get(&n))
+            .map(|g| g.to_wire[dir as usize])
+            .max()
+            .unwrap_or(0)
     }
 
     /// Who gives anything here from outside.
@@ -334,13 +366,17 @@ impl Signals {
 
     /// The power a device was last found to have coming in.
     pub(super) fn level_into(&self, p: IVec3) -> Option<u8> {
-        self.devices.get(&p).map(|d| d.input).filter(|i| *i != u8::MAX)
+        self.devices
+            .get(&p)
+            .map(|d| d.input)
+            .filter(|i| *i != u8::MAX)
     }
 
     /// Power coming into `p` from direction `dir`; `None`: that can't be told, it is cut off.
     fn read(&self, c: &Content, cubes: View, p: IVec3, dir: u8) -> Option<u8> {
         let from_outside = self.outside_gives(p + DIRS[dir as usize], dir ^ 1);
-        self.read_here(c, cubes, p, dir).map(|v| v.max(from_outside))
+        self.read_here(c, cubes, p, dir)
+            .map(|v| v.max(from_outside))
     }
 
     fn read_here(&self, c: &Content, cubes: View, p: IVec3, dir: u8) -> Option<u8> {
@@ -495,8 +531,17 @@ impl Signals {
         if self.readers.is_empty() {
             return;
         }
-        let behind = |s: &Self, r: IVec3| s.device_signal(c, r).and_then(|g| DIRS.get((g.front ^ 1) as usize)).map(|d| r + *d);
-        let those: Vec<IVec3> = self.readers.iter().copied().filter(|r| behind(self, *r) == Some(p)).collect();
+        let behind = |s: &Self, r: IVec3| {
+            s.device_signal(c, r)
+                .and_then(|g| DIRS.get((g.front ^ 1) as usize))
+                .map(|d| r + *d)
+        };
+        let those: Vec<IVec3> = self
+            .readers
+            .iter()
+            .copied()
+            .filter(|r| behind(self, *r) == Some(p))
+            .collect();
         self.dirty_devices.extend(those);
     }
 
@@ -518,7 +563,10 @@ impl Signals {
 
     /// Its devices that can't be moved just now: an anchor with power.
     pub(super) fn fixed<'a>(&'a self, c: &'a Content) -> impl Iterator<Item = IVec3> + 'a {
-        self.devices.iter().filter(|(_, d)| c.states[d.state as usize].flags & bf::IMMOVABLE != 0).map(|(p, _)| *p)
+        self.devices
+            .iter()
+            .filter(|(_, d)| c.states[d.state as usize].flags & bf::IMMOVABLE != 0)
+            .map(|(p, _)| *p)
     }
 
     /// What goes with the block at `p` if it moves.
@@ -570,7 +618,10 @@ impl Signals {
     fn add_device(&mut self, c: &Content, p: IVec3, state: u32) {
         let s = &c.states[state as usize].signal;
         if s.kind == sk::OBSERVER && s.front < 6 {
-            self.watchers.entry(p + DIRS[s.front as usize]).or_default().push(p);
+            self.watchers
+                .entry(p + DIRS[s.front as usize])
+                .or_default()
+                .push(p);
         }
         let triggered = self.moved_observers.remove(&p);
         let device = match self.arriving.remove(&p).and_then(|m| m.device) {
@@ -647,7 +698,10 @@ impl Signals {
                 self.level_changes.push((p, f, m.levels[f as usize]));
             }
         }
-        let w = self.wires.entry(p).or_insert(WireCell { mask: 0, level: came.map_or([0; 6], |m| m.levels), net: [NO_NET; 6] });
+        let w = self
+            .wires
+            .entry(p)
+            .or_insert(WireCell { mask: 0, level: came.map_or([0; 6], |m| m.levels), net: [NO_NET; 6] });
         let gone = w.mask & !mask;
         for f in 0..6 {
             if gone & (1 << f) != 0 {
@@ -696,7 +750,12 @@ impl Signals {
                     continue;
                 }
             }
-            if is_device(ka) && is_device(kb) && a.block == b.block && a.signal.front == b.signal.front && a.signal.attach == b.signal.attach {
+            if is_device(ka)
+                && is_device(kb)
+                && a.block == b.block
+                && a.signal.front == b.signal.front
+                && a.signal.attach == b.signal.attach
+            {
                 if let Some(d) = self.devices.get_mut(&p) {
                     let was = c.states[d.state as usize].signal.level;
                     d.state = new;
@@ -725,8 +784,13 @@ impl Signals {
     pub fn cube_loaded(&mut self, c: &Content, pos: IVec3, cube: &Cube) {
         // Blocks here may be what something next door was waiting to see.
         self.give_another_go();
-        self.stale.extend(self.cut_by_cube.remove(&pos).into_iter().flatten());
-        if !cube.palette().iter().any(|&s| c.states[s as usize].signal.kind != sk::NONE) {
+        self.stale
+            .extend(self.cut_by_cube.remove(&pos).into_iter().flatten());
+        if !cube
+            .palette()
+            .iter()
+            .any(|&s| c.states[s as usize].signal.kind != sk::NONE)
+        {
             return;
         }
         for i in 0..4096usize {
@@ -755,12 +819,22 @@ impl Signals {
         if !self.per_cube.contains_key(&pos) {
             return;
         }
-        let cells: Vec<IVec3> = self.wires.keys().filter(|p| **p >> 4 == pos).copied().collect();
+        let cells: Vec<IVec3> = self
+            .wires
+            .keys()
+            .filter(|p| **p >> 4 == pos)
+            .copied()
+            .collect();
         for p in cells {
             self.set_wire(p, 0);
             self.topology.insert(p);
         }
-        let gone: Vec<IVec3> = self.devices.keys().filter(|p| **p >> 4 == pos).copied().collect();
+        let gone: Vec<IVec3> = self
+            .devices
+            .keys()
+            .filter(|p| **p >> 4 == pos)
+            .copied()
+            .collect();
         for p in gone {
             self.remove_device(c, p);
             self.topology.insert(p);
@@ -814,7 +888,11 @@ impl Signals {
             }
         }
         for (cell, f) in again {
-            if self.wires.get(&cell).is_some_and(|w| w.net[f as usize] == NO_NET && w.mask & (1 << f) != 0) {
+            if self
+                .wires
+                .get(&cell)
+                .is_some_and(|w| w.net[f as usize] == NO_NET && w.mask & (1 << f) != 0)
+            {
                 self.flood(c, cubes, cell, f);
             }
         }
@@ -889,7 +967,10 @@ impl Signals {
                             if DIRS.iter().any(|d| cubes.state(at + *d).is_none()) {
                                 net.cut = true;
                             }
-                            if DIRS.iter().any(|d| self.device_signal(c, at + *d).is_some_and(can_give)) {
+                            if DIRS
+                                .iter()
+                                .any(|d| self.device_signal(c, at + *d).is_some_and(can_give))
+                            {
                                 net.ports.push((i as u32, Port::Strong(at)));
                             }
                         }
@@ -964,7 +1045,17 @@ impl Signals {
         self.buckets = buckets;
         // Only the pieces that had power and that have it now, however long the wire.
         let old = std::mem::replace(&mut net.lit, lit);
-        let changed: Vec<u32> = old.iter().copied().filter(|&i| net.next[i as usize] == 0).chain(net.lit.iter().copied().filter(|&i| net.next[i as usize] != net.level[i as usize])).collect();
+        let changed: Vec<u32> = old
+            .iter()
+            .copied()
+            .filter(|&i| net.next[i as usize] == 0)
+            .chain(
+                net.lit
+                    .iter()
+                    .copied()
+                    .filter(|&i| net.next[i as usize] != net.level[i as usize]),
+            )
+            .collect();
         for i in changed {
             let iu = i as usize;
             let (cell, face) = net.pieces[iu];
@@ -1001,7 +1092,11 @@ impl Signals {
         let mut any = false;
         for s in items.iter().filter(|s| !s.is_empty()) {
             any = true;
-            sum += s.count as f32 / c.items.get(s.item as usize).map_or(64, |i| i.max_stack).max(1) as f32;
+            sum += s.count as f32
+                / c.items
+                    .get(s.item as usize)
+                    .map_or(64, |i| i.max_stack)
+                    .max(1) as f32;
         }
         Some(if any { 1 + (sum / items.len() as f32 * 14.0) as u8 } else { 0 })
     }
@@ -1052,11 +1147,17 @@ impl Signals {
             sk::REPEATER => {
                 // A gate pointing into its side holds it where it is.
                 let sides = Self::sides(&s);
-                if sides.iter().any(|&side| d.signal_view().state(p + DIRS[side as usize]).is_none()) {
+                if sides
+                    .iter()
+                    .any(|&side| d.signal_view().state(p + DIRS[side as usize]).is_none())
+                {
                     self.held.insert(p);
                     return;
                 }
-                let locked = sides.iter().any(|&side| self.device_signal(c, p + DIRS[side as usize]).is_some_and(|g| matches!(g.kind, sk::REPEATER | sk::COMPARATOR) && direct(g, side ^ 1) > 0));
+                let locked = sides.iter().any(|&side| {
+                    self.device_signal(c, p + DIRS[side as usize])
+                        .is_some_and(|g| matches!(g.kind, sk::REPEATER | sk::COMPARATOR) && direct(g, side ^ 1) > 0)
+                });
                 if !locked {
                     let want = if read!(s.front ^ 1) > 0 { 15 } else { 0 };
                     if want != s.level {
@@ -1066,7 +1167,9 @@ impl Signals {
             }
             sk::COMPARATOR => {
                 let behind = p + DIRS[(s.front ^ 1) as usize];
-                let reads_itself = d.get(behind).is_some_and(|b| c.block_of(b).cb.signal_read.is_some());
+                let reads_itself = d
+                    .get(behind)
+                    .is_some_and(|b| c.block_of(b).cb.signal_read.is_some());
                 let container = self.fullness(c, &d.entities, d.frame, behind);
                 if reads_itself || container.is_some() {
                     self.readers.insert(p);
@@ -1152,7 +1255,10 @@ impl Signals {
 
     /// The strongest power coming into a cell from around it, for mods.
     pub fn power_at(&self, c: &Content, cubes: View, p: IVec3) -> u8 {
-        let mut most = self.wires.get(&p).map_or(0, |w| w.level.iter().copied().max().unwrap_or(0));
+        let mut most = self
+            .wires
+            .get(&p)
+            .map_or(0, |w| w.level.iter().copied().max().unwrap_or(0));
         for dir in 0..6u8 {
             most = most.max(self.read(c, cubes, p, dir).unwrap_or(0));
         }
@@ -1162,14 +1268,22 @@ impl Signals {
     /// Wire power in a cube, for a client getting it: (cell, face, level).
     pub fn levels_in(&self, c: &Content, pos: IVec3, cube: &Cube) -> Vec<(IVec3, u8, u8)> {
         let mut out = Vec::new();
-        if !cube.palette().iter().any(|&s| c.states[s as usize].signal.kind == sk::WIRE) {
+        if !cube
+            .palette()
+            .iter()
+            .any(|&s| c.states[s as usize].signal.kind == sk::WIRE)
+        {
             return out;
         }
         for i in 0..4096usize {
             if c.states[cube.get(i) as usize].signal.kind == sk::WIRE {
                 let p = pos * 16 + crate::world::cube::offset(i);
                 if let Some(w) = self.wires.get(&p) {
-                    out.extend((0..6u8).filter(|f| w.level[*f as usize] > 0).map(|f| (p, f, w.level[f as usize])));
+                    out.extend(
+                        (0..6u8)
+                            .filter(|f| w.level[*f as usize] > 0)
+                            .map(|f| (p, f, w.level[f as usize])),
+                    );
                 }
             }
         }
@@ -1216,7 +1330,17 @@ impl Dim {
         self.space.signals.now = now;
         if !self.space.signals.readers.is_empty() && !self.entities.dirty_inv.is_empty() {
             let frame = self.frame;
-            let changed: Vec<IVec3> = self.entities.dirty_inv.iter().filter_map(|id| self.entities.get(*id).filter(|e| e.block_frame() == frame).and_then(|e| e.anchor)).collect();
+            let changed: Vec<IVec3> = self
+                .entities
+                .dirty_inv
+                .iter()
+                .filter_map(|id| {
+                    self.entities
+                        .get(*id)
+                        .filter(|e| e.block_frame() == frame)
+                        .and_then(|e| e.anchor)
+                })
+                .collect();
             for p in changed {
                 self.space.signals.read_changed(c, p);
             }
@@ -1239,7 +1363,11 @@ impl Dim {
             dev.state = new;
             if info.kind == sk::TORCH {
                 dev.flips.push_back(now);
-                while dev.flips.front().is_some_and(|t| now.saturating_sub(*t) > BURN_WINDOW) {
+                while dev
+                    .flips
+                    .front()
+                    .is_some_and(|t| now.saturating_sub(*t) > BURN_WINDOW)
+                {
                     dev.flips.pop_front();
                 }
                 if dev.flips.len() >= BURN_FLIPS {
@@ -1292,7 +1420,13 @@ impl Dim {
                     }
                     let block = c.block_of(state);
                     if let (Some(cb), true) = (block.cb.on_signal, was != u8::MAX) {
-                        self.call(block.owner, cb, |w| abi::SignalArgs { world: w, pos: p.to_array(), state: new, level: level as u32, was: was as u32 });
+                        self.call(block.owner, cb, |w| abi::SignalArgs {
+                            world: w,
+                            pos: p.to_array(),
+                            state: new,
+                            level: level as u32,
+                            was: was as u32,
+                        });
                     }
                 }
                 Effect::Piston { p, extend } => {
@@ -1309,11 +1443,14 @@ impl Dim {
                     }
                 }
                 Effect::Compare { p, behind, side } => {
-                    let (Some(state), Some(there)) = (self.space.signals.devices.get(&p).map(|d| d.state), self.get(behind)) else { continue };
+                    let (Some(state), Some(there)) = (self.space.signals.devices.get(&p).map(|d| d.state), self.get(behind)) else {
+                        continue;
+                    };
                     let info = c.states[state as usize].signal;
                     let block = c.block_of(there);
                     let Some(cb) = block.cb.signal_read else { continue };
-                    let out = self.call(block.owner, cb, |w| abi::SignalReadArgs { world: w, pos: behind.to_array(), state: there, output: 0 });
+                    let out =
+                        self.call(block.owner, cb, |w| abi::SignalReadArgs { world: w, pos: behind.to_array(), state: there, output: 0 });
                     let want = compared(info.mode, out.output.min(15) as u8, side);
                     if want != info.level {
                         self.space.signals.schedule(p, want, info.delay, self.time);
@@ -1337,7 +1474,14 @@ impl Dim {
                     let block = c.block_of(state);
                     let Some(cb) = block.cb.signal_logic else { continue };
                     let [rear, left, right] = inputs.map(|v| v as u32);
-                    let out = self.call(block.owner, cb, |w| abi::LogicArgs { world: w, pos: p.to_array(), state, rear, sides: [left, right], output: info.level as u32 });
+                    let out = self.call(block.owner, cb, |w| abi::LogicArgs {
+                        world: w,
+                        pos: p.to_array(),
+                        state,
+                        rear,
+                        sides: [left, right],
+                        output: info.level as u32,
+                    });
                     let want = out.output.min(15) as u8;
                     if want != info.level {
                         self.space.signals.schedule(p, want, info.delay, self.time);
@@ -1373,24 +1517,53 @@ impl Dim {
                     *claims.entry(cell).or_default() += 1;
                 }
             }
-            for (m, _) in floater_plans.iter().enumerate().filter(|(m, _)| !lost_floaters[*m]) {
-                for cell in floater_plans[m].cells.iter().chain(floater_plans[m].broken.iter()) {
+            for (m, _) in floater_plans
+                .iter()
+                .enumerate()
+                .filter(|(m, _)| !lost_floaters[*m])
+            {
+                for cell in floater_plans[m]
+                    .cells
+                    .iter()
+                    .chain(floater_plans[m].broken.iter())
+                {
                     *claims.entry(*cell).or_default() += 1;
                 }
             }
-            let losers: Vec<usize> = (0..plans.len()).filter(going).filter(|i| plan_cells(&plans[*i]).any(|cell| claims[&cell] > 1)).collect();
-            let floater_losers: Vec<usize> = (0..floater_plans.len()).filter(|m| !lost_floaters[*m]).filter(|m| floater_plans[*m].cells.iter().chain(floater_plans[*m].broken.iter()).any(|cell| claims[cell] > 1)).collect();
+            let losers: Vec<usize> = (0..plans.len())
+                .filter(going)
+                .filter(|i| plan_cells(&plans[*i]).any(|cell| claims[&cell] > 1))
+                .collect();
+            let floater_losers: Vec<usize> = (0..floater_plans.len())
+                .filter(|m| !lost_floaters[*m])
+                .filter(|m| {
+                    floater_plans[*m]
+                        .cells
+                        .iter()
+                        .chain(floater_plans[*m].broken.iter())
+                        .any(|cell| claims[cell] > 1)
+                })
+                .collect();
             if losers.is_empty() && floater_losers.is_empty() {
                 break waiting;
             }
             for i in losers {
-                log::debug!("piston at {} gives way: {:?}", plans[i].p, plan_cells(&plans[i]).filter(|cell| claims[cell] > 1).collect::<Vec<_>>());
+                log::debug!(
+                    "piston at {} gives way: {:?}",
+                    plans[i].p,
+                    plan_cells(&plans[i])
+                        .filter(|cell| claims[cell] > 1)
+                        .collect::<Vec<_>>()
+                );
                 lost[i] = true;
                 self.space.signals.polled.insert(plans[i].p);
             }
             for m in floater_losers {
                 lost_floaters[m] = true;
-                self.space.signals.polled.extend(floater_plans[m].floaters.iter().copied());
+                self.space
+                    .signals
+                    .polled
+                    .extend(floater_plans[m].floaters.iter().copied());
                 for &p in &floater_plans[m].floaters {
                     self.floater_shows(c, p, FLOATER_STUCK);
                 }
@@ -1493,7 +1666,12 @@ impl Dim {
             // vanilla's way to leave a block behind. With nothing pushed, it brings back what it
             // reached however short the power was, which is how a flying machine's back half comes.
             plan.step = -step;
-            let held_on = self.space.signals.devices.get(&p).is_some_and(|d| self.time > d.pushed_at + MOVE_TICKS as u64);
+            let held_on = self
+                .space
+                .signals
+                .devices
+                .get(&p)
+                .is_some_and(|d| self.time > d.pushed_at + MOVE_TICKS as u64);
             if s.mode == 1 && held_on {
                 let beyond = head + step;
                 let here = self.get(beyond)?;
@@ -1506,7 +1684,12 @@ impl Dim {
         }
         let (riding, broken) = self.who_rides(c, &plan.moved, Some(p), plan.step);
         plan.broken.retain(|b| !riding.iter().any(|r| r.0 == *b));
-        plan.broken.extend(broken.into_iter().filter(|b| !plan.broken.contains(b)).collect::<Vec<_>>());
+        plan.broken.extend(
+            broken
+                .into_iter()
+                .filter(|b| !plan.broken.contains(b))
+                .collect::<Vec<_>>(),
+        );
         plan.riding = riding;
         Some(plan)
     }
@@ -1555,7 +1738,12 @@ impl Dim {
     /// `moved` with what stands on it, as cells of a new body around `center`.
     pub(super) fn with_riders(&self, c: &Content, center: IVec3, moved: Vec<IVec3>) -> Vec<Lifted> {
         let (riding, _) = self.who_rides(c, &moved, None, IVec3::ZERO);
-        moved.iter().map(|&m| (m, None)).chain(riding.into_iter().map(|(n, part)| (n, Some(part)))).map(|(m, part)| Lifted { from: m, local: m - center, to: m, part }).collect()
+        moved
+            .iter()
+            .map(|&m| (m, None))
+            .chain(riding.into_iter().map(|(n, part)| (n, Some(part))))
+            .map(|(m, part)| Lifted { from: m, local: m - center, to: m, part })
+            .collect()
     }
 
     /// What stands on `moved` goes with them along `step`, unless it would run into something:
@@ -1579,10 +1767,15 @@ impl Dim {
                 let held_by = |f: u8| moved.contains(&(n + DIRS[f as usize]));
                 let part = if info.signal.kind == sk::WIRE {
                     let mask = wire::mask(c, state);
-                    let going = (0..6u8).filter(|f| mask & (1 << f) != 0 && held_by(*f)).fold(0u8, |m, f| m | 1 << f);
+                    let going = (0..6u8)
+                        .filter(|f| mask & (1 << f) != 0 && held_by(*f))
+                        .fold(0u8, |m, f| m | 1 << f);
                     (going != 0).then(|| c.block_of(state).first_state + going as u32)
                 } else {
-                    let support = info.support.map(|(f, _)| f).or((info.signal.attach < 6).then_some(info.signal.attach));
+                    let support = info
+                        .support
+                        .map(|(f, _)| f)
+                        .or((info.signal.attach < 6).then_some(info.signal.attach));
                     support.filter(|f| held_by(*f)).map(|_| state)
                 };
                 if let Some(part) = part {
@@ -1593,12 +1786,19 @@ impl Dim {
         // Those running into what doesn't move or come along don't ride: they break, and then
         // what would have followed them may find it free, or run into something too. As many
         // rounds as that takes, none of it in any order.
-        let free = |s: &Dim, to: IVec3| s.get(to).is_some_and(|there| rider_meets(c, there) != RiderMeets::Wall);
+        let free = |s: &Dim, to: IVec3| {
+            s.get(to)
+                .is_some_and(|there| rider_meets(c, there) != RiderMeets::Wall)
+        };
         loop {
-            let stuck: Vec<IVec3> = riding.keys().copied().filter(|n| {
-                let to = *n + step;
-                !moved.contains(&to) && !riding.contains_key(&to) && !free(self, to) || self.space.signals.reserved(to)
-            }).collect();
+            let stuck: Vec<IVec3> = riding
+                .keys()
+                .copied()
+                .filter(|n| {
+                    let to = *n + step;
+                    !moved.contains(&to) && !riding.contains_key(&to) && !free(self, to) || self.space.signals.reserved(to)
+                })
+                .collect();
             if stuck.is_empty() {
                 break;
             }
@@ -1609,8 +1809,16 @@ impl Dim {
         }
         let mut riding: Vec<(IVec3, u32)> = riding.into_iter().collect();
         riding.sort_unstable_by_key(|r| r.0.to_array());
-        let in_their_way = riding.iter().map(|r| r.0 + step).filter(|to| !moved.contains(to) && !riding.iter().any(|r| r.0 == *to));
-        let in_their_way: Vec<IVec3> = in_their_way.filter(|to| self.get(*to).is_some_and(|there| rider_meets(c, there) == RiderMeets::Breaks)).collect();
+        let in_their_way = riding
+            .iter()
+            .map(|r| r.0 + step)
+            .filter(|to| !moved.contains(to) && !riding.iter().any(|r| r.0 == *to));
+        let in_their_way: Vec<IVec3> = in_their_way
+            .filter(|to| {
+                self.get(*to)
+                    .is_some_and(|there| rider_meets(c, there) == RiderMeets::Breaks)
+            })
+            .collect();
         broken.extend(in_their_way);
         (riding, broken)
     }
@@ -1635,14 +1843,19 @@ impl Dim {
         let mut carried_head = None;
         let mut head_turns = None;
         if plan.extend {
-            let h = info.head.and_then(|b| c.state_with(c.blocks[b as usize].first_state, "facing", wire::dir_name(plan.dir)));
+            let h = info
+                .head
+                .and_then(|b| c.state_with(c.blocks[b as usize].first_state, "facing", wire::dir_name(plan.dir)));
             if let Some(h) = h {
                 // From inside the piston, out of its short base.
                 also.push((IVec3::ZERO, short(h)));
                 carried_head = Some(Carried { local: IVec3::ZERO, to: head, state: h, entity: None });
                 head_turns = Some((IVec3::ZERO, h));
             }
-        } else if let Some(h) = self.get(head).filter(|h| c.states[*h as usize].signal.kind == sk::PISTON_HEAD) {
+        } else if let Some(h) = self
+            .get(head)
+            .filter(|h| c.states[*h as usize].signal.kind == sk::PISTON_HEAD)
+        {
             also.push((head - plan.p, h));
             head_turns = Some((head - plan.p, short(h)));
             self.write_block(c, head, AIR, true);
@@ -1654,7 +1867,13 @@ impl Dim {
         }
         if plan.extend {
             self.set(c, plan.p, with_level(&info, state, 15));
-            if let Some(d) = self.space.signals.devices.get_mut(&plan.p).filter(|_| !plan.moved.is_empty()) {
+            if let Some(d) = self
+                .space
+                .signals
+                .devices
+                .get_mut(&plan.p)
+                .filter(|_| !plan.moved.is_empty())
+            {
                 d.pushed_at = self.time;
             }
         }
@@ -1662,13 +1881,22 @@ impl Dim {
         for &(n, _) in &plan.riding {
             self.space.signals.reserved.insert(n + plan.step);
         }
-        let cells = plan.moved.iter().map(|&m| (m, None)).chain(plan.riding.iter().map(|&(n, part)| (n, Some(part)))).map(|(m, part)| Lifted { from: m, local: m - plan.p, to: m + plan.step, part });
-        let (body, mut blocks) = self.lift(c, c.game.moving_kind, plan.p.as_dvec3() + DVec3::new(0.5, 0.0, 0.5), cells, &also, Liveness::OnTheWay);
+        let cells = plan
+            .moved
+            .iter()
+            .map(|&m| (m, None))
+            .chain(plan.riding.iter().map(|&(n, part)| (n, Some(part))))
+            .map(|(m, part)| Lifted { from: m, local: m - plan.p, to: m + plan.step, part });
+        let (body, mut blocks) =
+            self.lift(c, c.game.moving_kind, plan.p.as_dvec3() + DVec3::new(0.5, 0.0, 0.5), cells, &also, Liveness::OnTheWay);
         blocks.extend(carried_head);
         if let Some(e) = self.entities.get_mut(body) {
             e.motion = Motion::To { to: e.pos + plan.step.as_dvec3(), left: MOVE_TICKS as u16 };
         }
-        self.space.signals.moving.push(Moving { body, piston: plan.p, head, blocks, retracting: !plan.extend, head_turns });
+        self.space
+            .signals
+            .moving
+            .push(Moving { body, piston: plan.p, head, blocks, retracting: !plan.extend, head_turns });
         self.sound(c.states[state as usize].sounds[1], plan.p.as_dvec3() + DVec3::splat(0.5), 0.5, 0.0);
     }
 
@@ -1679,7 +1907,13 @@ impl Dim {
             return;
         }
         let entities = &self.entities;
-        let (done, going): (Vec<Moving>, Vec<Moving>) = std::mem::take(&mut self.space.signals.moving).into_iter().partition(|m| entities.get(m.body).is_none_or(|e| !matches!(e.motion, Motion::To { .. })));
+        let (done, going): (Vec<Moving>, Vec<Moving>) = std::mem::take(&mut self.space.signals.moving)
+            .into_iter()
+            .partition(|m| {
+                entities
+                    .get(m.body)
+                    .is_none_or(|e| !matches!(e.motion, Motion::To { .. }))
+            });
         self.space.signals.moving = going;
         for mut m in done {
             // Clients show this a tick and a half later, a quarter of the way out: past that a
@@ -1701,7 +1935,12 @@ impl Dim {
             self.space.signals.reserved.remove(&b.to);
         }
         // A head without its piston goes with it.
-        let blocks: Vec<Carried> = m.blocks.iter().copied().filter(|b| c.states[b.state as usize].signal.kind != sk::PISTON_HEAD || out).collect();
+        let blocks: Vec<Carried> = m
+            .blocks
+            .iter()
+            .copied()
+            .filter(|b| c.states[b.state as usize].signal.kind != sk::PISTON_HEAD || out)
+            .collect();
         let mut also = Vec::new();
         if m.retracting {
             if let Some(s) = base.filter(|_| out) {
@@ -1752,7 +1991,10 @@ impl Dim {
         let step = DIRS[s.front as usize];
         if s.kind == sk::PISTON && s.level > 0 {
             let head = p + step;
-            if self.get(head).is_some_and(|h| c.states[h as usize].signal.kind == sk::PISTON_HEAD) {
+            if self
+                .get(head)
+                .is_some_and(|h| c.states[h as usize].signal.kind == sk::PISTON_HEAD)
+            {
                 self.set(c, head, AIR);
             }
         } else if s.kind == sk::PISTON_HEAD {
@@ -1770,7 +2012,11 @@ impl Dim {
         let mask = wire::mask(c, state);
         let mut left = mask;
         for f in 0..6u8 {
-            if mask & (1 << f) != 0 && self.get(p + DIRS[f as usize]).is_some_and(|s| !wire::holds_wire(c, s)) {
+            if mask & (1 << f) != 0
+                && self
+                    .get(p + DIRS[f as usize])
+                    .is_some_and(|s| !wire::holds_wire(c, s))
+            {
                 left &= !(1 << f);
             }
         }
@@ -1796,7 +2042,11 @@ impl Dim {
         } else if c.states[cur as usize].flags & bf::REPLACEABLE == 0 {
             return None;
         }
-        if mask & (1 << on) != 0 || !self.get(p + DIRS[on as usize]).is_some_and(|s| wire::holds_wire(c, s)) {
+        if mask & (1 << on) != 0
+            || !self
+                .get(p + DIRS[on as usize])
+                .is_some_and(|s| wire::holds_wire(c, s))
+        {
             return None;
         }
         Some(first + (mask | 1 << on) as u32)
@@ -1807,7 +2057,12 @@ impl Dim {
 /// and goes from there if it still has power. Plans that lost don't move anything, and pistons
 /// moving each other in a ring all wait.
 fn being_moved(plans: &[PushPlan], lost: &[bool]) -> Vec<bool> {
-    let pistons: FxHashMap<IVec3, usize> = plans.iter().enumerate().filter(|(i, _)| !lost[*i]).map(|(i, plan)| (plan.p, i)).collect();
+    let pistons: FxHashMap<IVec3, usize> = plans
+        .iter()
+        .enumerate()
+        .filter(|(i, _)| !lost[*i])
+        .map(|(i, plan)| (plan.p, i))
+        .collect();
     let mut movers = vec![0u32; plans.len()];
     let mut moves: Vec<Vec<usize>> = vec![Vec::new(); plans.len()];
     for (i, plan) in plans.iter().enumerate().filter(|(i, _)| !lost[*i]) {
@@ -1818,7 +2073,9 @@ fn being_moved(plans: &[PushPlan], lost: &[bool]) -> Vec<bool> {
     }
     let mut goes = vec![false; plans.len()];
     let mut waits = vec![false; plans.len()];
-    let mut todo: Vec<usize> = (0..plans.len()).filter(|i| !lost[*i] && movers[*i] == 0).collect();
+    let mut todo: Vec<usize> = (0..plans.len())
+        .filter(|i| !lost[*i] && movers[*i] == 0)
+        .collect();
     while let Some(i) = todo.pop() {
         goes[i] = true;
         for &moved in &moves[i] {
@@ -1840,5 +2097,17 @@ fn being_moved(plans: &[PushPlan], lost: &[bool]) -> Vec<bool> {
 fn plan_cells(plan: &PushPlan) -> impl Iterator<Item = IVec3> + '_ {
     let head = plan.p + DIRS[plan.dir as usize];
     let riding = plan.riding.iter().map(|r| r.0);
-    plan.moved.iter().copied().chain(riding.clone()).chain(plan.moved.iter().copied().chain(riding).map(|m| m + plan.step)).chain(plan.broken.iter().copied()).chain([head, plan.p])
+    plan.moved
+        .iter()
+        .copied()
+        .chain(riding.clone())
+        .chain(
+            plan.moved
+                .iter()
+                .copied()
+                .chain(riding)
+                .map(|m| m + plan.step),
+        )
+        .chain(plan.broken.iter().copied())
+        .chain([head, plan.p])
 }

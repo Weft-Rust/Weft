@@ -30,7 +30,10 @@ impl Server {
             }
             if self.backlog.len() == before {
                 // Nothing could be inserted: wait for the next cube from the workers.
-                match self.gen_rx.recv_timeout((deadline - Instant::now().min(deadline)).min(Duration::from_millis(2))) {
+                match self
+                    .gen_rx
+                    .recv_timeout((deadline - Instant::now().min(deadline)).min(Duration::from_millis(2)))
+                {
                     Ok(g) => self.backlog.push_back(g),
                     Err(_) => continue,
                 }
@@ -96,7 +99,8 @@ impl Server {
             }
             let above = (g.dim, g.pos + IVec3::Y);
             let late = Instant::now() >= deadline;
-            let above_coming = pending.contains(&above) || self.dims[g.dim as usize].generating.contains(&above.1) || self.wanted.contains(&above);
+            let above_coming =
+                pending.contains(&above) || self.dims[g.dim as usize].generating.contains(&above.1) || self.wanted.contains(&above);
             if late || above_coming {
                 self.backlog.push_back(g);
                 continue;
@@ -105,7 +109,9 @@ impl Server {
             self.wanted.remove(&(g.dim, g.pos));
             let t = Instant::now();
             self.dims[g.dim as usize].insert(c, g.pos, g.cube.unwrap(), &g.entities, g.conn, true);
-            self.shared.insert_ns.fetch_add(t.elapsed().as_nanos() as u64, Ordering::Relaxed);
+            self.shared
+                .insert_ns
+                .fetch_add(t.elapsed().as_nanos() as u64, Ordering::Relaxed);
             self.shared.inserted.fetch_add(1, Ordering::Relaxed);
         }
     }
@@ -134,7 +140,12 @@ impl Server {
         if in_flight >= budget {
             return;
         }
-        *self.shared.views.write() = self.players.iter().filter(|p| p.joined).map(|p| (p.dim, self.view(p))).collect();
+        *self.shared.views.write() = self
+            .players
+            .iter()
+            .filter(|p| p.joined)
+            .map(|p| (p.dim, self.view(p)))
+            .collect();
         let mut wanted: Vec<(i32, u32, IVec3)> = Vec::new();
         self.wanted.clear();
         let edited: Vec<Vec<IVec3>> = self.dims.iter_mut().map(|d| d.take_edited()).collect();
@@ -180,7 +191,13 @@ impl Server {
                 .iter()
                 .copied()
                 .chain(left.iter().map(|&q| q - IVec3::Y))
-                .filter(|&q| dim.has(q) && !dim.settled(q) && !dim.has(q + IVec3::Y) && !vis.seen.contains(&(q + IVec3::Y)) && !sky_column(q + IVec3::Y))
+                .filter(|&q| {
+                    dim.has(q)
+                        && !dim.settled(q)
+                        && !dim.has(q + IVec3::Y)
+                        && !vis.seen.contains(&(q + IVec3::Y))
+                        && !sky_column(q + IVec3::Y)
+                })
                 .collect();
             for t in tops {
                 dim.settle_down(t);
@@ -241,7 +258,9 @@ impl Server {
             let (mut cube, entities) = loaded.unwrap_or_else(|| (dim::generate(content(), dim, seed, pos), Vec::new()));
             dim::prepare(content(), dim, &edits, pos, &mut cube);
             let conn = dim::see_through(content(), &cube);
-            shared.gen_ns.fetch_add(t.elapsed().as_nanos() as u64, Ordering::Relaxed);
+            shared
+                .gen_ns
+                .fetch_add(t.elapsed().as_nanos() as u64, Ordering::Relaxed);
             shared.generated.fetch_add(1, Ordering::Relaxed);
             let _ = tx.send(Generated { dim, pos, cube: Some(cube), entities, conn });
         });
@@ -269,7 +288,9 @@ impl Server {
             let before: usize = d.regions.iter().map(|r| r.space.cubes.len()).sum();
             for r in &mut d.regions {
                 let removed = r.retain_cubes(c, |pos| {
-                    views.iter().any(|&(v, lo, hi)| v.column(pos) && pos.y >= lo && pos.y <= hi)
+                    views
+                        .iter()
+                        .any(|&(v, lo, hi)| v.column(pos) && pos.y >= lo && pos.y <= hi)
                 });
                 for (pos, cube, inside) in removed {
                     if let Some(s) = &storage {
@@ -293,11 +314,20 @@ impl Server {
     /// floating caves and holes into the sky). Cubes it fills whole are made, not generated.
     pub(super) fn area_fill(&mut self, c: &'static Content, dim: u32, fill: area::AreaFill) {
         let start = Instant::now();
-        let views: Vec<View> = self.players.iter().filter(|p| p.joined && p.dim == dim).map(|p| self.view(p)).collect();
+        let views: Vec<View> = self
+            .players
+            .iter()
+            .filter(|p| p.joined && p.dim == dim)
+            .map(|p| self.view(p))
+            .collect();
         let def = &c.dims[dim as usize];
         let in_view = |cp: IVec3| views.iter().any(|v| v.contains_in(def, cp));
         // Unbreakable blocks or liquids it keeps may be anywhere in terrain: such cubes are generated.
-        let keeps = fill.keep_liquids || fill.keep_unbreakable && c.states.iter().any(|s| s.hardness < 0.0 && s.liquid.is_none());
+        let keeps = fill.keep_liquids
+            || fill.keep_unbreakable
+                && c.states
+                    .iter()
+                    .any(|s| s.hardness < 0.0 && s.liquid.is_none());
         let d = &self.dims[dim as usize];
         let reach = (fill.radius / 16.0).ceil() as i32 + 2;
         let mid = (fill.center / 16.0).floor().as_ivec3();
@@ -335,12 +365,18 @@ impl Server {
         for (pos, cube, entities, conn) in made {
             self.dims[dim as usize].insert(c, pos, cube, &entities, conn, true);
         }
-        log::info!("area fill r {:.0}: loaded {loaded} cubes it opens up, made {} it fills whole, {:.0} ms", fill.radius, whole.len(), start.elapsed().as_secs_f64() * 1000.0);
+        log::info!(
+            "area fill r {:.0}: loaded {loaded} cubes it opens up, made {} it fills whole, {:.0} ms",
+            fill.radius,
+            whole.len(),
+            start.elapsed().as_secs_f64() * 1000.0
+        );
         self.dims[dim as usize].area_fill(c, fill, &whole);
         if let Some(e) = self.dims[dim as usize].edits.last() {
             let spec = e.spec(c);
             for p in self.players.iter_mut().filter(|p| p.joined && p.dim == dim) {
-                p.conn.send(ToClient::Edits { dim, specs: vec![spec.clone()], all: false });
+                p.conn
+                    .send(ToClient::Edits { dim, specs: vec![spec.clone()], all: false });
             }
         }
     }
@@ -349,23 +385,41 @@ impl Server {
 /// The cubes in a player's view that differ from generation: told about first (the client
 /// does not generate them), then sent, loaded ones as they are and the rest from storage with
 /// the area edits made since they were saved.
-pub(super) fn send_far(c: &'static Content, p: &mut Player, dim: &mut DimSet, storage: Option<&Arc<Mutex<Storage>>>, view: View, tick: u64) {
+pub(super) fn send_far(
+    c: &'static Content,
+    p: &mut Player,
+    dim: &mut DimSet,
+    storage: Option<&Arc<Mutex<Storage>>>,
+    view: View,
+    tick: u64,
+) {
     // What the client generates: the view and the sky column above it.
     let def = &c.dims[p.dim as usize];
     let center = view.center;
     let in_view = |q: IVec3| view.loaded(def, q);
     if tick % 10 == 0 || p.announced.is_empty() {
-        let mut new: Vec<IVec3> = dim.modified().filter(|&q| in_view(q) && !p.announced.contains(&q)).collect();
+        let mut new: Vec<IVec3> = dim
+            .modified()
+            .filter(|&q| in_view(q) && !p.announced.contains(&q))
+            .collect();
         if let Some(s) = storage {
-            new.extend(s.lock().saved(p.dim).iter().copied().filter(|&q| in_view(q) && !p.announced.contains(&q)));
+            new.extend(
+                s.lock()
+                    .saved(p.dim)
+                    .iter()
+                    .copied()
+                    .filter(|&q| in_view(q) && !p.announced.contains(&q)),
+            );
         }
         new.sort_unstable_by_key(|q| (q.x, q.y, q.z));
         new.dedup();
         if !new.is_empty() {
             p.announced.extend(new.iter().copied());
-            p.conn.send(ToClient::Saved { dim: p.dim, cubes: new.clone() });
+            p.conn
+                .send(ToClient::Saved { dim: p.dim, cubes: new.clone() });
             p.to_send_far.extend(new);
-            p.to_send_far.sort_unstable_by_key(|q| std::cmp::Reverse((*q - center).length_squared()));
+            p.to_send_far
+                .sort_unstable_by_key(|q| std::cmp::Reverse((*q - center).length_squared()));
         }
     }
     let mut n = 0;
@@ -383,7 +437,8 @@ pub(super) fn send_far(c: &'static Content, p: &mut Player, dim: &mut DimSet, st
                 Arc::new(cube)
             }
         };
-        p.conn.send(ToClient::Cube { dim: p.dim, frame: 0, pos, cube, edit: false });
+        p.conn
+            .send(ToClient::Cube { dim: p.dim, frame: 0, pos, cube, edit: false });
         p.send_levels(dim, pos);
         p.sent.insert(pos);
     }

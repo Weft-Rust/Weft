@@ -61,7 +61,9 @@ fn skeleton_model() -> Model {
     Model::from(vec![
         vanilla_part("head", [0.0, 0.0, 0.0], &[([-4.0, -8.0, -4.0], [8.0, 8.0, 8.0], [0.0, 0.0])]),
         vanilla_part("body", [0.0, 0.0, 0.0], &[([-4.0, 0.0, -2.0], [8.0, 12.0, 4.0], [16.0, 16.0])]),
-        vanilla_part("rightArm", [-5.0, 2.0, 0.0], &[([-1.0, -2.0, -1.0], [2.0, 12.0, 2.0], [40.0, 16.0])]).mirrored().rotation(forward, 0.0, 0.0),
+        vanilla_part("rightArm", [-5.0, 2.0, 0.0], &[([-1.0, -2.0, -1.0], [2.0, 12.0, 2.0], [40.0, 16.0])])
+            .mirrored()
+            .rotation(forward, 0.0, 0.0),
         vanilla_part("leftArm", [5.0, 2.0, 0.0], &[([-1.0, -2.0, -1.0], [2.0, 12.0, 2.0], [40.0, 16.0])]).rotation(forward, 0.0, 0.0),
         vanilla_part("rightLeg", [-2.0, 12.0, 0.0], &[([-1.0, 0.0, -1.0], [2.0, 12.0, 2.0], [0.0, 16.0])]).mirrored(),
         vanilla_part("leftLeg", [2.0, 12.0, 0.0], &[([-1.0, 0.0, -1.0], [2.0, 12.0, 2.0], [0.0, 16.0])]),
@@ -73,10 +75,18 @@ fn skeleton_model() -> Model {
 /// its wool in the lower, on boxes grown over it.
 fn sheep_model() -> Model {
     let wool = |p: [f32; 2]| [p[0], p[1] + 32.0];
-    let head = vanilla_part("head", [0.0, 6.0, -8.0], &[([-3.0, -4.0, -6.0], [6.0, 6.0, 8.0], [0.0, 0.0])]).cube([-3.0, -2.0, -4.0], [6.0, 6.0, 6.0], wool([0.0, 0.0])).inflated(0.6);
-    let body = vanilla_part("body", [0.0, 5.0, 2.0], &[([-4.0, -10.0, -7.0], [8.0, 16.0, 6.0], [28.0, 8.0])]).cube([-4.0, -6.0, -7.0], [8.0, 16.0, 6.0], wool([28.0, 8.0])).inflated(1.75).rotation(-std::f32::consts::FRAC_PI_2, 0.0, 0.0);
+    let head = vanilla_part("head", [0.0, 6.0, -8.0], &[([-3.0, -4.0, -6.0], [6.0, 6.0, 8.0], [0.0, 0.0])])
+        .cube([-3.0, -2.0, -4.0], [6.0, 6.0, 6.0], wool([0.0, 0.0]))
+        .inflated(0.6);
+    let body = vanilla_part("body", [0.0, 5.0, 2.0], &[([-4.0, -10.0, -7.0], [8.0, 16.0, 6.0], [28.0, 8.0])])
+        .cube([-4.0, -6.0, -7.0], [8.0, 16.0, 6.0], wool([28.0, 8.0]))
+        .inflated(1.75)
+        .rotation(-std::f32::consts::FRAC_PI_2, 0.0, 0.0);
     let mut parts = vec![head, body];
-    parts.extend(vanilla_legs(3.0, 12.0).map(|l| l.cube([-2.0, -6.0, -2.0], [4.0, 6.0, 4.0], wool([0.0, 16.0])).inflated(0.5)));
+    parts.extend(vanilla_legs(3.0, 12.0).map(|l| {
+        l.cube([-2.0, -6.0, -2.0], [4.0, 6.0, 4.0], wool([0.0, 16.0]))
+            .inflated(0.5)
+    }));
     Model::from(parts).uv(64, 64)
 }
 
@@ -84,8 +94,20 @@ fn sheep_model() -> Model {
 fn chicken_model() -> Model {
     let leg = |name, x| vanilla_part(name, [x, 19.0, 1.0], &[([-1.0, 0.0, -3.0], [3.0, 5.0, 3.0], [26.0, 0.0])]);
     Model::from(vec![
-        vanilla_part("head", [0.0, 15.0, -4.0], &[([-2.0, -6.0, -2.0], [4.0, 6.0, 3.0], [0.0, 0.0]), ([-2.0, -4.0, -4.0], [4.0, 2.0, 2.0], [14.0, 0.0]), ([-1.0, -2.0, -3.0], [2.0, 2.0, 2.0], [14.0, 4.0])]),
-        vanilla_part("body", [0.0, 16.0, 0.0], &[([-3.0, -4.0, -3.0], [6.0, 8.0, 6.0], [0.0, 9.0])]).rotation(-std::f32::consts::FRAC_PI_2, 0.0, 0.0),
+        vanilla_part(
+            "head",
+            [0.0, 15.0, -4.0],
+            &[
+                ([-2.0, -6.0, -2.0], [4.0, 6.0, 3.0], [0.0, 0.0]),
+                ([-2.0, -4.0, -4.0], [4.0, 2.0, 2.0], [14.0, 0.0]),
+                ([-1.0, -2.0, -3.0], [2.0, 2.0, 2.0], [14.0, 4.0]),
+            ],
+        ),
+        vanilla_part("body", [0.0, 16.0, 0.0], &[([-3.0, -4.0, -3.0], [6.0, 8.0, 6.0], [0.0, 9.0])]).rotation(
+            -std::f32::consts::FRAC_PI_2,
+            0.0,
+            0.0,
+        ),
         vanilla_part("wing0", [-4.0, 13.0, 0.0], &[([0.0, 0.0, -3.0], [1.0, 4.0, 6.0], [24.0, 13.0])]),
         vanilla_part("wing1", [4.0, 13.0, 0.0], &[([-1.0, 0.0, -3.0], [1.0, 4.0, 6.0], [24.0, 13.0])]),
         leg("rightLeg", -2.0),
@@ -101,8 +123,22 @@ fn arrow_model() -> Model {
 
 /// Vanilla's cow (`CowModel`): head with muzzle and horns, body lying along z with its udder.
 fn cow_model() -> Model {
-    let head = vanilla_part("head", [0.0, 4.0, -8.0], &[([-4.0, -4.0, -6.0], [8.0, 8.0, 6.0], [0.0, 0.0]), ([-3.0, 1.0, -7.0], [6.0, 3.0, 1.0], [1.0, 33.0]), ([-5.0, -5.0, -5.0], [1.0, 3.0, 1.0], [22.0, 0.0]), ([4.0, -5.0, -5.0], [1.0, 3.0, 1.0], [22.0, 0.0])]);
-    let body = vanilla_part("body", [0.0, 5.0, 2.0], &[([-6.0, -10.0, -7.0], [12.0, 18.0, 10.0], [18.0, 4.0]), ([-2.0, 2.0, -8.0], [4.0, 6.0, 1.0], [52.0, 0.0])]).rotation(-std::f32::consts::FRAC_PI_2, 0.0, 0.0);
+    let head = vanilla_part(
+        "head",
+        [0.0, 4.0, -8.0],
+        &[
+            ([-4.0, -4.0, -6.0], [8.0, 8.0, 6.0], [0.0, 0.0]),
+            ([-3.0, 1.0, -7.0], [6.0, 3.0, 1.0], [1.0, 33.0]),
+            ([-5.0, -5.0, -5.0], [1.0, 3.0, 1.0], [22.0, 0.0]),
+            ([4.0, -5.0, -5.0], [1.0, 3.0, 1.0], [22.0, 0.0]),
+        ],
+    );
+    let body = vanilla_part(
+        "body",
+        [0.0, 5.0, 2.0],
+        &[([-6.0, -10.0, -7.0], [12.0, 18.0, 10.0], [18.0, 4.0]), ([-2.0, 2.0, -8.0], [4.0, 6.0, 1.0], [52.0, 0.0])],
+    )
+    .rotation(-std::f32::consts::FRAC_PI_2, 0.0, 0.0);
     let mut parts = vec![head, body];
     parts.extend(vanilla_legs(4.0, 12.0));
     Model::from(parts).uv(64, 64)
@@ -110,14 +146,21 @@ fn cow_model() -> Model {
 
 /// Vanilla's pig (`PigModel`).
 fn pig_model() -> Model {
-    let head = vanilla_part("head", [0.0, 12.0, -6.0], &[([-4.0, -4.0, -8.0], [8.0, 8.0, 8.0], [0.0, 0.0]), ([-2.0, 0.0, -9.0], [4.0, 3.0, 1.0], [16.0, 16.0])]);
-    let body = vanilla_part("body", [0.0, 11.0, 2.0], &[([-5.0, -10.0, -7.0], [10.0, 16.0, 8.0], [28.0, 8.0])]).rotation(-std::f32::consts::FRAC_PI_2, 0.0, 0.0);
+    let head = vanilla_part(
+        "head",
+        [0.0, 12.0, -6.0],
+        &[([-4.0, -4.0, -8.0], [8.0, 8.0, 8.0], [0.0, 0.0]), ([-2.0, 0.0, -9.0], [4.0, 3.0, 1.0], [16.0, 16.0])],
+    );
+    let body = vanilla_part("body", [0.0, 11.0, 2.0], &[([-5.0, -10.0, -7.0], [10.0, 16.0, 8.0], [28.0, 8.0])]).rotation(
+        -std::f32::consts::FRAC_PI_2,
+        0.0,
+        0.0,
+    );
     let mut parts = vec![head, body];
     parts.extend(vanilla_legs(3.0, 18.0));
     Model::from(parts).uv(64, 64)
 }
 pub static COW: Entity = Entity::named("cow");
-
 
 pub fn register(r: &mut Registry) {
     // The engine's player kind, drawn as the same humanoid as the zombie.
@@ -133,7 +176,9 @@ pub fn register(r: &mut Registry) {
     });
     r.entity(&ZOMBIE)
         .tag("hostile")
-        .sound("ambient").sound("hurt").sound("death")
+        .sound("ambient")
+        .sound("hurt")
+        .sound("death")
         .size(0.6, 1.95)
         .health(20.0)
         .speed(2.6)
@@ -145,7 +190,9 @@ pub fn register(r: &mut Registry) {
         .goals(hostile(false));
     r.entity(&SPIDER)
         .tag("hostile")
-        .sound("ambient").sound("hurt").sound("death")
+        .sound("ambient")
+        .sound("hurt")
+        .sound("death")
         .size(1.3, 0.9)
         .health(16.0)
         .speed(3.6)
@@ -209,7 +256,9 @@ pub fn register(r: &mut Registry) {
         .on_hurt(panic);
     r.entity(&PIG)
         .tag("livestock")
-        .sound("ambient").sound("hurt").sound("death")
+        .sound("ambient")
+        .sound("hurt")
+        .sound("death")
         .size(0.9, 0.9)
         .health(10.0)
         .speed(2.5)
@@ -220,7 +269,9 @@ pub fn register(r: &mut Registry) {
         .on_hurt(panic);
     r.entity(&COW)
         .tag("livestock")
-        .sound("ambient").sound("hurt").sound("death")
+        .sound("ambient")
+        .sound("hurt")
+        .sound("death")
         .size(0.9, 1.3)
         .health(10.0)
         .speed(2.2)
@@ -230,14 +281,52 @@ pub fn register(r: &mut Registry) {
         .goals(passive())
         .on_hurt(panic);
     // Vanilla amounts; meat comes out cooked when the animal burns.
-    r.loot(&ZOMBIE).pool(Pool::new().items("rotten_flesh", 0, 2));
-    r.loot(&SPIDER).pool(Pool::new().items("string", 0, 2)).pool(Pool::new().when(Cond::KilledByPlayer).when(Cond::Chance(0.33)).item("spider_eye"));
+    r.loot(&ZOMBIE)
+        .pool(Pool::new().items("rotten_flesh", 0, 2));
+    r.loot(&SPIDER)
+        .pool(Pool::new().items("string", 0, 2))
+        .pool(
+            Pool::new()
+                .when(Cond::KilledByPlayer)
+                .when(Cond::Chance(0.33))
+                .item("spider_eye"),
+        );
     r.loot(&CREEPER).pool(Pool::new().items("gunpowder", 0, 2));
-    r.loot(&SKELETON).pool(Pool::new().items("arrow", 0, 2)).pool(Pool::new().items("bone", 0, 2));
-    r.loot(&SHEEP).pool(Pool::new().item("wool")).pool(Pool::new().entry(Entry::item("mutton").count(1, 2).smelted(&crate::recipes::SMELTING)));
-    r.loot(&CHICKEN).pool(Pool::new().items("feather", 0, 2)).pool(Pool::new().entry(Entry::item("chicken").count(1, 1).smelted(&crate::recipes::SMELTING)));
-    r.loot(&PIG).pool(Pool::new().entry(Entry::item("porkchop").count(1, 3).smelted(&crate::recipes::SMELTING)));
-    r.loot(&COW).pool(Pool::new().entry(Entry::item("beef").count(1, 3).smelted(&crate::recipes::SMELTING))).pool(Pool::new().items("leather", 0, 2));
+    r.loot(&SKELETON)
+        .pool(Pool::new().items("arrow", 0, 2))
+        .pool(Pool::new().items("bone", 0, 2));
+    r.loot(&SHEEP).pool(Pool::new().item("wool")).pool(
+        Pool::new().entry(
+            Entry::item("mutton")
+                .count(1, 2)
+                .smelted(&crate::recipes::SMELTING),
+        ),
+    );
+    r.loot(&CHICKEN)
+        .pool(Pool::new().items("feather", 0, 2))
+        .pool(
+            Pool::new().entry(
+                Entry::item("chicken")
+                    .count(1, 1)
+                    .smelted(&crate::recipes::SMELTING),
+            ),
+        );
+    r.loot(&PIG).pool(
+        Pool::new().entry(
+            Entry::item("porkchop")
+                .count(1, 3)
+                .smelted(&crate::recipes::SMELTING),
+        ),
+    );
+    r.loot(&COW)
+        .pool(
+            Pool::new().entry(
+                Entry::item("beef")
+                    .count(1, 3)
+                    .smelted(&crate::recipes::SMELTING),
+            ),
+        )
+        .pool(Pool::new().items("leather", 0, 2));
     // Natural spawning, as rules the engine runs: monsters in the dark (spiders more in deep
     // caves), animals in small herds on grass by day, rarely once the world is loaded.
     r.spawn(&ZOMBIE).light(0, 6).weight(2);
@@ -246,10 +335,14 @@ pub fn register(r: &mut Registry) {
     r.spawn(&SPIDER).light(0, 6);
     r.spawn(&SPIDER).light(0, 6).biome("#cave").weight(4);
     for animal in [&PIG, &COW, &SHEEP, &CHICKEN] {
-        r.spawn(animal).biome("#animals").ground("#animal_spawn").light(7, 15).group(2, 3).chance(0.05);
+        r.spawn(animal)
+            .biome("#animals")
+            .ground("#animal_spawn")
+            .light(7, 15)
+            .group(2, 3)
+            .chance(0.05);
     }
 }
-
 
 /// Vanilla's creeper: comes for the player, and within 3 blocks starts its 30 tick fuse, which
 /// runs back down once the player is 7 away. A radius 3 blast at the end.
@@ -257,7 +350,9 @@ fn creeper() -> ai::Goals {
     ai::Goals::new()
         .then(|w: &World, id: u64, st: &EntityState| {
             let near = ai::nearest_player(w, st, 7.0);
-            let d2 = near.as_ref().map_or(f64::MAX, |(_, p)| (0..3).map(|i| (p.pos[i] - st.pos[i]).powi(2)).sum());
+            let d2 = near
+                .as_ref()
+                .map_or(f64::MAX, |(_, p)| (0..3).map(|i| (p.pos[i] - st.pos[i]).powi(2)).sum());
             let Some(fuse) = w.component_mut(id, &FUSE) else { return false };
             if d2 < 9.0 || (*fuse > 0 && d2 < 49.0) {
                 *fuse += 1;
@@ -284,7 +379,10 @@ fn creeper() -> ai::Goals {
 fn blast(w: &World, id: u64, at: [f64; 3], radius: f64) {
     for other in w.near(at, radius * 2.0, None) {
         let Some(s) = w.entity(other).filter(|_| other != id) else { continue };
-        let d = (0..3).map(|i| (s.pos[i] - at[i]).powi(2)).sum::<f64>().sqrt();
+        let d = (0..3)
+            .map(|i| (s.pos[i] - at[i]).powi(2))
+            .sum::<f64>()
+            .sqrt();
         let impact = (1.0 - d / (radius * 2.0)).max(0.0);
         let damage = (impact * impact + impact) / 2.0 * 7.0 * radius * 2.0 + 1.0;
         w.damage(other, damage as f32, id, damage::EXPLOSION);
@@ -294,7 +392,10 @@ fn blast(w: &World, id: u64, at: [f64; 3], radius: f64) {
     if w.flags(p) & abi::block_flags::LIQUID == 0 {
         w.fill_sphere_keeping(at, radius, 0, abi::area_flags::KEEP_UNBREAKABLE | abi::area_flags::KEEP_LIQUIDS);
     }
-    w.spawn_particles(&Particle::named("core:poof"), at).count(40).spread(radius as f32 * 0.5).speed(2.0);
+    w.spawn_particles(&Particle::named("core:poof"), at)
+        .count(40)
+        .spread(radius as f32 * 0.5)
+        .speed(2.0);
     w.remove(id);
 }
 
@@ -340,7 +441,10 @@ fn shoot(w: &World, id: u64, from: &EntityState, at: &EntityState) {
 /// An arrow in flight: gone when it hits something or has flown for five seconds.
 fn arrow_flies(w: &World, id: u64, st: &EntityState) -> bool {
     let shooter = w.component(id, &SHOOTER).copied().unwrap_or(0);
-    let hit = w.near_bodies(st.pos, 1.0).into_iter().find(|&e| e != id && e != shooter && w.entity(e).is_some_and(|s| s.kind != st.kind));
+    let hit = w
+        .near_bodies(st.pos, 1.0)
+        .into_iter()
+        .find(|&e| e != id && e != shooter && w.entity(e).is_some_and(|s| s.kind != st.kind));
     if let Some(target) = hit {
         w.damage(target, 3.0, shooter, damage::ATTACK);
         w.remove(id);
@@ -352,25 +456,24 @@ fn arrow_flies(w: &World, id: u64, st: &EntityState) -> bool {
 
 /// A chicken: flutters down instead of falling, and lays an egg now and then.
 fn passive_chicken() -> ai::Goals {
-    let goals = ai::Goals::new()
-        .then(|w: &World, id: u64, st: &EntityState| {
-            if st.on_ground == 0 && st.vel[1] < 0.0 {
-                let mut now = *st;
-                now.vel[1] *= 0.6;
-                w.set_entity(id, &now);
-            }
-            if let Some(next) = w.component_mut(id, &FUSE) {
+    let goals = ai::Goals::new().then(|w: &World, id: u64, st: &EntityState| {
+        if st.on_ground == 0 && st.vel[1] < 0.0 {
+            let mut now = *st;
+            now.vel[1] *= 0.6;
+            w.set_entity(id, &now);
+        }
+        if let Some(next) = w.component_mut(id, &FUSE) {
+            if *next == 0 {
+                *next = 6000 + w.random_below(6000) as u32;
+            } else {
+                *next -= 1;
                 if *next == 0 {
-                    *next = 6000 + w.random_below(6000) as u32;
-                } else {
-                    *next -= 1;
-                    if *next == 0 {
-                        w.spawn_item(st.pos, ItemStack::new(EGG.id(), 1));
-                    }
+                    w.spawn_item(st.pos, ItemStack::new(EGG.id(), 1));
                 }
             }
-            false
-        });
+        }
+        false
+    });
     with_passive(goals)
 }
 

@@ -122,7 +122,15 @@ pub fn build(c: &Content, n: &Neighborhood, ctm: &super::ctm::Ctm) -> Mesh {
                                 let light = std::array::from_fn(|k| darker_by_ao(light[k], (ao >> (k * 2)) & 3));
                                 mesh.quads[Layer::Translucent as usize].push(quad(corners, WHOLE, tex, biome, tint, light));
                             } else {
-                                mesh.faces[info.layer as usize].push(crate::gpu_layout::face_record([x, y, z], dir as u32, ao, tint as u32, tex, biome, light));
+                                mesh.faces[info.layer as usize].push(crate::gpu_layout::face_record(
+                                    [x, y, z],
+                                    dir as u32,
+                                    ao,
+                                    tint as u32,
+                                    tex,
+                                    biome,
+                                    light,
+                                ));
                             }
                         }
                     }
@@ -134,12 +142,7 @@ pub fn build(c: &Content, n: &Neighborhood, ctm: &super::ctm::Ctm) -> Mesh {
                         let (a0, a1) = ([b[0] + e, b[1], b[2] + e], [b[0] + 1.0 - e, b[1] + 1.0, b[2] + 1.0 - e]);
                         let (c0, c1) = ([b[0] + e, b[1], b[2] + 1.0 - e], [b[0] + 1.0 - e, b[1] + 1.0, b[2] + e]);
                         for (p0, p1) in [(a0, a1), (c0, c1)] {
-                            let corners = [
-                                [p0[0], p0[1], p0[2]],
-                                [p1[0], p0[1], p1[2]],
-                                [p1[0], p1[1], p1[2]],
-                                [p0[0], p1[1], p0[2]],
-                            ];
+                            let corners = [[p0[0], p0[1], p0[2]], [p1[0], p0[1], p1[2]], [p1[0], p1[1], p1[2]], [p0[0], p1[1], p0[2]]];
                             let back = [corners[1], corners[0], corners[3], corners[2]];
                             for q in [corners, back] {
                                 mesh.quads[Layer::Cutout as usize].push(quad(q, WHOLE, t, biome, info.tint | FLAT, [l; 4]));
@@ -159,7 +162,8 @@ pub fn build(c: &Content, n: &Neighborhood, ctm: &super::ctm::Ctm) -> Mesh {
                             for dir in 0..6 {
                                 let [dx, dy, dz] = NORMALS[dir];
                                 let axis = dir / 2;
-                                let at_edge = bx.tilt.degrees == 0.0 && if dir % 2 == 0 { bx.min[axis] <= 0.0 } else { bx.max[axis] >= 1.0 };
+                                let at_edge =
+                                    bx.tilt.degrees == 0.0 && if dir % 2 == 0 { bx.min[axis] <= 0.0 } else { bx.max[axis] >= 1.0 };
                                 let (ns, nl) = (states[pidx(x + dx, y + dy, z + dz)], n.light[pidx(x + dx, y + dy, z + dz)]);
                                 if at_edge && ctm.hides(c.states[ns as usize].flags, ns) {
                                     continue;
@@ -230,7 +234,15 @@ fn box_uv(dir: usize, min: [f32; 3], max: [f32; 3]) -> [f32; 4] {
     }
 }
 
-fn corner_data(n: &Neighborhood, ctm: &super::ctm::Ctm, opaque: &impl Fn(usize) -> bool, x: i32, y: i32, z: i32, dir: usize) -> (u32, [u32; 4]) {
+fn corner_data(
+    n: &Neighborhood,
+    ctm: &super::ctm::Ctm,
+    opaque: &impl Fn(usize) -> bool,
+    x: i32,
+    y: i32,
+    z: i32,
+    dir: usize,
+) -> (u32, [u32; 4]) {
     let nrm = NORMALS[dir];
     let axis = dir / 2;
     let (ta, tb) = match axis {

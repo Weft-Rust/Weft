@@ -64,21 +64,46 @@ pub fn register(r: &mut Registry) {
         obelisk = obelisk.layer(&["   ", " g ", "   "]);
     }
     drop(obelisk.key('s', "base:sandstone").key('g', "glow_crystal"));
-    r.structure(&crate::OVERWORLD, &OBELISK).spacing(128).chance(0.5).biome("#dry").buried(1);
+    r.structure(&crate::OVERWORLD, &OBELISK)
+        .spacing(128)
+        .chance(0.5)
+        .biome("#dry")
+        .buried(1);
     // Glow crystals grow only in the overworld's deep caves (an underground biome).
-    r.ore(&GLOW_CRYSTAL).veins(3).size(6).replace("#stone_ore_replaceables").biome("#cave");
+    r.ore(&GLOW_CRYSTAL)
+        .veins(3)
+        .size(6)
+        .replace("#stone_ore_replaceables")
+        .biome("#cave");
     // A 64x64 texture among 16x16 ones: every texture keeps its own size.
     r.block(&MOSAIC).hardness(1.5).mineable("pickaxe");
     // A tint kind of the mod's own: violet by default (and on the item), teal in plains.
     r.tint_kind(&GLOW, 0xc080ff);
     r.biome_tint(&Biome::named("base:plains"), &GLOW, 0x40e0c0);
-    r.block(&GLOW_MOSS).tint(&GLOW).hardness(0.6).mineable("shovel");
+    r.block(&GLOW_MOSS)
+        .tint(&GLOW)
+        .hardness(0.6)
+        .mineable("shovel");
     // A glowing birch (a log's `tree` component grows it from a sapling or worldgen) and
     // flower; not generated in the world, only from the creative tabs.
     static TREE_LEAVES: Component<BlockRef> = Component::named("tree_leaves");
-    r.block(&GLOW_LOG).textures("glow_log_top", "glow_log", "glow_log_top").hardness(2.0).mineable("axe").tag("logs").set_text(&TREE_LEAVES, "glow_leaves");
-    r.block(&GLOW_LEAVES).cutout().opacity(1).tint(&GLOW).hardness(0.2).tag("leaves").mineable("shears");
-    r.block(&GLOW_FLOWER).plant().needs_below("#plant_soil").tint(&GLOW);
+    r.block(&GLOW_LOG)
+        .textures("glow_log_top", "glow_log", "glow_log_top")
+        .hardness(2.0)
+        .mineable("axe")
+        .tag("logs")
+        .set_text(&TREE_LEAVES, "glow_leaves");
+    r.block(&GLOW_LEAVES)
+        .cutout()
+        .opacity(1)
+        .tint(&GLOW)
+        .hardness(0.2)
+        .tag("leaves")
+        .mineable("shears");
+    r.block(&GLOW_FLOWER)
+        .plant()
+        .needs_below("#plant_soil")
+        .tint(&GLOW);
     r.block(&GLOW_CRYSTAL)
         .hardness(1.5)
         .mineable("pickaxe")
@@ -95,36 +120,44 @@ pub fn register(r: &mut Registry) {
         .speed(1.5)
         .flags(entity_flags::NO_GRAVITY)
         .unpushable()
-        
         .model(Model::from(vec![Part::new("wisp", [0.0, 3.0, 0.0]).cube([-3.0, -3.0, -3.0], [6.0, 6.0, 6.0], [0.0, 0.0])]).uv(32, 16))
         .shader("ghost")
         .on_tick(wisps);
 
-    r.entity(&IDOL).size(0.6, 1.1).health(20.0).model_file("idol").animations("idol").on_interact(|e| {
-        let mut bowed = BOWED.lock().unwrap();
-        let id = e.entity();
-        if let Some(i) = bowed.iter().position(|&b| b == id) {
-            bowed.swap_remove(i);
-            e.world().play_animation(id, "", false);
-        } else {
-            // Bows to whoever used it.
-            let w = e.world();
-            if let (Some(mut me), Some(them)) = (w.entity(id), w.entity(e.other())) {
-                me.yaw = (-(them.pos[0] - me.pos[0]) as f32).atan2(-(them.pos[2] - me.pos[2]) as f32);
-                w.set_entity(id, &me);
+    r.entity(&IDOL)
+        .size(0.6, 1.1)
+        .health(20.0)
+        .model_file("idol")
+        .animations("idol")
+        .on_interact(|e| {
+            let mut bowed = BOWED.lock().unwrap();
+            let id = e.entity();
+            if let Some(i) = bowed.iter().position(|&b| b == id) {
+                bowed.swap_remove(i);
+                e.world().play_animation(id, "", false);
+            } else {
+                // Bows to whoever used it.
+                let w = e.world();
+                if let (Some(mut me), Some(them)) = (w.entity(id), w.entity(e.other())) {
+                    me.yaw = (-(them.pos[0] - me.pos[0]) as f32).atan2(-(them.pos[2] - me.pos[2]) as f32);
+                    w.set_entity(id, &me);
+                }
+                bowed.push(id);
+                w.play_animation(id, "bow", false);
             }
-            bowed.push(id);
-            w.play_animation(id, "bow", false);
-        }
-    });
+        });
     let ring = Part::new("ring", [0.0, 8.0, 0.0]).child_of(0);
-    let ring = [[6.0, -1.0, -1.0], [-8.0, -1.0, -1.0], [-1.0, -1.0, 6.0], [-1.0, -1.0, -8.0]].into_iter().fold(ring, |p, at| p.cube(at, [2.0, 2.0, 2.0], [16.0, 0.0]));
+    let ring = [[6.0, -1.0, -1.0], [-8.0, -1.0, -1.0], [-1.0, -1.0, 6.0], [-1.0, -1.0, -8.0]]
+        .into_iter()
+        .fold(ring, |p, at| p.cube(at, [2.0, 2.0, 2.0], [16.0, 0.0]));
     r.entity(&ORB)
         .size(0.6, 0.9)
         .health(4.0)
         .flags(entity_flags::NO_GRAVITY)
-        
-        .model(Model::from(vec![Part::new("core", [0.0, 8.0, 0.0]).mesh(sphere([0.0, 8.0, 0.0], 4.0, 8, 12, [0.0, 0.0, 16.0, 16.0])), ring]).uv(32, 16));
+        .model(
+            Model::from(vec![Part::new("core", [0.0, 8.0, 0.0]).mesh(sphere([0.0, 8.0, 0.0], 4.0, 8, 12, [0.0, 0.0, 16.0, 16.0])), ring])
+                .uv(32, 16),
+        );
 
     r.set_text_on(Target::Entity("core:player"), &ANIMATIONS, "testmod:player");
     r.item(&TOTEM).max_stack(1);
@@ -132,7 +165,10 @@ pub fn register(r: &mut Registry) {
         let w = u.world();
         w.play_animation(u.player(), "wave", false);
         if let Some(st) = w.entity(u.player()) {
-            w.spawn_particles(&SPARK, [st.pos[0], st.pos[1] + 1.2, st.pos[2]]).count(40).spread(0.2).speed(4.0);
+            w.spawn_particles(&SPARK, [st.pos[0], st.pos[1] + 1.2, st.pos[2]])
+                .count(40)
+                .spread(0.2)
+                .speed(4.0);
         }
         true
     });
@@ -174,7 +210,10 @@ fn wisps(t: &EntityTick) {
         w.set_entity(id, &st);
         w.walk(id, [-st.yaw.sin(), -st.yaw.cos()], 1.0, false);
         if (time + phase) % 20 == 0 {
-            w.spawn_particles(&SPARK, [st.pos[0], st.pos[1] + 0.2, st.pos[2]]).count(WISP_SPARKS.get().max(0) as u32).spread(0.15).speed(0.3);
+            w.spawn_particles(&SPARK, [st.pos[0], st.pos[1] + 0.2, st.pos[2]])
+                .count(WISP_SPARKS.get().max(0) as u32)
+                .spread(0.15)
+                .speed(0.3);
         }
     }
 }

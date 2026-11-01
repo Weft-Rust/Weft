@@ -50,7 +50,10 @@ impl Dir {
             let o = d.offset();
             o[0] as f32 * v[0] + o[1] as f32 * v[1] + o[2] as f32 * v[2]
         };
-        allowed.dirs().max_by(|a, b| score(*a).total_cmp(&score(*b))).unwrap_or(Dir::Up)
+        allowed
+            .dirs()
+            .max_by(|a, b| score(*a).total_cmp(&score(*b)))
+            .unwrap_or(Dir::Up)
     }
 }
 

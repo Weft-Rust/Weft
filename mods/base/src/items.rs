@@ -30,16 +30,40 @@ const MATERIALS: [Material; 5] = [
 ];
 
 pub fn register(r: &mut Registry) {
-    r.item(&STICK).tag("stick").handheld().set(&FUEL, 100).tab(&crate::tabs::INGREDIENTS);
-    r.item(&COAL).tag("gems/coal").set(&FUEL, 1600).tab(&crate::tabs::INGREDIENTS);
-    r.item(&IRON_INGOT).tag("ingots/iron").tag("materials/iron").tab(&crate::tabs::INGREDIENTS);
-    r.item(&GOLD_INGOT).tag("ingots/gold").tag("materials/gold").tab(&crate::tabs::INGREDIENTS);
+    r.item(&STICK)
+        .tag("stick")
+        .handheld()
+        .set(&FUEL, 100)
+        .tab(&crate::tabs::INGREDIENTS);
+    r.item(&COAL)
+        .tag("gems/coal")
+        .set(&FUEL, 1600)
+        .tab(&crate::tabs::INGREDIENTS);
+    r.item(&IRON_INGOT)
+        .tag("ingots/iron")
+        .tag("materials/iron")
+        .tab(&crate::tabs::INGREDIENTS);
+    r.item(&GOLD_INGOT)
+        .tag("ingots/gold")
+        .tag("materials/gold")
+        .tab(&crate::tabs::INGREDIENTS);
     // Metal ores drop raw pieces (like modern versions) that smelt into ingots.
-    r.item(Item::generated("raw_iron".into())).tag("raw_ores/iron").tab(&crate::tabs::INGREDIENTS);
-    r.item(Item::generated("raw_gold".into())).tag("raw_ores/gold").tab(&crate::tabs::INGREDIENTS);
-    r.item(&DIAMOND).tag("gems/diamond").tag("materials/diamond").tab(&crate::tabs::INGREDIENTS);
-    r.item(&WHEAT_SEEDS).placed_block(&crate::blocks::WHEAT).tab(&crate::tabs::NATURAL);
-    r.item(&WHEAT).tag("crops/wheat").tab(&crate::tabs::INGREDIENTS);
+    r.item(Item::generated("raw_iron".into()))
+        .tag("raw_ores/iron")
+        .tab(&crate::tabs::INGREDIENTS);
+    r.item(Item::generated("raw_gold".into()))
+        .tag("raw_ores/gold")
+        .tab(&crate::tabs::INGREDIENTS);
+    r.item(&DIAMOND)
+        .tag("gems/diamond")
+        .tag("materials/diamond")
+        .tab(&crate::tabs::INGREDIENTS);
+    r.item(&WHEAT_SEEDS)
+        .placed_block(&crate::blocks::WHEAT)
+        .tab(&crate::tabs::NATURAL);
+    r.item(&WHEAT)
+        .tag("crops/wheat")
+        .tab(&crate::tabs::INGREDIENTS);
     // Filled buckets come with their liquids (blocks.rs); the engine fills and pours them.
     r.item(&BUCKET).max_stack(16).tab(&crate::tabs::TOOLS);
     r.set("lava_bucket", &FUEL, 20000);
@@ -60,22 +84,34 @@ pub fn register(r: &mut Registry) {
         ("cooked_mutton", 6, 9.6, "cooked_meat/mutton"),
         ("spider_eye", 2, 3.2, ""),
     ] {
-        let i = r.item(Item::generated(name.into())).set(&FOOD, Food { hunger, saturation }).use_ticks(32).on_use(base_api::eat).tab(&crate::tabs::FOOD);
+        let i = r
+            .item(Item::generated(name.into()))
+            .set(&FOOD, Food { hunger, saturation })
+            .use_ticks(32)
+            .on_use(base_api::eat)
+            .tab(&crate::tabs::FOOD);
         let i = if tag.starts_with("cooked_meat/") { i.tag("cooked_meat") } else { i };
         if !tag.is_empty() {
             i.tag(tag);
         }
     }
-    r.item(Item::generated("leather".into())).tag("materials/leather").tab(&crate::tabs::INGREDIENTS);
+    r.item(Item::generated("leather".into()))
+        .tag("materials/leather")
+        .tab(&crate::tabs::INGREDIENTS);
     for name in ["bone", "string", "sugar", "gunpowder", "feather", "arrow", "egg"] {
-        r.item(Item::generated(name.into())).tag(name).tab(&crate::tabs::INGREDIENTS);
+        r.item(Item::generated(name.into()))
+            .tag(name)
+            .tab(&crate::tabs::INGREDIENTS);
     }
 
     for m in &MATERIALS {
         // `.tool(kind)` tags it `tools/<kind>`; `<kind>s/<material>` picks its recipe.
         let tool = |r: &mut Registry, kind: &str, damage: f32, speed: f32| {
-            let b = r.item(Item::generated(format!("{}_{kind}", m.name)))
-                .tool(kind).tool_level(m.level).mining_speed(m.speed)
+            let b = r
+                .item(Item::generated(format!("{}_{kind}", m.name)))
+                .tool(kind)
+                .tool_level(m.level)
+                .mining_speed(m.speed)
                 .durability(m.durability)
                 .attack_damage(damage)
                 .attack_speed(speed)
@@ -103,7 +139,12 @@ pub fn register(r: &mut Registry) {
     }
 
     // Points per piece, head to feet, as in modern.
-    for (mat, points, toughness, durability) in [("leather", [1u32, 3, 2, 1], 0.0f32, 5u32), ("iron", [2, 6, 5, 2], 0.0, 15), ("gold", [2, 5, 3, 1], 0.0, 7), ("diamond", [3, 8, 6, 3], 2.0, 33)] {
+    for (mat, points, toughness, durability) in [
+        ("leather", [1u32, 3, 2, 1], 0.0f32, 5u32),
+        ("iron", [2, 6, 5, 2], 0.0, 15),
+        ("gold", [2, 5, 3, 1], 0.0, 7),
+        ("diamond", [3, 8, 6, 3], 2.0, 33),
+    ] {
         for (slot, piece, dur) in [(0, "helmet", 11), (1, "chestplate", 16), (2, "leggings", 15), (3, "boots", 13)] {
             let points = points[slot];
             let tag = ARMOR_SLOTS[slot];

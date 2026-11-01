@@ -52,7 +52,11 @@ impl Client {
             }
             ToClient::Blocks { dim, frame: 0, changes } if dim == self.world.dim => fwd.push(terrain::In::Blocks(changes)),
             ToClient::Blocks { dim, frame, changes } if dim == self.world.dim => {
-                if let Some(s) = self.entities.get_mut(&frame).and_then(|e| e.structure.as_mut()) {
+                if let Some(s) = self
+                    .entities
+                    .get_mut(&frame)
+                    .and_then(|e| e.structure.as_mut())
+                {
                     for (p, state) in changes {
                         s.set_block(p, state);
                     }
@@ -88,7 +92,8 @@ impl Client {
                 }
             }
             ToClient::Despawn(ids) => {
-                self.entity_components.retain(|(e, _), _| !ids.iter().any(|g| g.0 == *e));
+                self.entity_components
+                    .retain(|(e, _), _| !ids.iter().any(|g| g.0 == *e));
                 for (id, killed) in ids {
                     // Killed mobs stay a moment for the death animation, taken items until
                     // they reach the taker.
@@ -122,7 +127,15 @@ impl Client {
                 }
             }
             ToClient::OpenMenu { kind, window, slots, owner, block, name } => {
-                self.menu = Some(ClientMenu { kind, window, owner, block, name, slots: vec![ItemStack::EMPTY; slots as usize], cursor: ItemStack::EMPTY });
+                self.menu = Some(ClientMenu {
+                    kind,
+                    window,
+                    owner,
+                    block,
+                    name,
+                    slots: vec![ItemStack::EMPTY; slots as usize],
+                    cursor: ItemStack::EMPTY,
+                });
                 self.events.push(ClientEvent::OpenMenu);
             }
             ToClient::MenuSlots(list) => {
@@ -222,7 +235,10 @@ impl Client {
                 }
             }
             ToClient::Sounds(list) => {
-                self.sounds.extend(list.into_iter().map(|(sound, pos, volume, pitch)| crate::audio::Play { sound, pos: Some(pos), volume, pitch }));
+                self.sounds.extend(
+                    list.into_iter()
+                        .map(|(sound, pos, volume, pitch)| crate::audio::Play { sound, pos: Some(pos), volume, pitch }),
+                );
             }
             ToClient::Particles(list) => {
                 for b in &list {
@@ -334,7 +350,11 @@ impl Client {
         }
         // Riders relative to their body, both where the server had them this tick.
         for &(id, pos, .., frame) in &list {
-            let body = self.entities.get(&frame).filter(|_| frame != 0).map(|b| (b.target, b.pos));
+            let body = self
+                .entities
+                .get(&frame)
+                .filter(|_| frame != 0)
+                .map(|b| (b.target, b.pos));
             let Some(e) = self.entities.get_mut(&id) else { continue };
             match body {
                 Some((target, shown)) => {

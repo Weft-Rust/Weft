@@ -111,10 +111,7 @@ pub fn ensure_pack(run_dir: &Path, mods: &[(String, PathBuf)]) -> bool {
         }
         match build(&jar, &version, &maps, &out, &key) {
             Ok(n) => {
-                log::info!(
-                    "made the {PACK} resource pack from {} ({n} files)",
-                    jar.display()
-                );
+                log::info!("made the {PACK} resource pack from {} ({n} files)", jar.display());
                 return fresh;
             }
             Err(e) => log::warn!("{}: {e}", jar.display()),
@@ -125,7 +122,12 @@ pub fn ensure_pack(run_dir: &Path, mods: &[(String, PathBuf)]) -> bool {
 
 /// A mod's own files for the pack, for the pack to be made again when they change.
 fn own_files(dir: &Path, key: &mut String) {
-    let mut entries: Vec<PathBuf> = std::fs::read_dir(dir).into_iter().flatten().flatten().map(|e| e.path()).collect();
+    let mut entries: Vec<PathBuf> = std::fs::read_dir(dir)
+        .into_iter()
+        .flatten()
+        .flatten()
+        .map(|e| e.path())
+        .collect();
     entries.sort();
     for path in entries {
         key.push_str(&path.file_name().unwrap_or_default().to_string_lossy());
@@ -137,15 +139,8 @@ fn own_files(dir: &Path, key: &mut String) {
     }
 }
 
-fn build(
-    jar: &Path,
-    version: &str,
-    maps: &[(String, PathBuf, String)],
-    out: &Path,
-    key: &str,
-) -> Result<usize, String> {
-    let mut zip = zip::ZipArchive::new(std::fs::File::open(jar).map_err(|e| e.to_string())?)
-        .map_err(|e| e.to_string())?;
+fn build(jar: &Path, version: &str, maps: &[(String, PathBuf, String)], out: &Path, key: &str) -> Result<usize, String> {
+    let mut zip = zip::ZipArchive::new(std::fs::File::open(jar).map_err(|e| e.to_string())?).map_err(|e| e.to_string())?;
     const T: &str = "assets/minecraft/textures/";
     if zip.by_name(&format!("{T}block/dirt.png")).is_err() {
         return Err("no textures in it".into());
@@ -186,9 +181,23 @@ fn build(
             let next = words.next();
             let lower = (mode == "stack").then_some(next).flatten();
             let overlay = (mode == "dyed").then_some(next).flatten();
-            let color = words.clone().next().and_then(|w| u32::from_str_radix(w, 16).ok()).filter(|_| mode == "dyed");
-            let turned = (mode == "turned").then_some(next).flatten().and_then(|w| w.parse::<u32>().ok());
-            let numbers: Vec<u32> = if mode == "pieces" { next.into_iter().chain(words.clone()).filter_map(|w| w.parse().ok()).collect() } else { Vec::new() };
+            let color = words
+                .clone()
+                .next()
+                .and_then(|w| u32::from_str_radix(w, 16).ok())
+                .filter(|_| mode == "dyed");
+            let turned = (mode == "turned")
+                .then_some(next)
+                .flatten()
+                .and_then(|w| w.parse::<u32>().ok());
+            let numbers: Vec<u32> = if mode == "pieces" {
+                next.into_iter()
+                    .chain(words.clone())
+                    .filter_map(|w| w.parse().ok())
+                    .collect()
+            } else {
+                Vec::new()
+            };
             let crop: Vec<u32> = match next {
                 Some("crop") => words.filter_map(|w| w.parse().ok()).collect(),
                 _ if turned.is_some() && words.clone().next() == Some("crop") => words.skip(1).filter_map(|w| w.parse().ok()).collect(),
@@ -243,9 +252,7 @@ fn build(
                 std::fs::write(&dst, &png).map_err(|e| e.to_string())?;
             }
             files += 1;
-            if let Some(meta) =
-                read(&format!("{T}{src}.png.mcmeta")).and_then(|m| String::from_utf8(m).ok())
-            {
+            if let Some(meta) = read(&format!("{T}{src}.png.mcmeta")).and_then(|m| String::from_utf8(m).ok()) {
                 if meta.contains("\"gui\"") {
                     let _ = std::fs::write(dst.with_extension("png.mcmeta"), &meta);
                 }
@@ -253,10 +260,7 @@ fn build(
                     .ok()
                     .and_then(|v| v.get("animation").cloned())
                 {
-                    let mut s = format!(
-                        "frametime = {}\n",
-                        a.get("frametime").and_then(|f| f.as_u64()).unwrap_or(1)
-                    );
+                    let mut s = format!("frametime = {}\n", a.get("frametime").and_then(|f| f.as_u64()).unwrap_or(1));
                     if a.get("interpolate").and_then(|i| i.as_bool()) == Some(true) {
                         s.push_str("interpolate = true\n");
                     }
@@ -309,11 +313,7 @@ fn dye(px: &mut [u8], overlay: &[u8], color: u32) {
 
 /// The part `crop` (x, y, w, h) of a picture, or all of it: its width, height and pixels.
 fn cropped(img: &crate::assets::Image, crop: &[u32]) -> (u32, u32, Vec<u8>) {
-    let (x0, y0, w, h) = if crop.len() == 4 {
-        (crop[0], crop[1], crop[2], crop[3])
-    } else {
-        (0, 0, img.width, img.height)
-    };
+    let (x0, y0, w, h) = if crop.len() == 4 { (crop[0], crop[1], crop[2], crop[3]) } else { (0, 0, img.width, img.height) };
     let mut px = Vec::with_capacity((w * h * 4) as usize);
     for y in y0..(y0 + h).min(img.height) {
         let row = ((y * img.width + x0) * 4) as usize;
@@ -379,9 +379,8 @@ fn copy_tree(from: &Path, to: &Path) -> std::io::Result<()> {
 }
 
 fn fnv(s: &str) -> u64 {
-    s.bytes().fold(0xcbf29ce484222325, |h, b| {
-        (h ^ b as u64).wrapping_mul(0x100000001b3)
-    })
+    s.bytes()
+        .fold(0xcbf29ce484222325, |h, b| (h ^ b as u64).wrapping_mul(0x100000001b3))
 }
 
 #[cfg(test)]
@@ -396,7 +395,10 @@ mod tests {
         let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
         let roots = [("core".to_string(), root.join("crates/engine/assets")), ("base".to_string(), root.join("mods/base/assets"))];
         super::ensure_pack(&root.join("run"), &roots);
-        let sky = root.join("run/resourcepacks").join(super::PACK).join("base/textures");
+        let sky = root
+            .join("run/resourcepacks")
+            .join(super::PACK)
+            .join("base/textures");
         let sun = crate::assets::decode_png(&std::fs::read(sky.join("sky/sun.png")).unwrap()).unwrap();
         assert_eq!(sun.rgba[3], 0, "the corner of the sun is transparent");
         assert!(sky.join("gui/attack_bar_fill.png").is_file());

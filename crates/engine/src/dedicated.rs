@@ -26,7 +26,10 @@ pub fn run(opts: Options) -> Result<(), String> {
 
     let name = opts.world.as_deref().unwrap_or("world");
     let saves_dir = settings.saves_dir();
-    let meta = saves::list(&saves_dir).into_iter().find(|m| m.name == name).unwrap_or_else(|| saves::create(&saves_dir, name, opts.seed.unwrap_or_else(saves::now_secs)));
+    let meta = saves::list(&saves_dir)
+        .into_iter()
+        .find(|m| m.name == name)
+        .unwrap_or_else(|| saves::create(&saves_dir, name, opts.seed.unwrap_or_else(saves::now_secs)));
     if meta.format > saves::SAVE_FORMAT {
         return Err(format!("world '{name}' was saved in format {}, this build reads {}", meta.format, saves::SAVE_FORMAT));
     }
@@ -35,7 +38,10 @@ pub fn run(opts: Options) -> Result<(), String> {
     }
     let storage = saves::Storage::open(meta.clone(), content());
     let whitelist = crate::paths::config(&opts.run_dir).join("whitelist.txt");
-    let mut server = server::spawn(ServerConfig { seed: meta.seed, view_radius: settings.view_distance(), dedicated: true, whitelist: Some(whitelist) }, Some(storage));
+    let mut server = server::spawn(
+        ServerConfig { seed: meta.seed, view_radius: settings.view_distance(), dedicated: true, whitelist: Some(whitelist) },
+        Some(storage),
+    );
     net::host(&server, &settings);
     log::info!("server running world '{name}'; type stop to save and leave, anything else for help");
 

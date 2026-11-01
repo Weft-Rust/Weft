@@ -128,7 +128,10 @@ impl Body<'_> {
 
     /// Its solid boxes something with feet at `pos` could stand on, at most `reach` below the feet.
     fn under(&self, c: &Content, pos: DVec3, half_width: f64, reach: f64, mut f: impl FnMut(Aabb)) {
-        let area = Aabb { min: DVec3::new(pos.x - half_width, pos.y - reach - 1e-3, pos.z - half_width), max: DVec3::new(pos.x + half_width, pos.y + 1e-3, pos.z + half_width) };
+        let area = Aabb {
+            min: DVec3::new(pos.x - half_width, pos.y - reach - 1e-3, pos.z - half_width),
+            max: DVec3::new(pos.x + half_width, pos.y + 1e-3, pos.z + half_width),
+        };
         let mut look = |b: Aabb| {
             let inside = b.min.x < area.max.x && b.max.x > area.min.x && b.min.z < area.max.z && b.max.z > area.min.z;
             if inside && b.max.y <= pos.y + 1e-3 && b.max.y >= pos.y - reach - 1e-3 {
@@ -139,7 +142,11 @@ impl Body<'_> {
         match self.blocks {
             // Some only shove, and aren't to stand on and be taken away by.
             Some((blocks, place)) if self.aabb.intersects(&area) => {
-                let solid = |p: IVec3| Some(blocks.block(p)).filter(|s| c.states[*s as usize].flags & bf::NOT_STOOD_ON == 0).or(Some(crate::content::AIR));
+                let solid = |p: IVec3| {
+                    Some(blocks.block(p))
+                        .filter(|s| c.states[*s as usize].flags & bf::NOT_STOOD_ON == 0)
+                        .or(Some(crate::content::AIR))
+                };
                 each_solid(c, &solid, place.box_to_local(area), |b| look(place.box_to_world(b)));
             }
             _ => {
@@ -161,7 +168,14 @@ impl Body<'_> {
 
 /// What a box stands on, given where its feet are against each body: the one it has most under it.
 /// Two moving differently with as much under it carry it nowhere, for no list order to decide.
-fn most_under<'a>(c: &Content, bodies: &'a [Body<'a>], skip: u64, half_width: f64, reach: f64, feet: impl Fn(&Body) -> DVec3) -> Option<&'a Body<'a>> {
+fn most_under<'a>(
+    c: &Content,
+    bodies: &'a [Body<'a>],
+    skip: u64,
+    half_width: f64,
+    reach: f64,
+    feet: impl Fn(&Body) -> DVec3,
+) -> Option<&'a Body<'a>> {
     let mut best: Option<(&Body, f64)> = None;
     let mut tied = false;
     for b in bodies.iter().filter(|b| b.id != skip) {
@@ -192,7 +206,9 @@ pub struct Ride {
 /// ship); further away it lets go. What stood on a body before its move rides from that move.
 pub fn ride(c: &Content, pos: DVec3, half_width: f64, on_ground: bool, support: &mut Option<u64>, bodies: &[Body<'_>], skip: u64) -> Ride {
     if support.is_none() && on_ground {
-        *support = most_under(c, bodies, skip, half_width, 0.0, |b| pos + b.delta).filter(|b| b.delta != DVec3::ZERO).map(|b| b.id);
+        *support = most_under(c, bodies, skip, half_width, 0.0, |b| pos + b.delta)
+            .filter(|b| b.delta != DVec3::ZERO)
+            .map(|b| b.id);
     }
     let Some(id) = *support else { return Ride::default() };
     let Some(b) = bodies.iter().find(|b| b.id == id) else {
@@ -232,9 +248,18 @@ pub fn standing_on(c: &Content, pos: DVec3, half_width: f64, bodies: &[Body<'_>]
 pub fn push(c: &Content, pos: DVec3, half_width: f64, height: f64, bodies: &[Body<'_>], skip: u64, support: Option<u64>) -> (DVec3, bool) {
     let me = Aabb::around(pos, half_width, height);
     let (mut shift, mut crushes) = (DVec3::ZERO, false);
-    for b in bodies.iter().filter(|b| b.id != skip && Some(b.id) != support && b.delta != DVec3::ZERO) {
+    for b in bodies
+        .iter()
+        .filter(|b| b.id != skip && Some(b.id) != support && b.delta != DVec3::ZERO)
+    {
         let d = b.delta.abs();
-        let axis = if d.y >= d.x && d.y >= d.z { 1 } else if d.x >= d.z { 0 } else { 2 };
+        let axis = if d.y >= d.x && d.y >= d.z {
+            1
+        } else if d.x >= d.z {
+            0
+        } else {
+            2
+        };
         let up = b.delta[axis] > 0.0;
         b.solids(c, me, |s| {
             if s.intersects(&me) {
@@ -368,7 +393,9 @@ pub fn move_box_with(
                 continue;
             }
             for s in &solids {
-                let overlap = (0..3).filter(|&a| a != axis).all(|a| b.min[a] < s.max[a] - 1e-7 && b.max[a] > s.min[a] + 1e-7);
+                let overlap = (0..3)
+                    .filter(|&a| a != axis)
+                    .all(|a| b.min[a] < s.max[a] - 1e-7 && b.max[a] > s.min[a] + 1e-7);
                 if !overlap {
                     continue;
                 }
@@ -424,7 +451,15 @@ pub struct Hit {
 /// the world's blocks and of moving structures (`(entity, where its blocks are, its blocks)`), by
 /// where the ray enters it. The client's crosshair, the server's and mods'
 /// `look_at` all ask this.
-pub fn pick(c: &Content, world: &impl Fn(IVec3) -> Option<u32>, structures: &[(u64, Transform, &dyn Blocks)], eye: DVec3, dir: DVec3, reach: f64, liquids: bool) -> Option<Hit> {
+pub fn pick(
+    c: &Content,
+    world: &impl Fn(IVec3) -> Option<u32>,
+    structures: &[(u64, Transform, &dyn Blocks)],
+    eye: DVec3,
+    dir: DVec3,
+    reach: f64,
+    liquids: bool,
+) -> Option<Hit> {
     let mut best = raycast(c, world, eye, dir, reach, liquids);
     for &(id, place, blocks) in structures {
         let block = |p: IVec3| Some(blocks.block(p));
@@ -476,7 +511,11 @@ pub fn raycast(c: &Content, block: &impl Fn(IVec3) -> Option<u32>, origin: DVec3
             let s = &c.states[state as usize];
             if s.flags & bf::NOT_TARGETABLE == 0 || (liquids && s.liquid.is_some()) {
                 let local = origin - p.as_dvec3();
-                let best = s.selection.iter().filter_map(|b| ray_box(local, dir, b, max)).min_by(|a, b| a.0.total_cmp(&b.0));
+                let best = s
+                    .selection
+                    .iter()
+                    .filter_map(|b| ray_box(local, dir, b, max))
+                    .min_by(|a, b| a.0.total_cmp(&b.0));
                 if let Some((dist, face)) = best {
                     return Some(Hit { frame: 0, block: p, face, state, dist });
                 }
@@ -585,12 +624,23 @@ pub struct Walked {
 /// ladders, liquids and steps from the blocks it is in, with vanilla's numbers. `vel` is blocks
 /// per tick; a player differs only in where `ctl` comes from.
 #[allow(clippy::too_many_arguments)]
-pub fn walk(c: &Content, block: &impl Fn(IVec3) -> Option<u32>, bodies: &[Body<'_>], skip: u64, pos: &mut DVec3, vel: &mut DVec3, on_ground: bool, ctl: &Control, f: &Frame) -> Walked {
+pub fn walk(
+    c: &Content,
+    block: &impl Fn(IVec3) -> Option<u32>,
+    bodies: &[Body<'_>],
+    skip: u64,
+    pos: &mut DVec3,
+    vel: &mut DVec3,
+    on_ground: bool,
+    ctl: &Control,
+    f: &Frame,
+) -> Walked {
     let feet = pos.floor().as_ivec3();
     let flags = |q: IVec3| block(q).map_or(0, |s| c.states[s as usize].flags);
     let liquid = in_liquid(c, block, *pos, 0.0) || in_liquid(c, block, *pos, (f.height * 0.5).min(1.0));
     let drag = block(feet).map_or(1.0, |s| c.states[s as usize].drag as f64);
-    let slip_at = |y: f64| block(IVec3::new(feet.x, (y - 0.5).floor() as i32, feet.z)).map_or(0.6, |s| c.states[s as usize].friction as f64);
+    let slip_at =
+        |y: f64| block(IVec3::new(feet.x, (y - 0.5).floor() as i32, feet.z)).map_or(0.6, |s| c.states[s as usize].friction as f64);
     let accelerate = |vel: &mut DVec3, k: f64| {
         let len2 = ctl.wish.length_squared();
         if len2 > 1e-7 {
@@ -633,7 +683,10 @@ pub fn walk(c: &Content, block: &impl Fn(IVec3) -> Option<u32>, bodies: &[Body<'
     if ctl.careful && on_ground {
         let ground = |dx: f64, dz: f64| {
             let area = Aabb::around(*pos + DVec3::new(dx, -0.6, dz), f.half_width, f.height);
-            collides(c, block, area) || bodies.iter().any(|b| b.solids(c, area, |s| s.intersects(&area)))
+            collides(c, block, area)
+                || bodies
+                    .iter()
+                    .any(|b| b.solids(c, area, |s| s.intersects(&area)))
         };
         let shrink = |v: f64| if v.abs() < 0.05 { 0.0 } else { v - 0.05 * v.signum() };
         while vel.x != 0.0 && !ground(vel.x, 0.0) {

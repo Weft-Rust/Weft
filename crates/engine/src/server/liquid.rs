@@ -31,11 +31,7 @@ fn decode(c: &Content, state: u32) -> Option<Fluid> {
 }
 
 fn encode(def: &LiquidDef, amount: u32, falling: bool) -> u32 {
-    if falling {
-        def.first_state + 8
-    } else {
-        def.first_state + 8 - amount.clamp(1, 8)
-    }
+    if falling { def.first_state + 8 } else { def.first_state + 8 - amount.clamp(1, 8) }
 }
 
 impl Dim {
@@ -45,11 +41,13 @@ impl Dim {
 
     /// Room for liquid: neither solid nor a ladder (unloaded counts as solid).
     fn holds_liquid(&self, c: &Content, p: IVec3) -> bool {
-        self.get(p).is_some_and(|s| c.states[s as usize].flags & (bf::SOLID | bf::CLIMBABLE) == 0)
+        self.get(p)
+            .is_some_and(|s| c.states[s as usize].flags & (bf::SOLID | bf::CLIMBABLE) == 0)
     }
 
     fn solid(&self, c: &Content, p: IVec3) -> bool {
-        self.get(p).is_none_or(|s| c.states[s as usize].flags & bf::SOLID != 0)
+        self.get(p)
+            .is_none_or(|s| c.states[s as usize].flags & bf::SOLID != 0)
     }
 
     /// What liquid `l` would make of `p` from its neighbors: a state, or `None` for nothing.
@@ -96,7 +94,10 @@ impl Dim {
     fn falls_into(&self, c: &Content, l: u16, p: IVec3) -> Option<u32> {
         let state = self.get(p)?;
         let mine = c.liquids[l as usize].first_state;
-        c.reactions.iter().find(|r| r.falls_into.is_some() && c.matches(&r.liquid, mine) && c.matches(&r.touching, state)).and_then(|r| r.falls_into)
+        c.reactions
+            .iter()
+            .find(|r| r.falls_into.is_some() && c.matches(&r.liquid, mine) && c.matches(&r.touching, state))
+            .and_then(|r| r.falls_into)
     }
 
     fn spread_to(&mut self, c: &'static Content, p: IVec3, state: u32, falling_in: bool, l: u16) {
@@ -190,9 +191,17 @@ impl Dim {
         }
         let below = p + down;
         if self.can_spread_to(c, below, f.id, true) {
-            let state = self.new_liquid(c, below, f.id, down).unwrap_or(encode(def, 8, true));
+            let state = self
+                .new_liquid(c, below, f.id, down)
+                .unwrap_or(encode(def, 8, true));
             self.spread_to(c, below, state, true, f.id);
-            let sources = HORIZONTAL.iter().filter(|&&d| self.fluid(c, p + d).is_some_and(|n| n.id == f.id && n.source)).count();
+            let sources = HORIZONTAL
+                .iter()
+                .filter(|&&d| {
+                    self.fluid(c, p + d)
+                        .is_some_and(|n| n.id == f.id && n.source)
+                })
+                .count();
             if sources >= 3 {
                 self.spread_sides(c, p, f, down);
             }
@@ -212,7 +221,10 @@ impl Dim {
                 continue;
             }
             let Some(n) = self.get(p + d) else { continue };
-            let hit = c.reactions.iter().find(|r| c.matches(&r.liquid, state) && c.matches(&r.touching, n));
+            let hit = c
+                .reactions
+                .iter()
+                .find(|r| c.matches(&r.liquid, state) && c.matches(&r.touching, n));
             if let Some(b) = hit.and_then(|r| if f.source { r.source } else { r.flowing }) {
                 self.set(c, p, b);
                 return;
@@ -227,10 +239,15 @@ impl Dim {
         if held.is_empty() {
             return None;
         }
-        let creative = self.entities.get(player).is_some_and(|e| e.mode == crate::world::GameMode::Creative);
+        let creative = self
+            .entities
+            .get(player)
+            .is_some_and(|e| e.mode == crate::world::GameMode::Creative);
         if let Some(&(l, empty)) = c.item_liquid.get(&held.item) {
             let reach = self.attribute(c, player, super::extend::BLOCK_REACH, false);
-            let hit = self.look_ray(c, player, reach, false).filter(|h| h.frame == 0)?;
+            let hit = self
+                .look_ray(c, player, reach, false)
+                .filter(|h| h.frame == 0)?;
             let replaceable = |s: u32| c.states[s as usize].flags & bf::REPLACEABLE != 0;
             let target = if replaceable(hit.state) { hit.block } else { hit.block + DIRS[hit.face as usize] };
             let old = self.get(target).filter(|&s| replaceable(s))?;
@@ -239,7 +256,8 @@ impl Dim {
             if old == source {
                 return None;
             }
-            let mut q = weft_abi::Query { entity: player, pos: target.to_array(), state: source, item: held.item, ..weft_abi::Query::DEFAULT };
+            let mut q =
+                weft_abi::Query { entity: player, pos: target.to_array(), state: source, item: held.item, ..weft_abi::Query::DEFAULT };
             if !self.ask(c, weft_abi::question::PLACE_BLOCK, &mut q) {
                 return None;
             }
@@ -251,10 +269,13 @@ impl Dim {
             return Some(if creative || empty == 0 { held } else { ItemStack::new(empty, 1) });
         }
         let reach = self.attribute(c, player, super::extend::BLOCK_REACH, false);
-        let hit = self.look_ray(c, player, reach, true).filter(|h| h.frame == 0)?;
+        let hit = self
+            .look_ray(c, player, reach, true)
+            .filter(|h| h.frame == 0)?;
         let f = decode(c, hit.state).filter(|f| f.source)?;
         let filled = *c.containers.get(&(held.item, f.id))?;
-        let mut q = weft_abi::Query { entity: player, pos: hit.block.to_array(), state: hit.state, item: held.item, ..weft_abi::Query::DEFAULT };
+        let mut q =
+            weft_abi::Query { entity: player, pos: hit.block.to_array(), state: hit.state, item: held.item, ..weft_abi::Query::DEFAULT };
         if !self.ask(c, weft_abi::question::BREAK_BLOCK, &mut q) {
             return None;
         }
@@ -265,7 +286,9 @@ impl Dim {
         if held.count == 1 {
             return Some(ItemStack::new(filled, 1));
         }
-        let rest = self.entities.insert_item(c, player, ItemStack::new(filled, 1));
+        let rest = self
+            .entities
+            .insert_item(c, player, ItemStack::new(filled, 1));
         if !rest.is_empty() {
             let pos = self.entities.get(player).map_or(DVec3::ZERO, |e| e.pos);
             self.spawn_item(c, pos, rest);
@@ -283,7 +306,11 @@ impl Dim {
         let structures: Vec<(u64, crate::physics::Transform, &dyn crate::physics::Blocks)> = self
             .bodies
             .iter()
-            .filter_map(|(&sid, s)| self.entities.get(sid).map(|b| (sid, crate::physics::Transform::of(b.pos), &**s as &dyn crate::physics::Blocks)))
+            .filter_map(|(&sid, s)| {
+                self.entities
+                    .get(sid)
+                    .map(|b| (sid, crate::physics::Transform::of(b.pos), &**s as &dyn crate::physics::Blocks))
+            })
             .collect();
         // Asked from a body's blocks, it looks along those.
         if self.frame != 0 {

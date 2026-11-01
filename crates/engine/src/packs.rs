@@ -54,7 +54,10 @@ pub fn shader_dir(run_dir: &Path) -> PathBuf {
 
 /// Folders of the enabled resource packs that exist, highest priority first.
 pub fn enabled(run_dir: &Path, ids: &[String]) -> Vec<PathBuf> {
-    ids.iter().map(|id| resource_dir(run_dir).join(id)).filter(|p| p.is_dir()).collect()
+    ids.iter()
+        .map(|id| resource_dir(run_dir).join(id))
+        .filter(|p| p.is_dir())
+        .collect()
 }
 
 static SHADER_PACK: RwLock<Option<PathBuf>> = RwLock::new(None);
@@ -70,7 +73,9 @@ pub fn pack_uses(name: &str, what: &str) -> bool {
 
 fn pack_source(name: &str) -> Option<String> {
     let path = SHADER_PACK.read().unwrap().as_ref().map(|d| d.join(name))?;
-    std::fs::read_to_string(path).ok().map(|s| without_bom(&s).to_string())
+    std::fs::read_to_string(path)
+        .ok()
+        .map(|s| without_bom(&s).to_string())
 }
 
 /// Windows editors may save a file with a byte order mark, which WGSL has no place for.
@@ -82,10 +87,13 @@ fn without_bom(src: &str) -> &str {
 /// read the source tree, so edits show after a reload.
 fn engine_source(assets: &Assets, name: &str) -> String {
     let asset = format!("core:{}", name.trim_end_matches(".wgsl"));
-    assets.read(&asset, "shaders", "wgsl").map(|b| without_bom(&String::from_utf8_lossy(&b)).to_string()).unwrap_or_else(|| {
-        log::error!("engine shader {name} is missing from the assets");
-        String::new()
-    })
+    assets
+        .read(&asset, "shaders", "wgsl")
+        .map(|b| without_bom(&String::from_utf8_lossy(&b)).to_string())
+        .unwrap_or_else(|| {
+            log::error!("engine shader {name} is missing from the assets");
+            String::new()
+        })
 }
 
 /// An engine shader no pack replaces, after `prelude`.
@@ -111,7 +119,11 @@ pub fn shader(assets: &Assets, name: &str) -> Result<Shader, ShaderError> {
 }
 
 /// `shader` for engine shaders that take mod snippets (`shaders::compose`).
-pub fn compose(assets: &Assets, name: &str, parts: &[(&crate::shaders::Hook, &[(String, String)])]) -> Result<(Shader, Vec<crate::shaders::Slots>), ShaderError> {
+pub fn compose(
+    assets: &Assets,
+    name: &str,
+    parts: &[(&crate::shaders::Hook, &[(String, String)])],
+) -> Result<(Shader, Vec<crate::shaders::Slots>), ShaderError> {
     if let Some(src) = pack_source(name) {
         match crate::shaders::compose(name, &with_common(assets, name, &src), parts) {
             Ok(made) => return Ok(made),
@@ -183,7 +195,10 @@ impl Screen for ResourcePacks {
 
     fn pointer(&mut self, cursor: glam::Vec2, ui: &mut Ui, ctx: &mut Ctx, _hud: &mut crate::hud::Hud) -> bool {
         let Some(id) = self.dragging.clone() else {
-            let handle = ui.hit(cursor).and_then(|h| ui.nodes[h].id.as_deref()).and_then(|i| i.strip_prefix("pack_handle:"));
+            let handle = ui
+                .hit(cursor)
+                .and_then(|h| ui.nodes[h].id.as_deref())
+                .and_then(|i| i.strip_prefix("pack_handle:"));
             let Some(id) = handle.filter(|_| ctx.input.pressed_button(0)) else { return false };
             self.dragging = Some(id.to_string());
             self.cursor = cursor;
@@ -208,7 +223,11 @@ impl Screen for ResourcePacks {
         let before = ctx.settings.resource_packs();
         let mut packs: Vec<String> = before.iter().filter(|p| **p != id).cloned().collect();
         if cursor.x >= (left.x + left.w + right.x) / 2.0 {
-            let above = packs.iter().filter_map(|p| ui.find(&format!("pack:{p}"))).filter(|&n| ui.nodes[n].rect.y + ui.nodes[n].rect.h / 2.0 < cursor.y).count();
+            let above = packs
+                .iter()
+                .filter_map(|p| ui.find(&format!("pack:{p}")))
+                .filter(|&n| ui.nodes[n].rect.y + ui.nodes[n].rect.h / 2.0 < cursor.y)
+                .count();
             packs.insert(above, id);
         }
         if packs != before {
@@ -222,31 +241,52 @@ impl Screen for ResourcePacks {
         let dir = resource_dir(&cx.settings.run_dir);
         let all = list(&dir);
         let selected = cx.settings.resource_packs();
-        let missing = |id: &str| PackInfo { id: id.to_string(), name: id.to_string(), description: cx.lang.get("packs.missing").to_string() };
+        let missing =
+            |id: &str| PackInfo { id: id.to_string(), name: id.to_string(), description: cx.lang.get("packs.missing").to_string() };
         let dragging = self.dragging.as_deref();
         frame(ui, cx, "settings.resource_packs", |ui| {
             ui.container(Style::row().gap(8.0).grow().h(0.0).stretch(), |ui| {
                 ui.container(Style::default().gap(4.0).w(260.0).stretch(), |ui| {
                     label(ui, cx, "packs.available", &[], "default");
-                    let panel = ui.panel("panel", Style::default().pad(6.0).gap(4.0).stretch().grow().h(0.0).scroll(), |ui| {
-                        let available: Vec<&PackInfo> = all.iter().filter(|p| !selected.contains(&p.id)).collect();
-                        if available.is_empty() {
-                            label(ui, cx, if all.is_empty() { "packs.none" } else { "packs.all_selected" }, &[], "dim");
-                        }
-                        for p in available {
-                            pack_row(ui, cx, p, dragging == Some(p.id.as_str()));
-                        }
-                    });
+                    let panel = ui.panel(
+                        "panel",
+                        Style::default()
+                            .pad(6.0)
+                            .gap(4.0)
+                            .stretch()
+                            .grow()
+                            .h(0.0)
+                            .scroll(),
+                        |ui| {
+                            let available: Vec<&PackInfo> = all.iter().filter(|p| !selected.contains(&p.id)).collect();
+                            if available.is_empty() {
+                                label(ui, cx, if all.is_empty() { "packs.none" } else { "packs.all_selected" }, &[], "dim");
+                            }
+                            for p in available {
+                                pack_row(ui, cx, p, dragging == Some(p.id.as_str()));
+                            }
+                        },
+                    );
                     ui.set_id(panel, "packs_available");
                 });
                 ui.container(Style::default().gap(4.0).w(260.0).stretch(), |ui| {
                     label(ui, cx, "packs.selected", &[], "default");
-                    let panel = ui.panel("panel", Style::default().pad(6.0).gap(4.0).stretch().grow().h(0.0).scroll(), |ui| {
-                        for id in &selected {
-                            let gone = missing(id);
-                            pack_row(ui, cx, all.iter().find(|p| &p.id == id).unwrap_or(&gone), dragging == Some(id.as_str()));
-                        }
-                    });
+                    let panel = ui.panel(
+                        "panel",
+                        Style::default()
+                            .pad(6.0)
+                            .gap(4.0)
+                            .stretch()
+                            .grow()
+                            .h(0.0)
+                            .scroll(),
+                        |ui| {
+                            for id in &selected {
+                                let gone = missing(id);
+                                pack_row(ui, cx, all.iter().find(|p| &p.id == id).unwrap_or(&gone), dragging == Some(id.as_str()));
+                            }
+                        },
+                    );
                     ui.set_id(panel, "packs_selected");
                 });
             });
@@ -283,26 +323,52 @@ impl Screen for ShaderPacks {
         let all = list(&dir);
         let current = cx.settings.shader_pack();
         frame(ui, cx, "settings.shader_packs", |ui| {
-            ui.panel("panel", Style::default().pad(8.0).gap(4.0).w(320.0).h(0.0).grow().min_h(60.0).scroll().stretch(), |ui| {
-                let choices = std::iter::once((None, cx.t("packs.shaders_off", &[]), String::new()))
-                    .chain(all.iter().map(|p| (Some(p.id.clone()), cx.rich(&p.name), p.description.clone())));
-                for (id, name, description) in choices {
-                    let selected = id == current;
-                    let b = ui.button("button", Style::default().min_h(20.0).pad_xy(6.0, 4.0).stretch(), Rc::new(move |c: &mut Ctx| {
-                        c.settings.set_text("shader_pack", id.as_deref().unwrap_or(""));
-                        c.requests.push(Request::Rebuild);
-                    }), |ui| {
-                        ui.text(name, "button");
-                        if !description.is_empty() {
-                            ui.text(cx.rich(&description), "button");
+            ui.panel(
+                "panel",
+                Style::default()
+                    .pad(8.0)
+                    .gap(4.0)
+                    .w(320.0)
+                    .h(0.0)
+                    .grow()
+                    .min_h(60.0)
+                    .scroll()
+                    .stretch(),
+                |ui| {
+                    let choices = std::iter::once((None, cx.t("packs.shaders_off", &[]), String::new())).chain(
+                        all.iter()
+                            .map(|p| (Some(p.id.clone()), cx.rich(&p.name), p.description.clone())),
+                    );
+                    for (id, name, description) in choices {
+                        let selected = id == current;
+                        let b = ui.button(
+                            "button",
+                            Style::default().min_h(20.0).pad_xy(6.0, 4.0).stretch(),
+                            Rc::new(move |c: &mut Ctx| {
+                                c.settings
+                                    .set_text("shader_pack", id.as_deref().unwrap_or(""));
+                                c.requests.push(Request::Rebuild);
+                            }),
+                            |ui| {
+                                ui.text(name, "button");
+                                if !description.is_empty() {
+                                    ui.text(cx.rich(&description), "button");
+                                }
+                            },
+                        );
+                        if let Kind::Button { selected: sel, .. } = &mut ui.nodes[b].kind {
+                            *sel = selected;
                         }
-                    });
-                    if let Kind::Button { selected: sel, .. } = &mut ui.nodes[b].kind {
-                        *sel = selected;
                     }
-                }
-            });
-            label(ui, cx, "packs.shaders_note", &[Arg::Text("world.wgsl, entity.wgsl, model.wgsl, particle.wgsl, weather.wgsl, sky.wgsl, post.wgsl".into())], "dim");
+                },
+            );
+            label(
+                ui,
+                cx,
+                "packs.shaders_note",
+                &[Arg::Text("world.wgsl, entity.wgsl, model.wgsl, particle.wgsl, weather.wgsl, sky.wgsl, post.wgsl".into())],
+                "dim",
+            );
             ui.container(Style::row().gap(6.0).justify(Justify::Center), |ui| {
                 button(ui, cx, "packs.open_folder", &[], 140.0, move |_| open_folder(&dir));
                 button(ui, cx, "menu.done", &[], 140.0, |c| c.requests.push(Request::Close));

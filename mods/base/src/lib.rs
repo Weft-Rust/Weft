@@ -6,10 +6,10 @@ mod beds;
 mod blocks;
 mod items;
 mod machines;
-mod redstone;
 mod mobs;
 mod player;
 mod recipes;
+mod redstone;
 mod sounds;
 mod worldgen;
 
@@ -64,7 +64,14 @@ fn init(r: &mut Registry) {
     for dim in [&OVERWORLD, &FLATLANDS] {
         r.sky_stars(dim, &STARS).count(1500);
         r.sky_clouds(dim, &CLOUDS).texture("clouds");
-        r.sky_body(dim, &SUN).texture("sun").size(33.0).glow(0xFFE633);
-        r.sky_body(dim, &MOON).texture("moon_phases").frames(4, 2).size(23.0).phase(0.5);
+        r.sky_body(dim, &SUN)
+            .texture("sun")
+            .size(33.0)
+            .glow(0xFFE633);
+        r.sky_body(dim, &MOON)
+            .texture("moon_phases")
+            .frames(4, 2)
+            .size(23.0)
+            .phase(0.5);
     }
 }

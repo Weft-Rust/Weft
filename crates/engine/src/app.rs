@@ -26,9 +26,9 @@ use crate::screens::{self, BuildCx, Screen};
 use crate::server::{self, ServerConfig, ServerHandle};
 use crate::settings::Settings;
 use crate::ui::lang::Lang;
+use crate::ui::look::Look;
 use crate::ui::render::UiRenderer;
 use crate::ui::text::{self, Arg, Msg};
-use crate::ui::look::Look;
 use crate::ui::{Kind, Ui};
 
 pub type BackendFactory = fn(&BackendDesc) -> Result<Box<dyn Backend>, weft_render::Error>;
@@ -161,7 +161,11 @@ pub(crate) const CLIENT_COMMANDS: &[(&str, &str, fn(&mut Running, &crate::comman
     // Logging is per process.
     ("log", "[filters:text]", |_, a| crate::commands::log_command(a.text("filters").unwrap_or(""))),
     // The shown gizmo groups belong to this client.
-    ("gizmo", "[group:word(#core:gizmos)]", |r, a| r.game.as_mut().map_or(Vec::new(), |g| g.client.gizmo_command(a.text("group").unwrap_or("")))),
+    ("gizmo", "[group:word(#core:gizmos)]", |r, a| {
+        r.game
+            .as_mut()
+            .map_or(Vec::new(), |g| g.client.gizmo_command(a.text("group").unwrap_or("")))
+    }),
     ("music", "", |r, _| match &mut r.audio {
         Some(a) => {
             a.skip_music();
@@ -270,7 +274,9 @@ pub fn run(factory: BackendFactory, opts: Options) -> Result<(), String> {
 /// source tree, or `--dev`) the source tree's.
 fn engine_assets(dev: bool) -> PathBuf {
     let source = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("assets");
-    let shipped = std::env::current_exe().ok().and_then(|p| p.parent().map(|d| d.join("assets").join("core")));
+    let shipped = std::env::current_exe()
+        .ok()
+        .and_then(|p| p.parent().map(|d| d.join("assets").join("core")));
     match shipped {
         Some(s) if !dev && s.is_dir() => s,
         _ => source,
@@ -321,7 +327,8 @@ impl App {
             crate::config::override_for_run("core:view_distance", &v.to_string());
         }
         let mut settings = Settings::new(&self.opts.run_dir);
-        let icon = crate::assets::decode_png_file(&engine_assets(self.opts.dev).join("icon.png")).and_then(|(w, h, px)| winit::window::Icon::from_rgba(px, w, h).ok());
+        let icon = crate::assets::decode_png_file(&engine_assets(self.opts.dev).join("icon.png"))
+            .and_then(|(w, h, px)| winit::window::Icon::from_rgba(px, w, h).ok());
         let mut attrs = Window::default_attributes()
             .with_title("Weft")
             .with_window_icon(icon)
@@ -330,9 +337,16 @@ impl App {
         // desktop (still rendered at full size, so screenshots are the same).
         if recording() {
             // Sized to what the owner's OBS scene keeps of the left monitor (crops 30 px above, 50 below).
-            attrs = attrs.with_decorations(false).with_window_level(winit::window::WindowLevel::AlwaysOnTop).with_inner_size(winit::dpi::PhysicalSize::new(2560, 1360)).with_position(winit::dpi::PhysicalPosition::new(0, 30));
+            attrs = attrs
+                .with_decorations(false)
+                .with_window_level(winit::window::WindowLevel::AlwaysOnTop)
+                .with_inner_size(winit::dpi::PhysicalSize::new(2560, 1360))
+                .with_position(winit::dpi::PhysicalPosition::new(0, 30));
         } else if self.opts.automated {
-            attrs = attrs.with_active(false).with_window_level(winit::window::WindowLevel::AlwaysOnBottom).with_position(winit::dpi::PhysicalPosition::new(-32000, -32000));
+            attrs = attrs
+                .with_active(false)
+                .with_window_level(winit::window::WindowLevel::AlwaysOnBottom)
+                .with_position(winit::dpi::PhysicalPosition::new(-32000, -32000));
         }
         let window = Arc::new(el.create_window(attrs).map_err(|e| e.to_string())?);
         let size = window.inner_size();
@@ -357,7 +371,12 @@ impl App {
         }
         let packs_now = (settings.resource_packs(), settings.shader_pack());
         let packs = crate::packs::enabled(&self.opts.run_dir, &settings.resource_packs());
-        crate::packs::set_shader_pack(settings.shader_pack().as_ref().map(|p| crate::packs::shader_dir(&self.opts.run_dir).join(p)));
+        crate::packs::set_shader_pack(
+            settings
+                .shader_pack()
+                .as_ref()
+                .map(|p| crate::packs::shader_dir(&self.opts.run_dir).join(p)),
+        );
         let assets = Assets::new(roots, packs);
         crate::assets::set_current(&assets);
         let lang = Lang::load(&assets, &settings.language(), self.opts.dev);
@@ -470,10 +489,8 @@ impl App {
 }
 
 fn make_depth(gpu: &mut dyn Backend, w: u32, h: u32) -> (TextureId, u32, u32) {
-    let t = gpu.create_texture(
-        &TextureDesc { width: w.max(1), height: h.max(1), mips: 1, format: Format::Depth32, render_target: true },
-        "depth",
-    );
+    let t = gpu
+        .create_texture(&TextureDesc { width: w.max(1), height: h.max(1), mips: 1, format: Format::Depth32, render_target: true }, "depth");
     (t, w, h)
 }
 
@@ -518,7 +535,9 @@ impl Running {
         let mut screens = std::mem::take(&mut self.screens);
         for (s, ui) in &mut screens {
             let (hover, focus) = (ui.hovered, ui.focused);
-            let focus_id = focus.and_then(|f| ui.nodes.get(f)).and_then(|n| n.id.clone());
+            let focus_id = focus
+                .and_then(|f| ui.nodes.get(f))
+                .and_then(|n| n.id.clone());
             let inputs: Vec<(String, String, usize)> = ui
                 .nodes
                 .iter()
@@ -558,7 +577,10 @@ impl Running {
             self.window.set_cursor_visible(false);
         } else if self.settings.read_only {
         } else if on {
-            let _ = self.window.set_cursor_grab(CursorGrabMode::Locked).or_else(|_| self.window.set_cursor_grab(CursorGrabMode::Confined));
+            let _ = self
+                .window
+                .set_cursor_grab(CursorGrabMode::Locked)
+                .or_else(|_| self.window.set_cursor_grab(CursorGrabMode::Confined));
             self.window.set_cursor_visible(false);
         } else {
             let _ = self.window.set_cursor_grab(CursorGrabMode::None);
@@ -586,7 +608,16 @@ impl Running {
         let (client_conn, server_conn) = net::local_pair();
         let _ = server.connect.send(server_conn);
         let key = net::p2p::player_key(&self.settings.run_dir);
-        match Client::new(&mut *self.gpu, &self.assets, &self.textures, client_conn, &self.settings.name(), &key, self.settings.view_distance(), std::fs::read(self.settings.run_dir.join("skins").join("skin.png")).ok()) {
+        match Client::new(
+            &mut *self.gpu,
+            &self.assets,
+            &self.textures,
+            client_conn,
+            &self.settings.name(),
+            &key,
+            self.settings.view_distance(),
+            std::fs::read(self.settings.run_dir.join("skins").join("skin.png")).ok(),
+        ) {
             Ok(mut client) => {
                 client.sent = load_chat_history(&self.settings.run_dir);
                 self.game = Some(Game { client, server: Some(server) });
@@ -643,7 +674,11 @@ impl Running {
                 }
                 Request::Quit => self.quit = true,
                 Request::Restart => {
-                    match std::env::current_exe().and_then(|exe| std::process::Command::new(exe).args(std::env::args().skip(1)).spawn()) {
+                    match std::env::current_exe().and_then(|exe| {
+                        std::process::Command::new(exe)
+                            .args(std::env::args().skip(1))
+                            .spawn()
+                    }) {
                         Ok(_) => self.quit = true,
                         Err(e) => log::error!("restarting: {e}"),
                     }
@@ -673,7 +708,12 @@ impl Running {
                     self.settings.set_bind(&action, key);
                 }
                 Request::ResetBinds => {
-                    let defaults: Vec<(String, crate::input::Chord)> = self.input.binds.iter().map(|b| (b.action.clone(), b.default)).collect();
+                    let defaults: Vec<(String, crate::input::Chord)> = self
+                        .input
+                        .binds
+                        .iter()
+                        .map(|b| (b.action.clone(), b.default))
+                        .collect();
                     for (a, k) in defaults {
                         self.input.rebind(&a, k);
                         self.settings.set_bind(&a, k);
@@ -714,7 +754,16 @@ impl Running {
                     Ok(conn) => {
                         self.leave_world_silent();
                         let key = net::p2p::player_key(&self.settings.run_dir);
-                        match Client::new(&mut *self.gpu, &self.assets, &self.textures, conn, &self.settings.name(), &key, self.settings.view_distance(), std::fs::read(self.settings.run_dir.join("skins").join("skin.png")).ok()) {
+                        match Client::new(
+                            &mut *self.gpu,
+                            &self.assets,
+                            &self.textures,
+                            conn,
+                            &self.settings.name(),
+                            &key,
+                            self.settings.view_distance(),
+                            std::fs::read(self.settings.run_dir.join("skins").join("skin.png")).ok(),
+                        ) {
                             Ok(mut client) => {
                                 client.sent = load_chat_history(&self.settings.run_dir);
                                 self.game = Some(Game { client, server: None });
@@ -776,9 +825,16 @@ impl Running {
         let Some((_, ui)) = self.screens.last_mut() else { return };
         if self.input.pressed_button(0) && menu_screen {
             let arrow = hovered.is_some_and(|h| ui.nodes[h].recipes);
-            let kinds = self.game.as_ref().and_then(|g| g.client.menu.as_ref()).and_then(|m| content().game.menus.get(m.kind as usize)).map(|d| d.recipes.clone()).unwrap_or_default();
+            let kinds = self
+                .game
+                .as_ref()
+                .and_then(|g| g.client.menu.as_ref())
+                .and_then(|m| content().game.menus.get(m.kind as usize))
+                .map(|d| d.recipes.clone())
+                .unwrap_or_default();
             if arrow && !kinds.is_empty() {
-                requests.push(Request::Open(Box::new(crate::game_screens::RecipeView::new(crate::game_screens::RecipeQuery::Kinds(kinds)))));
+                requests
+                    .push(Request::Open(Box::new(crate::game_screens::RecipeView::new(crate::game_screens::RecipeQuery::Kinds(kinds)))));
                 return;
             }
         }
@@ -802,10 +858,16 @@ impl Running {
             use crate::server::menu::{GATHER, HOTBAR_SWAP};
             for button in [0u8, 1] {
                 if self.input.pressed_button(button) {
-                    let inside = ui.nodes.iter().any(|n| matches!(n.kind, Kind::Container { class: Some(_) }) && n.rect.contains(cursor) && n.rect.w < ui.size.x);
+                    let inside = ui
+                        .nodes
+                        .iter()
+                        .any(|n| matches!(n.kind, Kind::Container { class: Some(_) }) && n.rect.contains(cursor) && n.rect.w < ui.size.x);
                     // Vanilla: the same slot and button again within a quarter second, any other
                     // click in between breaks it.
-                    let double = button == 0 && g.client.last_click.is_some_and(|(l, b, t)| Some(l) == slot && b == button && t.elapsed().as_secs_f32() < 0.25);
+                    let double = button == 0
+                        && g.client
+                            .last_click
+                            .is_some_and(|(l, b, t)| Some(l) == slot && b == button && t.elapsed().as_secs_f32() < 0.25);
                     g.client.last_click = slot.map(|s| (s, button, Instant::now()));
                     if shift && button == 0 {
                         g.client.sweep.extend(slot);
@@ -814,12 +876,17 @@ impl Running {
                         // Double click: the rest of the stack just picked up joins it (the
                         // server knows what is on the cursor even before we do).
                         Some(s) if double && !shift => {
-                            g.client.send(net::ToServer::Click { slot: s, button: GATHER, shift: false });
+                            g.client
+                                .send(net::ToServer::Click { slot: s, button: GATHER, shift: false });
                             g.client.last_click = None;
                         }
                         Some(s) if holding && !shift && g.client.drag.is_none() => g.client.drag = Some((button, vec![s])),
-                        Some(s) => g.client.send(net::ToServer::Click { slot: s, button, shift }),
-                        None if !inside => g.client.send(net::ToServer::Click { slot: u32::MAX, button, shift: false }),
+                        Some(s) => g
+                            .client
+                            .send(net::ToServer::Click { slot: s, button, shift }),
+                        None if !inside => g
+                            .client
+                            .send(net::ToServer::Click { slot: u32::MAX, button, shift: false }),
                         None => {}
                     }
                 }
@@ -828,16 +895,21 @@ impl Running {
             if shift && self.input.held_button(0) && !holding {
                 if let Some(s) = slot.filter(|s| !g.client.sweep.contains(s)) {
                     g.client.sweep.push(s);
-                    g.client.send(net::ToServer::Click { slot: s, button: 0, shift: true });
+                    g.client
+                        .send(net::ToServer::Click { slot: s, button: 0, shift: true });
                 }
             } else if !self.input.held_button(0) {
                 g.client.sweep.clear();
             }
             // Number keys over a slot swap it with that hotbar slot, unless typing a search.
-            if let Some(s) = slot.filter(|_| !ui.focused.is_some_and(|f| matches!(ui.nodes[f].kind, Kind::Input { .. }))) {
+            if let Some(s) = slot.filter(|_| {
+                !ui.focused
+                    .is_some_and(|f| matches!(ui.nodes[f].kind, Kind::Input { .. }))
+            }) {
                 for (n, action) in crate::input::HOTBAR.into_iter().enumerate() {
                     if self.input.pressed(action) {
-                        g.client.send(net::ToServer::Click { slot: s, button: HOTBAR_SWAP + n as u8, shift: false });
+                        g.client
+                            .send(net::ToServer::Click { slot: s, button: HOTBAR_SWAP + n as u8, shift: false });
                     }
                 }
             }
@@ -850,7 +922,8 @@ impl Running {
                 } else {
                     let (button, slots) = g.client.drag.take().unwrap();
                     if slots.len() == 1 {
-                        g.client.send(net::ToServer::Click { slot: slots[0], button, shift: false });
+                        g.client
+                            .send(net::ToServer::Click { slot: slots[0], button, shift: false });
                     } else {
                         g.client.send(net::ToServer::Drag { slots, button });
                     }
@@ -875,13 +948,22 @@ impl Running {
                     let stack = if tag == crate::client::modui::TAG_CREATIVE {
                         weft_abi::ItemStack::new(data as u32, 1)
                     } else {
-                        g.client.menu.as_ref().and_then(|m| m.slots.get(data as usize)).copied().unwrap_or_default()
+                        g.client
+                            .menu
+                            .as_ref()
+                            .and_then(|m| m.slots.get(data as usize))
+                            .copied()
+                            .unwrap_or_default()
                     };
                     // An empty slot shows its group's hint, if it has one.
                     let hint = || {
                         let c = content();
                         let def = c.game.menus.get(g.client.menu.as_ref()?.kind as usize)?;
-                        let key = def.group_of(&c.game.player_layout, data as u32)?.0.tooltip.clone()?;
+                        let key = def
+                            .group_of(&c.game.player_layout, data as u32)?
+                            .0
+                            .tooltip
+                            .clone()?;
                         Some(crate::ui::text::rich(self.lang.get(&key), &self.lang, Some(&self.input)))
                     };
                     let tip = if !stack.is_empty() {
@@ -915,7 +997,12 @@ impl Running {
                     let r = ui.nodes[h].rect;
                     let unit = ui.text_unit * t.scale;
                     let p = (cursor - Vec2::new(r.x, r.y)) / unit;
-                    let target = t.layout.links.iter().find(|(_, b)| p.x >= b[0] && p.x <= b[2] && p.y >= b[1] && p.y <= b[3]).map(|l| l.0.clone());
+                    let target = t
+                        .layout
+                        .links
+                        .iter()
+                        .find(|(_, b)| p.x >= b[0] && p.x <= b[2] && p.y >= b[1] && p.y <= b[3])
+                        .map(|l| l.0.clone());
                     if let Some(n) = target.and_then(|t| ui.find(&t)) {
                         ui.focused = Some(n);
                     }
@@ -965,7 +1052,9 @@ impl Running {
     /// Recipes of (or uses for) the item under the cursor, in any screen.
     fn recipe_keys(&mut self, requests: &mut Vec<Request>) {
         let Some((_, ui)) = self.screens.last_mut() else { return };
-        let typing = ui.focused.is_some_and(|f| matches!(ui.nodes[f].kind, Kind::Input { .. }));
+        let typing = ui
+            .focused
+            .is_some_and(|f| matches!(ui.nodes[f].kind, Kind::Input { .. }));
         for (action, uses) in [("core:recipes", false), ("core:uses", true)] {
             if !typing && self.input.pressed(action) {
                 if let Some(item) = crate::game_screens::hovered_item(ui, self.game.as_ref().map(|g| &g.client)) {
@@ -985,11 +1074,15 @@ impl Running {
             requests,
             stats: &self.stats,
             debug: self.debug,
-            top: self.screens.last_mut().map(|(s, ui)| Top { screen: Some(&mut **s), ui }),
+            top: self
+                .screens
+                .last_mut()
+                .map(|(s, ui)| Top { screen: Some(&mut **s), ui }),
         };
         if !actions.is_empty() {
             if let Some(&click) = content().game.sound_names.get("core:ui.click") {
-                self.ui_sounds.push(crate::audio::Play { sound: click, pos: None, volume: 1.0, pitch: 0.0 });
+                self.ui_sounds
+                    .push(crate::audio::Play { sound: click, pos: None, volume: 1.0, pitch: 0.0 });
             }
         }
         for a in actions {
@@ -1008,7 +1101,13 @@ impl Running {
 
     /// Runs the mods' client hooks of one kind with a view that may drive the client.
     fn client_hooks(&mut self, hook: u32, screen: &str) {
-        let hooks: Vec<(abi::ModId, abi::Callback)> = content().game.client_hooks.iter().filter(|h| h.1 == hook).map(|h| (h.0, h.2)).collect();
+        let hooks: Vec<(abi::ModId, abi::Callback)> = content()
+            .game
+            .client_hooks
+            .iter()
+            .filter(|h| h.1 == hook)
+            .map(|h| (h.0, h.2))
+            .collect();
         for (owner, cb) in hooks {
             let mut v = self.frame_view();
             if hook == abi::client_hook::FRAME {
@@ -1026,7 +1125,13 @@ impl Running {
     fn entity_ticks(&mut self, dt: f32) {
         let Some(g) = &self.game else { return };
         let c = content();
-        let all: Vec<abi::ClientEntityArgs> = g.client.entities.iter().filter(|(_, e)| e.item.is_empty() && e.structure.is_none()).map(|(&id, e)| e.args(id, dt)).collect();
+        let all: Vec<abi::ClientEntityArgs> = g
+            .client
+            .entities
+            .iter()
+            .filter(|(_, e)| e.item.is_empty() && e.structure.is_none())
+            .map(|(&id, e)| e.args(id, dt))
+            .collect();
         for mut a in all {
             match c.game.client_entity_ticks.get(&a.kind) {
                 Some(&(owner, cb)) => {
@@ -1042,7 +1147,9 @@ impl Running {
             }
         }
         if let Some(g) = &mut self.game {
-            g.client.entities.retain(|_, e| !e.dying.is_some_and(|d| d >= 1.0));
+            g.client
+                .entities
+                .retain(|_, e| !e.dying.is_some_and(|d| d >= 1.0));
         }
     }
 
@@ -1050,7 +1157,13 @@ impl Running {
     /// command or a test.
     fn apply_settings(&mut self) {
         let s = self.settings.clone();
-        let mut now = Applied { vsync: s.vsync(), view: s.view_distance(), language: s.language(), gui_scale: s.gui_scale(), packs: (s.resource_packs(), s.shader_pack()) };
+        let mut now = Applied {
+            vsync: s.vsync(),
+            view: s.view_distance(),
+            language: s.language(),
+            gui_scale: s.gui_scale(),
+            packs: (s.resource_packs(), s.shader_pack()),
+        };
         if now.vsync != self.applied.vsync {
             self.gpu.set_vsync(now.vsync);
         }
@@ -1070,7 +1183,11 @@ impl Running {
         }
         // Not while choosing: every click would reload everything.
         if now.packs != self.applied.packs {
-            if self.screens.iter().any(|(s, _)| matches!(s.name(), "core:resource_packs" | "core:shader_packs")) {
+            if self
+                .screens
+                .iter()
+                .any(|(s, _)| matches!(s.name(), "core:resource_packs" | "core:shader_packs"))
+            {
                 now.packs = self.applied.packs.clone();
                 self.packs_pending = true;
             } else {
@@ -1123,7 +1240,9 @@ impl Running {
     fn client_command_lines(&mut self, line: &str) -> Option<Vec<Msg>> {
         let rest = line.trim().strip_prefix('/')?;
         let tokens: Vec<&str> = rest.split_whitespace().collect();
-        let def = tokens.first().and_then(|n| content().commands.iter().find(|d| d.client && d.name == *n))?;
+        let def = tokens
+            .first()
+            .and_then(|n| content().commands.iter().find(|d| d.client && d.name == *n))?;
         let g = self.game.as_ref()?;
         let p = &g.client.player;
         let here = crate::commands::Origin { pos: p.pos, yaw: p.yaw, pitch: p.pitch };
@@ -1141,7 +1260,14 @@ impl Running {
                     let reply_ptr = &mut reply as *mut Vec<Msg> as *mut core::ffi::c_void;
                     let player = self.game.as_ref().map_or(0, |g| g.client.player_id);
                     let mut v = self.frame_view();
-                    let mut a = abi::CommandArgs { world: std::ptr::null_mut(), player, values: values.as_ptr(), count: values.len() as u32, reply: reply_ptr, client: v.raw() };
+                    let mut a = abi::CommandArgs {
+                        world: std::ptr::null_mut(),
+                        player,
+                        values: values.as_ptr(),
+                        count: values.len() as u32,
+                        reply: reply_ptr,
+                        client: v.raw(),
+                    };
                     crate::host::invoke(owner, cb, &mut a);
                     reply
                 }
@@ -1155,7 +1281,14 @@ impl Running {
         let Some(g) = self.game.as_mut() else { return };
         let packets = std::mem::take(&mut g.client.packets);
         for (channel, data) in packets {
-            let Some((owner, cb)) = content().game.packets.get(channel as usize).and_then(|p| p.client) else { continue };
+            let Some((owner, cb)) = content()
+                .game
+                .packets
+                .get(channel as usize)
+                .and_then(|p| p.client)
+            else {
+                continue;
+            };
             let mut v = self.frame_view();
             let mut a = abi::ClientPacketArgs { client: v.raw(), data: abi::Slice::new(&data) };
             crate::host::invoke(owner, cb, &mut a);
@@ -1172,7 +1305,9 @@ impl Running {
         st.gpu.clear();
         st.gpu.extend_from_slice(self.gpu.gpu_times());
         (st.server_ms, st.regions, st.phases) = server.map_or((0.0, 0, [0.0; 6]), |s| (s.tick_ms(), s.regions(), s.phases()));
-        st.load = server.map_or((0, 0), |s| (s.shared.pending.load(std::sync::atomic::Ordering::Relaxed), s.shared.unsent.load(std::sync::atomic::Ordering::Relaxed)));
+        st.load = server.map_or((0, 0), |s| {
+            (s.shared.pending.load(std::sync::atomic::Ordering::Relaxed), s.shared.unsent.load(std::sync::atomic::Ordering::Relaxed))
+        });
         st.window = self.gpu.surface_size();
         st.gui_scale = gui_scale;
         let ctx = Ctx {
@@ -1189,7 +1324,9 @@ impl Running {
         let asked: std::cell::RefCell<Vec<(String, bool)>> = Default::default();
         let dev = self.lang.dev;
         let test = |t: &text::Test| match t {
-            text::Test::Keys(keys) => keys.iter().all(|k| if k.contains(':') { ctx.input.held(k) } else { crate::settings::parse_key(k).is_some_and(|key| ctx.input.held_key(key)) }),
+            text::Test::Keys(keys) => keys.iter().all(|k| {
+                if k.contains(':') { ctx.input.held(k) } else { crate::settings::parse_key(k).is_some_and(|key| ctx.input.held_key(key)) }
+            }),
             text::Test::Fixed(holds) => *holds,
             text::Test::If(name) => {
                 if let Some(&(_, v)) = asked.borrow().iter().find(|(n, _)| n == name) {
@@ -1408,7 +1545,12 @@ fn frame(r: &mut Running, opts: &Options) -> bool {
     }
     f3_keys(r);
     toggle_keys(r);
-    if r.packs_pending && !r.screens.iter().any(|(s, _)| matches!(s.name(), "core:resource_packs" | "core:shader_packs")) {
+    if r.packs_pending
+        && !r
+            .screens
+            .iter()
+            .any(|(s, _)| matches!(s.name(), "core:resource_packs" | "core:shader_packs"))
+    {
         r.packs_pending = false;
         r.apply_settings();
     }
@@ -1537,7 +1679,8 @@ const F3_COMBOS: &[(KeyCode, F3Action)] = &[
         if let Some(g) = &mut r.game {
             let all = crate::world::GameMode::ALL;
             let next = all[(all.iter().position(|&m| m == g.client.mode).unwrap_or(0) + 1) % all.len()];
-            g.client.send(net::ToServer::Chat(format!("/gamemode {}", next.name())));
+            g.client
+                .send(net::ToServer::Chat(format!("/gamemode {}", next.name())));
         }
     }),
     (KeyCode::F6, |r| {
@@ -1558,7 +1701,10 @@ fn toggle_gizmo(r: &mut Running, group: &str) {
 /// F3 alone toggles the overlay on release; F3 + a key does what `F3_COMBOS` says, F3 + a digit
 /// toggles one group instead.
 fn f3_keys(r: &mut Running) {
-    let f3 = r.input.key_of("core:debug").is_some_and(|k| r.input.held_key(k.key));
+    let f3 = r
+        .input
+        .key_of("core:debug")
+        .is_some_and(|k| r.input.held_key(k.key));
     if r.input.pressed("core:debug") {
         r.f3_combo = Some(false);
     }
@@ -1569,11 +1715,22 @@ fn f3_keys(r: &mut Running) {
                 r.f3_combo = Some(true);
             }
         }
-        let digits = [KeyCode::Digit1, KeyCode::Digit2, KeyCode::Digit3, KeyCode::Digit4, KeyCode::Digit5, KeyCode::Digit6, KeyCode::Digit7, KeyCode::Digit8, KeyCode::Digit9];
+        let digits = [
+            KeyCode::Digit1,
+            KeyCode::Digit2,
+            KeyCode::Digit3,
+            KeyCode::Digit4,
+            KeyCode::Digit5,
+            KeyCode::Digit6,
+            KeyCode::Digit7,
+            KeyCode::Digit8,
+            KeyCode::Digit9,
+        ];
         let groups = crate::hud::DEBUG_GROUPS.len() + crate::hud::mod_debug_groups().len();
         for (i, k) in digits.into_iter().take(groups).enumerate() {
             if r.input.pressed_key(Key::Code(k)) {
-                r.settings.set("debug_groups", (r.settings.debug_groups() ^ (1 << i)) as f64);
+                r.settings
+                    .set("debug_groups", (r.settings.debug_groups() ^ (1 << i)) as f64);
                 r.f3_combo = Some(true);
                 r.debug = true;
                 r.hud.invalidate();
@@ -1598,8 +1755,14 @@ fn toggle_keys(r: &mut Running) {
 }
 
 fn reload_assets(r: &mut Running, opts: &Options) {
-    r.assets.set_packs(crate::packs::enabled(&opts.run_dir, &r.settings.resource_packs()));
-    crate::packs::set_shader_pack(r.settings.shader_pack().as_ref().map(|p| crate::packs::shader_dir(&opts.run_dir).join(p)));
+    r.assets
+        .set_packs(crate::packs::enabled(&opts.run_dir, &r.settings.resource_packs()));
+    crate::packs::set_shader_pack(
+        r.settings
+            .shader_pack()
+            .as_ref()
+            .map(|p| crate::packs::shader_dir(&opts.run_dir).join(p)),
+    );
     r.assets.rescan();
     crate::assets::set_current(&r.assets);
     r.hud.load_layout(&opts.run_dir);
@@ -1612,7 +1775,9 @@ fn reload_assets(r: &mut Running, opts: &Options) {
         a.reload();
     }
     if let Some(g) = &mut r.game {
-        g.client.render.reload_shaders(&mut *r.gpu, &r.textures, &r.assets);
+        g.client
+            .render
+            .reload_shaders(&mut *r.gpu, &r.textures, &r.assets);
         g.client.render.set_textures(&mut *r.gpu, &r.textures);
         g.client.entity_render.reload(&mut *r.gpu, &r.assets);
         g.client.particles.reload(&mut *r.gpu, &r.assets);
@@ -1620,7 +1785,11 @@ fn reload_assets(r: &mut Running, opts: &Options) {
         g.client.weather_render.reload(&mut *r.gpu, &r.assets);
         g.client.sky.reload(&mut *r.gpu, &r.assets);
         g.client.world.remesh_all();
-        g.client.entities.values_mut().filter_map(|e| e.structure.as_mut()).for_each(|s| s.remesh_all());
+        g.client
+            .entities
+            .values_mut()
+            .filter_map(|e| e.structure.as_mut())
+            .for_each(|s| s.remesh_all());
     }
     r.rebuild_all();
     log::info!("assets reloaded");
@@ -1629,7 +1798,8 @@ fn reload_assets(r: &mut Running, opts: &Options) {
 fn window_keys(r: &mut Running) {
     if r.input.pressed("core:fullscreen") {
         let on = r.window.fullscreen().is_none();
-        r.window.set_fullscreen(on.then_some(winit::window::Fullscreen::Borderless(None)));
+        r.window
+            .set_fullscreen(on.then_some(winit::window::Fullscreen::Borderless(None)));
         r.settings.set("fullscreen", on as u32 as f64);
     }
     if r.input.pressed("core:screenshot") {
@@ -1651,7 +1821,8 @@ fn update_game(r: &mut Running, dt: f64, frame_start: Instant) {
         if world_input {
             g.client.update(&mut *r.gpu, &r.textures, &r.input, dt);
         } else {
-            g.client.update(&mut *r.gpu, &r.textures, &Input::default(), dt);
+            g.client
+                .update(&mut *r.gpu, &r.textures, &Input::default(), dt);
         }
         r.prof[0] = t.elapsed().as_secs_f32() * 1000.0;
         r.prof[1] = Instant::now().duration_since(frame_start).as_secs_f32() * 1000.0;
@@ -1674,11 +1845,19 @@ fn play_sounds(r: &mut Running) {
 }
 
 fn client_events(r: &mut Running) {
-    let events = r.game.as_mut().map(|g| std::mem::take(&mut g.client.events)).unwrap_or_default();
+    let events = r
+        .game
+        .as_mut()
+        .map(|g| std::mem::take(&mut g.client.events))
+        .unwrap_or_default();
     for ev in events {
         match ev {
             crate::client::ClientEvent::OpenMenu => {
-                let kind = r.game.as_ref().and_then(|g| g.client.menu.as_ref()).map_or(0, |m| m.kind);
+                let kind = r
+                    .game
+                    .as_ref()
+                    .and_then(|g| g.client.menu.as_ref())
+                    .map_or(0, |m| m.kind);
                 r.screens.retain(|(s, _)| !s.shows_menu());
                 r.open(Box::new(crate::game_screens::MenuScreen::new(kind)));
             }
@@ -1699,13 +1878,19 @@ fn client_events(r: &mut Running) {
 fn world_keys(r: &mut Running) {
     if r.game.is_some() && r.screens.is_empty() {
         let command = r.input.pressed("core:command");
-        let f3_held = r.input.key_of("core:debug").is_some_and(|k| r.input.held_key(k.key));
+        let f3_held = r
+            .input
+            .key_of("core:debug")
+            .is_some_and(|k| r.input.held_key(k.key));
         if command || (r.input.pressed("core:chat") && !f3_held) {
             r.open(Box::new(crate::game_screens::Chat::new(if command { "/" } else { "" })));
             r.input.typed.clear();
         }
     }
-    let (top_chat, top_menu) = r.screens.last().map_or((false, false), |(s, _)| (s.shows_chat(), s.shows_menu()));
+    let (top_chat, top_menu) = r
+        .screens
+        .last()
+        .map_or((false, false), |(s, _)| (s.shows_chat(), s.shows_menu()));
     if top_chat && r.input.pressed_key(Key::Code(KeyCode::Enter)) {
         let text = r.screens.last().and_then(|(_, ui)| {
             ui.find("chat").and_then(|n| match &ui.nodes[n].kind {
@@ -1728,7 +1913,10 @@ fn world_keys(r: &mut Running) {
             r.handle(vec![Request::SendChat(t)]);
         }
     }
-    let typing = r.screens.last().is_some_and(|(_, ui)| ui.focused.is_some_and(|f| matches!(ui.nodes.get(f).map(|n| &n.kind), Some(Kind::Input { .. }))));
+    let typing = r.screens.last().is_some_and(|(_, ui)| {
+        ui.focused
+            .is_some_and(|f| matches!(ui.nodes.get(f).map(|n| &n.kind), Some(Kind::Input { .. })))
+    });
     if top_menu && r.input.pressed("core:inventory") && !typing {
         if let Some(g) = &mut r.game {
             g.client.close_menu();
@@ -1755,7 +1943,13 @@ fn end_input(r: &mut Running) {
     r.input.toggle_sneak = r.settings.toggle_sneak();
     r.input.toggle_sprint = r.settings.toggle_sprint();
     r.input.end_frame();
-    let top = (r.screens.len(), r.screens.last().map(|(s, _)| s.name().to_string()).unwrap_or_default());
+    let top = (
+        r.screens.len(),
+        r.screens
+            .last()
+            .map(|(s, _)| s.name().to_string())
+            .unwrap_or_default(),
+    );
     if top != r.screen_seen {
         let name = top.1.clone();
         r.screen_seen = top;
@@ -1769,14 +1963,26 @@ fn end_input(r: &mut Running) {
 fn refresh_hud(r: &mut Running) {
     if let Some(g) = &r.game {
         let chat_open = r.screens.last().is_some_and(|(s, _)| s.shows_chat());
-        if r.hud.editing() && !r.screens.last().is_some_and(|(s, _)| s.name() == "core:hud_editor") {
+        if r.hud.editing()
+            && !r
+                .screens
+                .last()
+                .is_some_and(|(s, _)| s.name() == "core:hud_editor")
+        {
             r.hud.set_edit(None);
         }
-        if r.hud.update(&g.client, r.debug, r.settings.debug_groups(), chat_open, &r.lang, &r.input) {
+        if r.hud
+            .update(&g.client, r.debug, r.settings.debug_groups(), chat_open, &r.lang, &r.input)
+        {
             r.quads_dirty = true;
         }
         let mut h = g.client.selected as u64;
-        for s in g.client.inventory.iter().chain(g.client.menu.iter().flat_map(|m| m.slots.iter().chain([&m.cursor]))) {
+        for s in g.client.inventory.iter().chain(
+            g.client
+                .menu
+                .iter()
+                .flat_map(|m| m.slots.iter().chain([&m.cursor])),
+        ) {
             h = crate::world::mix(h ^ ((s.item as u64) << 32 | s.count as u64) ^ (s.data as u64) << 48);
         }
         if h != r.client_hash {
@@ -1884,7 +2090,11 @@ fn draw_overlays(r: &mut Running, info: &weft_render::FrameInfo, scale: f32, tex
     }
     let (sw, sh) = r.gpu.surface_size();
     if !hud_hidden() && !(r.hud_off && r.screens.is_empty()) {
-        labels.extend(r.mod_screen_text.iter().map(|(x, y, text, color, size)| (x * sw as f32 / scale, y * sh as f32 / scale, text, *color, *size)));
+        labels.extend(
+            r.mod_screen_text
+                .iter()
+                .map(|(x, y, text, color, size)| (x * sw as f32 / scale, y * sh as f32 / scale, text, *color, *size)),
+        );
     }
     if !labels.is_empty() {
         let mut o = crate::ui::Ui::new();
@@ -1906,7 +2116,13 @@ fn draw_overlays(r: &mut Running, info: &weft_render::FrameInfo, scale: f32, tex
         let game = crate::content::try_content().map(|c| (c, &r.textures));
         r.ui.tooltip(&mut *r.gpu, &r.assets, ui, &r.look, scale, r.input.cursor, game);
     }
-    if let Some(cursor) = r.game.as_ref().and_then(|g| g.client.menu.as_ref()).map(|m| m.cursor).filter(|s| !s.is_empty()) {
+    if let Some(cursor) = r
+        .game
+        .as_ref()
+        .and_then(|g| g.client.menu.as_ref())
+        .map(|m| m.cursor)
+        .filter(|s| !s.is_empty())
+    {
         let p = r.input.cursor;
         let rect = crate::ui::Rect { x: p.x - 9.0 * scale, y: p.y - 9.0 * scale, w: 18.0 * scale, h: 18.0 * scale };
         crate::hud::stack_icon(&mut r.ui, &r.textures, rect, cursor, scale, text_unit);
@@ -1919,28 +2135,41 @@ fn record_passes(r: &mut Running, info: &weft_render::FrameInfo, scale: f32) {
         if let Some(&[x, y, w, h]) = r.previews.first() {
             let worn = g.client.worn();
             let look = r.input.cursor - Vec2::new(x, y);
-            let tex = g.client.entity_render.draw_preview(&mut *r.gpu, &mut r.list, info, [w.round() as u32, h.round() as u32], look, &worn);
+            let tex =
+                g.client
+                    .entity_render
+                    .draw_preview(&mut *r.gpu, &mut r.list, info, [w.round() as u32, h.round() as u32], look, &worn);
             if tex != r.preview_tex {
                 r.preview_tex = tex;
                 r.quads_dirty = true;
             }
         }
     }
-    let clear = r.game.as_ref().map_or([0.02, 0.02, 0.03, 1.0], |g| g.client.fog_color());
+    let clear = r
+        .game
+        .as_ref()
+        .map_or([0.02, 0.02, 0.03, 1.0], |g| g.client.fog_color());
     // Screen effects need the world in an image they can read.
     let post = r.post.on() && r.game.is_some();
     let world_target = if post { Target::Texture(r.post.scene_target(&mut *r.gpu, info.width, info.height)) } else { Target::Surface };
     if let Some(g) = &mut r.game {
-        g.client.gpu_terrain.frame(&mut *r.gpu, &mut r.list, info.slot);
+        g.client
+            .gpu_terrain
+            .frame(&mut *r.gpu, &mut r.list, info.slot);
         let cam = g.client.render_camera();
-        g.client.particles.simulate(&mut *r.gpu, &mut r.list, info.slot, &r.textures, &g.client.world, &cam);
+        g.client
+            .particles
+            .simulate(&mut *r.gpu, &mut r.list, info.slot, &r.textures, &g.client.world, &cam);
         g.client.update_wires(&mut *r.gpu, &r.textures);
     }
-    r.list.push(Cmd::BeginPass { color: Some((world_target, Some(clear))), depth: Some((r.depth.0, Some(0.0))) });
+    r.list
+        .push(Cmd::BeginPass { color: Some((world_target, Some(clear))), depth: Some((r.depth.0, Some(0.0))) });
     if let Some(g) = &mut r.game {
         let worn = g.client.worn();
         let held = g.client.held().item;
-        g.client.entity_render.preload(&mut *r.gpu, &r.assets, &g.client.entities, &worn, held);
+        g.client
+            .entity_render
+            .preload(&mut *r.gpu, &r.assets, &g.client.entities, &worn, held);
         g.client.render(&mut *r.gpu, &mut r.list, info, &r.textures);
     }
     r.list.push(Cmd::EndPass);
@@ -1948,7 +2177,8 @@ fn record_passes(r: &mut Running, info: &weft_render::FrameInfo, scale: f32) {
         r.post.apply(&mut *r.gpu, &mut r.list, info);
     } else {
         // The UI pipeline has no depth, so it cannot draw in a pass that has one.
-        r.list.push(Cmd::BeginPass { color: Some((Target::Surface, None)), depth: None });
+        r.list
+            .push(Cmd::BeginPass { color: Some((Target::Surface, None)), depth: None });
     }
     r.ui.draw(&mut *r.gpu, &mut r.list, info, scale);
     r.list.push(Cmd::Mark);
@@ -2000,7 +2230,10 @@ fn save_screenshot(r: &mut Running) {
     r.shot_pending = false;
     if let Some(cap) = r.gpu.take_capture() {
         let path = r.shot_path.take().unwrap_or_else(|| {
-            r.settings.run_dir.join("screenshots").join(format!("{}.png", saves::now_secs()))
+            r.settings
+                .run_dir
+                .join("screenshots")
+                .join(format!("{}.png", saves::now_secs()))
         });
         if let Some(dir) = path.parent() {
             let _ = std::fs::create_dir_all(dir);
@@ -2034,5 +2267,12 @@ fn chat_history_path(run_dir: &std::path::Path) -> PathBuf {
 }
 
 fn load_chat_history(run_dir: &std::path::Path) -> Vec<String> {
-    std::fs::read_to_string(chat_history_path(run_dir)).map(|s| s.lines().filter(|l| !l.is_empty()).map(str::to_string).collect()).unwrap_or_default()
+    std::fs::read_to_string(chat_history_path(run_dir))
+        .map(|s| {
+            s.lines()
+                .filter(|l| !l.is_empty())
+                .map(str::to_string)
+                .collect()
+        })
+        .unwrap_or_default()
 }

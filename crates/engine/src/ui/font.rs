@@ -58,7 +58,9 @@ impl Font {
                 64 => 2,
                 _ => continue,
             };
-            let bytes: Vec<u8> = (0..hex.len() / 2).filter_map(|i| u8::from_str_radix(&hex[i * 2..i * 2 + 2], 16).ok()).collect();
+            let bytes: Vec<u8> = (0..hex.len() / 2)
+                .filter_map(|i| u8::from_str_radix(&hex[i * 2..i * 2 + 2], 16).ok())
+                .collect();
             if bytes.len() != 16 * bpr {
                 continue;
             }
@@ -66,7 +68,9 @@ impl Font {
             for (y, row) in rows.iter_mut().enumerate() {
                 *row = if bpr == 1 { (bytes[y] as u16) << 8 } else { (bytes[y * 2] as u16) << 8 | bytes[y * 2 + 1] as u16 };
             }
-            let metrics = (ch == ' ').then_some((0, 4)).or_else(|| rows.iter().all(|&r| r == 0).then_some((0, bpr as u8 * 4)));
+            let metrics = (ch == ' ')
+                .then_some((0, 4))
+                .or_else(|| rows.iter().all(|&r| r == 0).then_some((0, bpr as u8 * 4)));
             bitmaps.push((ch, rows, metrics));
         }
 
@@ -79,7 +83,10 @@ impl Font {
                 let Some((k, v)) = line.split_once(" = ") else { continue };
                 match k.trim() {
                     "cell" => {
-                        let n: Vec<u32> = v.split_whitespace().filter_map(|n| n.parse().ok()).collect();
+                        let n: Vec<u32> = v
+                            .split_whitespace()
+                            .filter_map(|n| n.parse().ok())
+                            .collect();
                         if let [w, h] = n[..] {
                             cell = (w, h);
                         }
@@ -159,7 +166,11 @@ impl Font {
             }
         }
         // Cell width for fixed-width text: the widest digit.
-        let mono = ('0'..='9').filter_map(|c| glyphs.get(&c)).map(|g: &Glyph| g.advance as f32).fold(0.0, f32::max).max(1.0);
+        let mono = ('0'..='9')
+            .filter_map(|c| glyphs.get(&c))
+            .map(|g: &Glyph| g.advance as f32)
+            .fold(0.0, f32::max)
+            .max(1.0);
         Font { glyphs, atlas_width, atlas_height, atlas, line_height, pixel, mono, fallback: Glyph { cell: 0, left: 2, advance: 13 } }
     }
 

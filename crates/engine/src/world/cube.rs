@@ -102,7 +102,15 @@ impl Cube {
         }
         let bits = bits_for(palette.len());
         // A word at a time, like `decode`.
-        let words: Box<[u64]> = indices.chunks_exact(64 / bits as usize).map(|group| group.iter().enumerate().fold(0u64, |w, (k, &p)| w | (p as u64) << (k as u32 * bits))).collect();
+        let words: Box<[u64]> = indices
+            .chunks_exact(64 / bits as usize)
+            .map(|group| {
+                group
+                    .iter()
+                    .enumerate()
+                    .fold(0u64, |w, (k, &p)| w | (p as u64) << (k as u32 * bits))
+            })
+            .collect();
         c.blocks = Blocks::Packed { palette, bits, words };
         c
     }
@@ -192,7 +200,9 @@ impl Cube {
     pub fn changed_around(&self, old: &Cube) -> Option<u32> {
         let same_blocks = match (&self.blocks, &old.blocks) {
             (Blocks::Uniform(a), Blocks::Uniform(b)) => a == b,
-            (Blocks::Packed { palette: p, bits: b, words: w }, Blocks::Packed { palette: op, bits: ob, words: ow }) => p == op && b == ob && w == ow,
+            (Blocks::Packed { palette: p, bits: b, words: w }, Blocks::Packed { palette: op, bits: ob, words: ow }) => {
+                p == op && b == ob && w == ow
+            }
             _ => false,
         };
         let same_light = match (&self.light, &old.light) {
@@ -203,7 +213,9 @@ impl Cube {
         if same_blocks && same_light {
             return None;
         }
-        if let (Blocks::Uniform(_), Blocks::Uniform(_), Light::Uniform(_), Light::Uniform(_)) = (&self.blocks, &old.blocks, &self.light, &old.light) {
+        if let (Blocks::Uniform(_), Blocks::Uniform(_), Light::Uniform(_), Light::Uniform(_)) =
+            (&self.blocks, &old.blocks, &self.light, &old.light)
+        {
             return Some(ALL_AROUND);
         }
         // Something changed; inside blocks are read by this cube alone, so only the outer
@@ -387,7 +399,10 @@ impl Cube {
             }
             let count = VOLUME * bits as usize / 64;
             let raw = take_bytes(data, count * 8)?;
-            let words: Box<[u64]> = raw.chunks_exact(8).map(|c| u64::from_le_bytes(c.try_into().unwrap())).collect();
+            let words: Box<[u64]> = raw
+                .chunks_exact(8)
+                .map(|c| u64::from_le_bytes(c.try_into().unwrap()))
+                .collect();
             Blocks::Packed { palette, bits, words }
         };
         let light = match take_bytes(data, 1)?[0] {
@@ -468,7 +483,9 @@ pub const ALL_CONNECTED: u16 = 0x7FFF;
 
 /// Faces reachable from face `from` through the inside of a cube with connectivity `conn`.
 pub fn exits(conn: u16, from: usize) -> u8 {
-    (0..6).filter(|&f| f != from && conn & face_pair(from, f) != 0).fold(0, |m, f| m | 1 << f)
+    (0..6)
+        .filter(|&f| f != from && conn & face_pair(from, f) != 0)
+        .fold(0, |m, f| m | 1 << f)
 }
 
 impl Cube {

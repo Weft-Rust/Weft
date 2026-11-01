@@ -22,7 +22,10 @@ pub fn current_ticket() -> Option<String> {
 }
 
 pub fn host(server: &crate::server::ServerHandle, settings: &crate::settings::Settings) {
-    server.shared.hosting.store(true, std::sync::atomic::Ordering::Relaxed);
+    server
+        .shared
+        .hosting
+        .store(true, std::sync::atomic::Ordering::Relaxed);
     p2p::host(server.connect.clone(), settings);
 }
 
@@ -130,7 +133,6 @@ macro_rules! messages {
         }
     };
 }
-
 
 wire_struct! {
     #[derive(Clone, Debug)]

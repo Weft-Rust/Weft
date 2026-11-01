@@ -1,4 +1,4 @@
-﻿//! Blocks and what belongs to them. The world's are a `Space`, a moving structure's are one, and
+//! Blocks and what belongs to them. The world's are a `Space`, a moving structure's are one, and
 //! everything that works on blocks works on whichever `Dim::space` is: see `Dim::in_frame`.
 
 use std::cmp::Reverse;
@@ -90,7 +90,11 @@ impl Space {
         }
         self.relight();
         self.edited.clear();
-        let cubes: Vec<(IVec3, Arc<Cube>)> = self.cubes.iter().map(|(p, cube)| (*p, cube.clone())).collect();
+        let cubes: Vec<(IVec3, Arc<Cube>)> = self
+            .cubes
+            .iter()
+            .map(|(p, cube)| (*p, cube.clone()))
+            .collect();
         for (p, cube) in cubes {
             self.signals.cube_loaded(c, p, &cube);
         }
@@ -115,7 +119,9 @@ impl Space {
     }
 
     pub fn get(&self, p: IVec3) -> Option<u32> {
-        self.cubes.get(&cube_of(p)).map(|cube| cube.get(local_index(p)))
+        self.cubes
+            .get(&cube_of(p))
+            .map(|cube| cube.get(local_index(p)))
     }
 
     /// Writes a block of a structure without block updates (building it, loading it).
@@ -142,11 +148,17 @@ impl Space {
     pub fn grow_bounds(&mut self, p: IVec3, state: u32) {
         if state == AIR {
             // Shrinking needs a look over everything (only when the edge itself went).
-            if self.bounds.is_some_and(|(lo, hi)| p.cmpeq(lo).any() || p.cmpeq(hi).any()) {
+            if self
+                .bounds
+                .is_some_and(|(lo, hi)| p.cmpeq(lo).any() || p.cmpeq(hi).any())
+            {
                 self.bounds = self.scan_bounds();
             }
         } else {
-            self.bounds = Some(self.bounds.map_or((p, p), |(lo, hi)| (lo.min(p), hi.max(p))));
+            self.bounds = Some(
+                self.bounds
+                    .map_or((p, p), |(lo, hi)| (lo.min(p), hi.max(p))),
+            );
         }
     }
 
@@ -176,6 +188,9 @@ impl Space {
 
     /// The blocks of a structure for saving: (position, state name), air left out.
     pub fn structure_blocks(&self, c: &Content) -> Vec<(IVec3, String)> {
-        self.all_blocks().into_iter().map(|(p, s)| (p, c.state_name(s))).collect()
+        self.all_blocks()
+            .into_iter()
+            .map(|(p, s)| (p, c.state_name(s)))
+            .collect()
     }
 }

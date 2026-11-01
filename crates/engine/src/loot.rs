@@ -96,7 +96,12 @@ pub struct RawLootMod {
 
 unsafe fn conds(s: abi::Slice<abi::LootCond>) -> Vec<RawCond> {
     let mut out = Vec::new();
-    unsafe { s.as_slice().iter().copied().for_each(|c| out.push(RawCond { kind: c.kind, value: c.value, text: c.text.as_str().to_string() })) };
+    unsafe {
+        s.as_slice()
+            .iter()
+            .copied()
+            .for_each(|c| out.push(RawCond { kind: c.kind, value: c.value, text: c.text.as_str().to_string() }))
+    };
     out
 }
 
@@ -106,7 +111,14 @@ pub unsafe fn copy_pool(p: &abi::LootPool) -> RawPool {
     unsafe {
         let mut entries = Vec::new();
         p.entries.as_slice().iter().copied().for_each(|e| {
-            entries.push(RawEntry { item: e.item.as_str().to_string(), weight: e.weight, min: e.min, max: e.max.max(e.min), conds: conds(e.conditions), smelt: e.smelt.as_str().to_string() })
+            entries.push(RawEntry {
+                item: e.item.as_str().to_string(),
+                weight: e.weight,
+                min: e.min,
+                max: e.max.max(e.min),
+                conds: conds(e.conditions),
+                smelt: e.smelt.as_str().to_string(),
+            })
         });
         RawPool { rolls: (p.rolls_min, p.rolls_max.max(p.rolls_min)), conds: conds(p.conditions), entries }
     }
@@ -123,10 +135,12 @@ impl Resolve<'_> {
         if s.is_empty() {
             return 0;
         }
-        crate::refs::Ref::parse(s).and_then(|r| crate::refs::item(&r, self.items, self.components, self.tag_items)).unwrap_or_else(|e| {
-            errors.push(format!("loot table {table}: {e}"));
-            0
-        })
+        crate::refs::Ref::parse(s)
+            .and_then(|r| crate::refs::item(&r, self.items, self.components, self.tag_items))
+            .unwrap_or_else(|e| {
+                errors.push(format!("loot table {table}: {e}"));
+                0
+            })
     }
 
     /// A condition naming a tag nobody declares could never pass: an error, not a silent no.
@@ -165,7 +179,14 @@ impl Resolve<'_> {
 }
 
 /// Tables by name: mods' own, then modifiers in mod load order (`order` of the owner).
-pub fn freeze(raw: Vec<RawLoot>, mut mods_list: Vec<RawLootMod>, order: &dyn Fn(ModId) -> u32, r: &Resolve, defaults: FxHashMap<String, Table>, errors: &mut Vec<String>) -> FxHashMap<String, Table> {
+pub fn freeze(
+    raw: Vec<RawLoot>,
+    mut mods_list: Vec<RawLootMod>,
+    order: &dyn Fn(ModId) -> u32,
+    r: &Resolve,
+    defaults: FxHashMap<String, Table>,
+    errors: &mut Vec<String>,
+) -> FxHashMap<String, Table> {
     let mut tables = defaults;
     let mut raw = raw;
     raw.sort_by_key(|t| order(t.owner));
@@ -175,7 +196,11 @@ pub fn freeze(raw: Vec<RawLoot>, mut mods_list: Vec<RawLootMod>, order: &dyn Fn(
     }
     mods_list.sort_by_key(|m| order(m.owner));
     for m in mods_list {
-        let names: Vec<String> = tables.keys().filter(|n| comps::matches(&m.table, n)).cloned().collect();
+        let names: Vec<String> = tables
+            .keys()
+            .filter(|n| comps::matches(&m.table, n))
+            .cloned()
+            .collect();
         if names.is_empty() && !m.table.contains('*') {
             errors.push(format!("loot modifier for unknown table {}", m.table));
         }
@@ -186,8 +211,16 @@ pub fn freeze(raw: Vec<RawLoot>, mut mods_list: Vec<RawLootMod>, order: &dyn Fn(
             let t = tables.get_mut(&n).unwrap();
             match m.op {
                 abi::loot_op::ADD_POOL => t.pools.extend(pool.clone()),
-                abi::loot_op::REPLACE_ITEM => t.pools.iter_mut().flat_map(|p| p.entries.iter_mut()).filter(|e| Some(e.item) == from).for_each(|e| e.item = to),
-                abi::loot_op::REMOVE_ITEM => t.pools.iter_mut().for_each(|p| p.entries.retain(|e| Some(e.item) != from)),
+                abi::loot_op::REPLACE_ITEM => t
+                    .pools
+                    .iter_mut()
+                    .flat_map(|p| p.entries.iter_mut())
+                    .filter(|e| Some(e.item) == from)
+                    .for_each(|e| e.item = to),
+                abi::loot_op::REMOVE_ITEM => t
+                    .pools
+                    .iter_mut()
+                    .for_each(|p| p.entries.retain(|e| Some(e.item) != from)),
                 abi::loot_op::CLEAR => t.pools.clear(),
                 op => errors.push(format!("loot modifier for {n}: unknown operation {op}")),
             }
@@ -199,7 +232,13 @@ pub fn freeze(raw: Vec<RawLoot>, mut mods_list: Vec<RawLootMod>, order: &dyn Fn(
 /// One item when the block is harvested: a block's table when it names none.
 pub fn harvested(item: u32, count: u32) -> Table {
     let conds = vec![Cond { kind: lc::HARVESTED, value: 1.0, tag: u32::MAX, prop: String::new() }];
-    Table { pools: vec![Pool { rolls: (1, 1), conds, entries: vec![Entry { item, weight: 1, min: count, max: count, conds: Vec::new(), smelt: None }] }] }
+    Table {
+        pools: vec![Pool {
+            rolls: (1, 1),
+            conds,
+            entries: vec![Entry { item, weight: 1, min: count, max: count, conds: Vec::new(), smelt: None }],
+        }],
+    }
 }
 
 // ---------------------------------------------------------------- rolling
@@ -209,14 +248,20 @@ fn passes(c: &crate::content::Content, conds: &[Cond], ctx: &Ctx, rng: &mut dyn 
         lc::CHANCE => rng() < cd.value,
         lc::TOOL_TAG => !ctx.tool.is_empty() && c.components.has(comps::ITEM, ctx.tool.item, cd.tag),
         lc::NOT_TOOL_TAG => ctx.tool.is_empty() || !c.components.has(comps::ITEM, ctx.tool.item, cd.tag),
-        lc::TOOL_LEVEL => !ctx.tool.is_empty() && c.item_value::<u32>(ctx.tool.item, c.ids.tool_level).unwrap_or(0) as f32 >= cd.value,
+        lc::TOOL_LEVEL => {
+            !ctx.tool.is_empty()
+                && c.item_value::<u32>(ctx.tool.item, c.ids.tool_level)
+                    .unwrap_or(0) as f32
+                    >= cd.value
+        }
         lc::KILLED_BY_PLAYER => ctx.by_player,
         lc::ON_FIRE => ctx.on_fire,
         lc::HARVESTED => ctx.mined == 0 || c.harvests(ctx.mined, ctx.tool.item),
         // Not per tick or per entity: only when a table is rolled for a block.
         lc::BLOCK_STATE => {
             let name = c.state_name(ctx.state);
-            name.split_once('[').is_some_and(|(_, props)| props.trim_end_matches(']').split(',').any(|p| p == cd.prop))
+            name.split_once('[')
+                .is_some_and(|(_, props)| props.trim_end_matches(']').split(',').any(|p| p == cd.prop))
         }
         _ => false,
     })
@@ -232,7 +277,11 @@ pub fn roll(c: &crate::content::Content, t: &Table, ctx: &Ctx, rng: &mut dyn FnM
         }
         let rolls = p.rolls.0 + ((rng() * (p.rolls.1 - p.rolls.0 + 1) as f32) as u32).min(p.rolls.1 - p.rolls.0);
         for _ in 0..rolls {
-            let ok: Vec<&Entry> = p.entries.iter().filter(|e| passes(c, &e.conds, ctx, rng)).collect();
+            let ok: Vec<&Entry> = p
+                .entries
+                .iter()
+                .filter(|e| passes(c, &e.conds, ctx, rng))
+                .collect();
             let total: u32 = ok.iter().map(|e| e.weight).sum();
             if total == 0 {
                 continue;
@@ -261,7 +310,10 @@ pub fn roll(c: &crate::content::Content, t: &Table, ctx: &Ctx, rng: &mut dyn FnM
                     }
                 }
             }
-            match out.iter_mut().find(|s| s.item == item && s.count + n <= c.max_stack(item)) {
+            match out
+                .iter_mut()
+                .find(|s| s.item == item && s.count + n <= c.max_stack(item))
+            {
                 Some(s) => s.count += n,
                 None => out.push(ItemStack::new(item, n)),
             }

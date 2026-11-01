@@ -58,7 +58,10 @@ pub struct Slots {
 impl Slots {
     /// Slot of a snippet (`ns:name`), 0 if it is not there.
     pub fn slot(&self, name: &str) -> u32 {
-        self.names.iter().position(|n| n == name).map_or(0, |i| i as u32 + 1)
+        self.names
+            .iter()
+            .position(|n| n == name)
+            .map_or(0, |i| i as u32 + 1)
     }
 }
 
@@ -110,7 +113,17 @@ pub fn compose(label: &str, base: &str, parts: &[(&Hook, &[(String, String)])]) 
             }
         }
     }
-    let slots = |chosen: &[Snippet]| -> Vec<Slots> { (0..hooks.len()).map(|h| Slots { names: chosen.iter().filter(|s| s.0 == h).map(|s| s.1.0.clone()).collect() }).collect() };
+    let slots = |chosen: &[Snippet]| -> Vec<Slots> {
+        (0..hooks.len())
+            .map(|h| Slots {
+                names: chosen
+                    .iter()
+                    .filter(|s| s.0 == h)
+                    .map(|s| s.1.0.clone())
+                    .collect(),
+            })
+            .collect()
+    };
     if let Ok(shader) = Shader::from_wgsl(label, &source(base, &hooks, &all)) {
         return Ok((shader, slots(&all)));
     }

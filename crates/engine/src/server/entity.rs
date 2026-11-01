@@ -1,8 +1,8 @@
 //! Entities of one dimension: core state in a dense list, mod components as raw bytes, inventories
 //! as an engine contract every mod can read and write.
 
-use rayon::prelude::*;
 use glam::{DVec3, IVec3};
+use rayon::prelude::*;
 use rustc_hash::{FxHashMap, FxHashSet};
 use weft_abi::{ItemStack, entity_flags as ef};
 
@@ -74,7 +74,10 @@ pub struct Entity {
 pub enum Motion {
     Free,
     /// To there, in that many ticks.
-    To { to: DVec3, left: u16 },
+    To {
+        to: DVec3,
+        left: u16,
+    },
     /// It has landed and is waiting to go: its blocks are the world's now.
     Parked,
 }
@@ -139,7 +142,10 @@ impl Entity {
     /// its kind's; crouching lowers either.
     pub fn dims(&self, c: &Content) -> (f64, f64, f64) {
         let k = &c.game.entities[self.kind as usize];
-        let [w, h, eye] = self.size.unwrap_or([k.width, k.height, k.eye]).map(|v| v as f64);
+        let [w, h, eye] = self
+            .size
+            .unwrap_or([k.width, k.height, k.eye])
+            .map(|v| v as f64);
         let (h, eye) = physics::posed(self.pose, h, eye);
         (w / 2.0, h, eye)
     }
@@ -166,7 +172,11 @@ impl Entity {
     /// Something that stands in the world and can be hit: not a dropped item, a block's entity or
     /// a spectator.
     pub fn is_body(&self, c: &Content) -> bool {
-        !self.removed && self.item.is_empty() && self.anchor.is_none() && self.kind != c.game.virtual_kind && self.mode != crate::world::GameMode::Spectator
+        !self.removed
+            && self.item.is_empty()
+            && self.anchor.is_none()
+            && self.kind != c.game.virtual_kind
+            && self.mode != crate::world::GameMode::Spectator
     }
 
     pub fn state(&self, c: &Content, max_health: f32) -> weft_abi::EntityState {
@@ -189,7 +199,10 @@ impl Entity {
             age: self.age,
             fall: self.fall,
             moved: self.moved,
-            size: { let (hw, h, eye) = self.dims(c); [hw as f32 * 2.0, h as f32, eye as f32] },
+            size: {
+                let (hw, h, eye) = self.dims(c);
+                [hw as f32 * 2.0, h as f32, eye as f32]
+            },
         }
     }
 }
@@ -219,40 +232,56 @@ pub struct Entities {
 /// Falls up to this many blocks do no damage.
 pub const SAFE_FALL: f32 = 3.0;
 
-
 /// What a component of an entity of `kind` starts as: the kind's own value, or the component's.
 fn starting_value(c: &Content, kind: &crate::registry::EntityKind, comp: u32) -> Box<[u8]> {
     match kind.values.iter().find(|v| v.0 == comp) {
         Some(v) => v.1.clone(),
-        None => c.game.components[comp as usize].default.clone().into_boxed_slice(),
+        None => c.game.components[comp as usize]
+            .default
+            .clone()
+            .into_boxed_slice(),
     }
 }
 
 impl Entities {
     /// What it holds in the selected slot.
     pub fn held(&self, id: u64) -> weft_abi::ItemStack {
-        self.get(id).and_then(|e| self.inventories.get(&id)?.get(e.selected as usize).copied()).unwrap_or_default()
+        self.get(id)
+            .and_then(|e| self.inventories.get(&id)?.get(e.selected as usize).copied())
+            .unwrap_or_default()
     }
 
     pub fn get(&self, id: u64) -> Option<&Entity> {
-        self.index.get(&id).map(|&i| &self.list[i]).filter(|e| !e.removed)
+        self.index
+            .get(&id)
+            .map(|&i| &self.list[i])
+            .filter(|e| !e.removed)
     }
 
     pub fn get_mut(&mut self, id: u64) -> Option<&mut Entity> {
-        self.index.get(&id).map(|&i| &mut self.list[i]).filter(|e| !e.removed)
+        self.index
+            .get(&id)
+            .map(|&i| &mut self.list[i])
+            .filter(|e| !e.removed)
     }
 
     pub fn insert(&mut self, c: &Content, e: Entity) {
         let id = e.id;
         let kind = &c.game.entities[e.kind as usize];
         for &comp in &kind.components {
-            self.comps.entry((id, comp)).or_insert_with(|| starting_value(c, kind, comp));
+            self.comps
+                .entry((id, comp))
+                .or_insert_with(|| starting_value(c, kind, comp));
         }
         if kind.slots > 0 {
-            self.inventories.entry(id).or_insert_with(|| vec![ItemStack::EMPTY; kind.slots as usize]);
+            self.inventories
+                .entry(id)
+                .or_insert_with(|| vec![ItemStack::EMPTY; kind.slots as usize]);
         }
         if e.player {
-            self.inventories.entry(id).or_insert_with(|| vec![ItemStack::EMPTY; c.game.player_layout.slots as usize]);
+            self.inventories
+                .entry(id)
+                .or_insert_with(|| vec![ItemStack::EMPTY; c.game.player_layout.slots as usize]);
         }
         if let Some(a) = e.anchor {
             self.anchors.insert((e.block_frame(), a), id);
@@ -301,12 +330,19 @@ impl Entities {
 
     /// Who decides which region `e` is in: the body holding it, if it is a block on one.
     pub fn follows<'a>(&'a self, e: &'a Entity) -> &'a Entity {
-        e.frame.filter(|_| e.anchor.is_some()).and_then(|f| self.get(f)).unwrap_or(e)
+        e.frame
+            .filter(|_| e.anchor.is_some())
+            .and_then(|f| self.get(f))
+            .unwrap_or(e)
     }
 
     /// Block entities on body `id`.
     pub fn on_body(&self, id: u64) -> Vec<u64> {
-        self.list.iter().filter(|e| !e.removed && e.anchor.is_some() && e.frame == Some(id)).map(|e| e.id).collect()
+        self.list
+            .iter()
+            .filter(|e| !e.removed && e.anchor.is_some() && e.frame == Some(id))
+            .map(|e| e.id)
+            .collect()
     }
 
     pub fn remove(&mut self, id: u64) {
@@ -324,9 +360,19 @@ impl Entities {
         if !self.list.iter().any(|e| e.removed) {
             return;
         }
-        let gone: FxHashSet<u64> = self.list.iter().filter(|e| e.removed).map(|e| e.id).collect();
+        let gone: FxHashSet<u64> = self
+            .list
+            .iter()
+            .filter(|e| e.removed)
+            .map(|e| e.id)
+            .collect();
         self.list.retain(|e| !e.removed);
-        self.index = self.list.iter().enumerate().map(|(i, e)| (e.id, i)).collect();
+        self.index = self
+            .list
+            .iter()
+            .enumerate()
+            .map(|(i, e)| (e.id, i))
+            .collect();
         self.comps.retain(|(e, _), _| !gone.contains(e));
         self.sent.retain(|(e, _), _| !gone.contains(e));
         for id in &gone {
@@ -349,20 +395,35 @@ impl Entities {
     /// Takes an entity out entirely (moving it to another dimension).
     /// Whether any of `stack` would fit in its inventory.
     pub fn can_insert(&self, c: &Content, id: u64, stack: ItemStack) -> bool {
-        self.inventories.get(&id).is_some_and(|inv| inv.iter().any(|s| s.is_empty() || (s.item == stack.item && s.data == stack.data && s.count < c.items.get(stack.item as usize).map_or(64, |i| i.max_stack))))
+        self.inventories.get(&id).is_some_and(|inv| {
+            inv.iter().any(|s| {
+                s.is_empty()
+                    || (s.item == stack.item
+                        && s.data == stack.data
+                        && s.count < c.items.get(stack.item as usize).map_or(64, |i| i.max_stack))
+            })
+        })
     }
 
     pub fn take(&mut self, id: u64) -> Option<(Entity, Option<Vec<ItemStack>>, Vec<(u32, Box<[u8]>)>)> {
         let i = *self.index.get(&id)?;
         let e = self.list.remove(i);
-        self.index = self.list.iter().enumerate().map(|(i, e)| (e.id, i)).collect();
+        self.index = self
+            .list
+            .iter()
+            .enumerate()
+            .map(|(i, e)| (e.id, i))
+            .collect();
         // Its block is the new region's now; here, the place would still count as taken.
         if let Some(a) = e.anchor {
             self.anchors.remove(&(e.block_frame(), a));
         }
         let inv = self.inventories.remove(&id);
         let keys: Vec<(u64, u32)> = self.comps.keys().filter(|k| k.0 == id).copied().collect();
-        let comps = keys.into_iter().filter_map(|k| self.comps.remove(&k).map(|v| (k.1, v))).collect();
+        let comps = keys
+            .into_iter()
+            .filter_map(|k| self.comps.remove(&k).map(|v| (k.1, v)))
+            .collect();
         self.sent.retain(|k, _| k.0 != id);
         Some((e, inv, comps))
     }
@@ -370,7 +431,12 @@ impl Entities {
     /// Canonical tick order after regions merge.
     pub fn sort_by_id(&mut self) {
         self.list.sort_by_key(|e| e.id);
-        self.index = self.list.iter().enumerate().map(|(i, e)| (e.id, i)).collect();
+        self.index = self
+            .list
+            .iter()
+            .enumerate()
+            .map(|(i, e)| (e.id, i))
+            .collect();
     }
 
     pub fn set_slot(&mut self, owner: u64, slot: u32, stack: ItemStack) {
@@ -388,7 +454,11 @@ impl Entities {
         // Pickups never go into a player's equipment.
         let worn = if self.get(owner).is_some_and(|e| e.player) { c.game.player_layout.worn.clone() } else { 0..0 };
         let Some(inv) = self.inventories.get_mut(&owner) else { return stack };
-        for (_, s) in inv.iter_mut().enumerate().filter(|(i, _)| !worn.contains(&(*i as u32))) {
+        for (_, s) in inv
+            .iter_mut()
+            .enumerate()
+            .filter(|(i, _)| !worn.contains(&(*i as u32)))
+        {
             if stack.count == 0 {
                 break;
             }
@@ -398,7 +468,11 @@ impl Entities {
                 stack.count -= n;
             }
         }
-        for (_, s) in inv.iter_mut().enumerate().filter(|(i, _)| !worn.contains(&(*i as u32))) {
+        for (_, s) in inv
+            .iter_mut()
+            .enumerate()
+            .filter(|(i, _)| !worn.contains(&(*i as u32)))
+        {
             if stack.count == 0 {
                 break;
             }
@@ -414,7 +488,11 @@ impl Entities {
 
     /// What can be hit and is alive within `radius`.
     pub fn near_bodies(&self, c: &Content, pos: DVec3, radius: f64) -> Vec<u64> {
-        self.list.iter().filter(|e| e.is_body(c) && e.alive() && (e.pos - pos).length_squared() <= radius * radius).map(|e| e.id).collect()
+        self.list
+            .iter()
+            .filter(|e| e.is_body(c) && e.alive() && (e.pos - pos).length_squared() <= radius * radius)
+            .map(|e| e.id)
+            .collect()
     }
 
     pub fn near(&self, pos: DVec3, radius: f64, kind: u32) -> Vec<u64> {
@@ -466,7 +544,10 @@ pub fn step(c: &Content, e: &mut Entity, gravity: f64, block: &impl Fn(IVec3) ->
     }
     if k.is(ef::KINEMATIC) || e.motion == Motion::Parked {
         // On another body, it goes with that too (a piston on a platform moving blocks).
-        let carried = e.frame.and_then(|f| bodies.iter().find(|b| b.id == f)).map_or(DVec3::ZERO, |b| b.delta);
+        let carried = e
+            .frame
+            .and_then(|f| bodies.iter().find(|b| b.id == f))
+            .map_or(DVec3::ZERO, |b| b.delta);
         e.pos += carried;
         match &mut e.motion {
             Motion::To { to, left } => {
@@ -519,7 +600,12 @@ pub fn step(c: &Content, e: &mut Entity, gravity: f64, block: &impl Fn(IVec3) ->
             ctl.swim = true;
         }
     }
-    let frame = physics::Frame { half_width: hw, height: h, step: if e.item.is_empty() { 0.6 } else { 0.0 }, gravity: if k.is(ef::NO_GRAVITY) { 0.0 } else { gravity * DT * DT } };
+    let frame = physics::Frame {
+        half_width: hw,
+        height: h,
+        step: if e.item.is_empty() { 0.6 } else { 0.0 },
+        gravity: if k.is(ef::NO_GRAVITY) { 0.0 } else { gravity * DT * DT },
+    };
     let mut v = e.vel * DT;
     let r = physics::walk(c, block, bodies, e.id, &mut e.pos, &mut v, e.on_ground, &ctl, &frame);
     e.vel = v / DT;
@@ -553,35 +639,42 @@ pub fn soft_push(c: &Content, list: &[Entity]) -> Vec<(usize, DVec3)> {
     };
     let mut cells: FxHashMap<(i32, i32), Vec<usize>> = FxHashMap::default();
     for (i, e) in list.iter().enumerate().filter(|(_, e)| soft(e)) {
-        cells.entry(((e.pos.x / 2.0).floor() as i32, (e.pos.z / 2.0).floor() as i32)).or_default().push(i);
+        cells
+            .entry(((e.pos.x / 2.0).floor() as i32, (e.pos.z / 2.0).floor() as i32))
+            .or_default()
+            .push(i);
     }
-    list.par_iter().with_min_len(256).enumerate().filter(|(_, e)| soft(e) && !e.player).filter_map(|(i, e)| {
-        let (cx, cz) = ((e.pos.x / 2.0).floor() as i32, (e.pos.z / 2.0).floor() as i32);
-        let mut push = DVec3::ZERO;
-        // Each mob feels at most this many others (vanilla's cramming limit), so a thousand in
-        // one spot cost a thousand times that, not a million pairs.
-        let (mut felt, mut looked) = (0, 0);
-        'near: for dz in -1..=1 {
-            for dx in -1..=1 {
-                for &j in cells.get(&(cx + dx, cz + dz)).into_iter().flatten() {
-                    looked += 1;
-                    if felt == MAX_CRAMMING || looked > 4 * MAX_CRAMMING {
-                        break 'near;
+    list.par_iter()
+        .with_min_len(256)
+        .enumerate()
+        .filter(|(_, e)| soft(e) && !e.player)
+        .filter_map(|(i, e)| {
+            let (cx, cz) = ((e.pos.x / 2.0).floor() as i32, (e.pos.z / 2.0).floor() as i32);
+            let mut push = DVec3::ZERO;
+            // Each mob feels at most this many others (vanilla's cramming limit), so a thousand in
+            // one spot cost a thousand times that, not a million pairs.
+            let (mut felt, mut looked) = (0, 0);
+            'near: for dz in -1..=1 {
+                for dx in -1..=1 {
+                    for &j in cells.get(&(cx + dx, cz + dz)).into_iter().flatten() {
+                        looked += 1;
+                        if felt == MAX_CRAMMING || looked > 4 * MAX_CRAMMING {
+                            break 'near;
+                        }
+                        let o = &list[j];
+                        let reach = e.dims(c).0 + o.dims(c).0;
+                        let d = e.pos - o.pos;
+                        if j == i || d.x.abs() >= reach || d.z.abs() >= reach || d.y >= o.height(c) || -d.y >= e.height(c) {
+                            continue;
+                        }
+                        // Exactly on top of each other: split by id so they still drift apart.
+                        let d = if d.x.abs() + d.z.abs() < 1e-4 { DVec3::new(if e.id < o.id { -0.01 } else { 0.01 }, d.y, 0.0) } else { d };
+                        push += physics::nudge(d);
+                        felt += 1;
                     }
-                    let o = &list[j];
-                    let reach = e.dims(c).0 + o.dims(c).0;
-                    let d = e.pos - o.pos;
-                    if j == i || d.x.abs() >= reach || d.z.abs() >= reach || d.y >= o.height(c) || -d.y >= e.height(c) {
-                        continue;
-                    }
-                    // Exactly on top of each other: split by id so they still drift apart.
-                    let d = if d.x.abs() + d.z.abs() < 1e-4 { DVec3::new(if e.id < o.id { -0.01 } else { 0.01 }, d.y, 0.0) } else { d };
-                    push += physics::nudge(d);
-                    felt += 1;
                 }
             }
-        }
-        (push != DVec3::ZERO).then_some((i, push * crate::world::TPS as f64))
-    })
-    .collect()
+            (push != DVec3::ZERO).then_some((i, push * crate::world::TPS as f64))
+        })
+        .collect()
 }

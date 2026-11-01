@@ -65,7 +65,9 @@ impl ClientView {
         if unsafe { (host().player_group)(Str::new(name), &mut out) } == 0 {
             return Vec::new();
         }
-        (out[0]..out[0] + out[1]).map(|i| self.inventory_slot(i)).collect()
+        (out[0]..out[0] + out[1])
+            .map(|i| self.inventory_slot(i))
+            .collect()
     }
     /// The local player is in creative mode.
     pub fn creative(&self) -> bool {
@@ -632,7 +634,12 @@ impl Ui {
     }
 
     /// A slider at `value` (0..1, read every frame); `on_change` gets where the player drags it.
-    pub fn slider(&mut self, s: S, value: impl Fn(&ClientView) -> f32 + Send + Sync + 'static, on_change: impl Fn(&ClientView, f32) + Send + Sync + 'static) {
+    pub fn slider(
+        &mut self,
+        s: S,
+        value: impl Fn(&ClientView) -> f32 + Send + Sync + 'static,
+        on_change: impl Fn(&ClientView, f32) + Send + Sync + 'static,
+    ) {
         let mut n = node(k::SLIDER, s);
         n.bind = bind(value);
         n.on_change = callback(move |a: &mut abi::UiChangeArgs| on_change(&ClientView { raw: a.client }, a.value));

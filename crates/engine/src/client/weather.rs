@@ -47,26 +47,29 @@ pub struct Weather {
 
 impl Weather {
     pub fn new(gpu: &mut dyn Backend, assets: &Assets) -> Weather {
-        let mut w = Weather { pipe: None, pictures: [None, None], columns: Vec::new(), built: None, instances: Vec::new(), gpu: Vec::new() };
+        let mut w =
+            Weather { pipe: None, pictures: [None, None], columns: Vec::new(), built: None, instances: Vec::new(), gpu: Vec::new() };
         w.reload(gpu, assets);
         w
     }
 
     pub fn reload(&mut self, gpu: &mut dyn Backend, assets: &Assets) {
-        let made = crate::packs::compose(assets, "weather.wgsl", &[]).map_err(|e| e.0).and_then(|(shader, _)| {
-            gpu.create_pipeline(&PipelineDesc {
-                label: "weather",
-                shader: &shader,
-                vertex: "vs",
-                fragment: Some("fs"),
-                color: Some(Format::Surface),
-                depth: Some(DepthState { write: false, compare: Compare::GreaterEqual }),
-                blend: Blend::Alpha,
-                cull_back: false,
-                topology: Topology::Triangles,
-            })
+        let made = crate::packs::compose(assets, "weather.wgsl", &[])
             .map_err(|e| e.0)
-        });
+            .and_then(|(shader, _)| {
+                gpu.create_pipeline(&PipelineDesc {
+                    label: "weather",
+                    shader: &shader,
+                    vertex: "vs",
+                    fragment: Some("fs"),
+                    color: Some(Format::Surface),
+                    depth: Some(DepthState { write: false, compare: Compare::GreaterEqual }),
+                    blend: Blend::Alpha,
+                    cull_back: false,
+                    topology: Topology::Triangles,
+                })
+                .map_err(|e| e.0)
+            });
         match made {
             Ok(pipe) => {
                 if let Some(old) = self.pipe.replace(pipe) {
@@ -77,12 +80,17 @@ impl Weather {
         }
         self.drop_pictures(gpu);
         self.pictures = ["core:environment/rain", "core:environment/snow"].map(|name| {
-            let img = assets.read(name, "textures", "png").and_then(|b| decode_png(&b));
+            let img = assets
+                .read(name, "textures", "png")
+                .and_then(|b| decode_png(&b));
             if img.is_none() {
                 log::error!("weather: no picture {name}");
             }
             img.map(|img| {
-                let texture = gpu.create_texture(&TextureDesc { width: img.width, height: img.height, mips: 1, format: Format::Rgba8Srgb, render_target: false }, name);
+                let texture = gpu.create_texture(
+                    &TextureDesc { width: img.width, height: img.height, mips: 1, format: Format::Rgba8Srgb, render_target: false },
+                    name,
+                );
                 gpu.write_texture(texture, 0, &img.rgba);
                 (texture, gpu.texture_index(texture))
             })
@@ -122,7 +130,9 @@ impl Weather {
                     continue;
                 }
                 let floor = (eye.y - REACH..top).rev().find(|&y| {
-                    let s = world.block_or_air(IVec3::new(x, y, z)).unwrap_or(crate::content::AIR);
+                    let s = world
+                        .block_or_air(IVec3::new(x, y, z))
+                        .unwrap_or(crate::content::AIR);
                     c.states[s as usize].flags & (weft_abi::block_flags::SOLID | weft_abi::block_flags::LIQUID) != 0
                 });
                 let bottom = floor.map_or(eye.y - REACH, |y| y + 1);
@@ -130,17 +140,34 @@ impl Weather {
                     continue;
                 }
                 let cell = IVec3::new(x, bottom, z);
-                let biome = world.cube(cell >> 4i32).map_or(0, |cube| cube.biome((x & 15) as usize, (z & 15) as usize));
-                let cold = c.ids.snowy.is_some_and(|t| c.components.has(crate::components::BIOME, biome as u32, t));
+                let biome = world
+                    .cube(cell >> 4i32)
+                    .map_or(0, |cube| cube.biome((x & 15) as usize, (z & 15) as usize));
+                let cold = c
+                    .ids
+                    .snowy
+                    .is_some_and(|t| c.components.has(crate::components::BIOME, biome as u32, t));
                 let seed = (x.wrapping_mul(3121) ^ z.wrapping_mul(45238971)) as u32;
-                self.columns.push(Column { x, z, bottom, top, cold, light: world.light(cell), seed: seed.wrapping_mul(0x9E37_79B1) >> 8 });
+                self.columns
+                    .push(Column { x, z, bottom, top, cold, light: world.light(cell), seed: seed.wrapping_mul(0x9E37_79B1) >> 8 });
             }
         }
     }
 
     /// `level`: how much of it there is, 0..1. `ticks`: game ticks, with the fraction of one.
     #[allow(clippy::too_many_arguments)]
-    pub fn draw(&mut self, gpu: &mut dyn Backend, list: &mut CommandList, frame: &FrameInfo, cam: &Camera, scene: BufferId, world: &ClientWorld, level: f32, ticks: f64, dt: f32) {
+    pub fn draw(
+        &mut self,
+        gpu: &mut dyn Backend,
+        list: &mut CommandList,
+        frame: &FrameInfo,
+        cam: &Camera,
+        scene: BufferId,
+        world: &ClientWorld,
+        level: f32,
+        ticks: f64,
+        dt: f32,
+    ) {
         let Some(pipe) = self.pipe else { return };
         if level <= 0.0 {
             self.built = None;

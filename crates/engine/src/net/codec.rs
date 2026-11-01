@@ -297,7 +297,16 @@ mod tests {
         let msgs = [
             ToServer::Join { name: "Ann".into(), key: "k".into() },
             ToServer::Use { pos: IVec3::new(-5, 70, 3), face: 3, look: [0.1, -0.5, 0.8], sneak: true, frame: 0 },
-            ToServer::Move { pos: DVec3::new(1.5, 64.0, -3.25), yaw: 1.0, pitch: -0.5, on_ground: true, pose: crate::world::Pose::Swim, sprint: true, flying: false, frame: Some((7, DVec3::ONE)) },
+            ToServer::Move {
+                pos: DVec3::new(1.5, 64.0, -3.25),
+                yaw: 1.0,
+                pitch: -0.5,
+                on_ground: true,
+                pose: crate::world::Pose::Swim,
+                sprint: true,
+                flying: false,
+                frame: Some((7, DVec3::ONE)),
+            },
             ToServer::UseItem { target: Some((IVec3::new(1, 2, 3), 4)) },
             ToServer::Click { slot: 7, button: 1, shift: true },
             ToServer::Drag { slots: vec![3, 4, 9], button: 0 },
@@ -314,7 +323,15 @@ mod tests {
 
     #[test]
     fn tags_follow_the_message_table() {
-        for m in [ToClient::Died, ToClient::Chat(Msg::new("chat.message", vec![Arg::Text("me".into()), Arg::Int(-3), Arg::Msg(Msg::new("k", vec![Arg::Float(1.5, 2)]))])), ToClient::Despawn(vec![(4, true)]), ToClient::Animate(Vec::new())] {
+        for m in [
+            ToClient::Died,
+            ToClient::Chat(Msg::new(
+                "chat.message",
+                vec![Arg::Text("me".into()), Arg::Int(-3), Arg::Msg(Msg::new("k", vec![Arg::Float(1.5, 2)]))],
+            )),
+            ToClient::Despawn(vec![(4, true)]),
+            ToClient::Animate(Vec::new()),
+        ] {
             let bytes = encode_client(&m);
             assert_eq!(bytes[0] as usize, m.kind());
             assert_eq!(decode_client(&bytes).map(|b| b.kind()), Some(m.kind()));
@@ -333,7 +350,15 @@ mod tests {
 
     #[test]
     fn gizmos_roundtrip() {
-        let g = crate::net::GizmoShape { group: "regions".into(), kind: 1, a: DVec3::new(1.0, 2.0, 3.0), b: DVec3::splat(-4.5), color: 0xFF8000FF, ticks: 21, text: Msg::new("gizmo.value", vec![Arg::Text("r0".into())]) };
+        let g = crate::net::GizmoShape {
+            group: "regions".into(),
+            kind: 1,
+            a: DVec3::new(1.0, 2.0, 3.0),
+            b: DVec3::splat(-4.5),
+            color: 0xFF8000FF,
+            ticks: 21,
+            text: Msg::new("gizmo.value", vec![Arg::Text("r0".into())]),
+        };
         let Some(ToClient::Gizmos(back)) = decode_client(&encode_client(&ToClient::Gizmos(vec![g.clone()]))) else { panic!("not decoded") };
         assert_eq!(back, vec![g]);
     }

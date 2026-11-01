@@ -8,7 +8,8 @@ use weft_sdk::*;
 
 /// How many of each event arrived since `events reset`, in `EVENT_NAMES` order.
 static COUNTS: [AtomicU32; 8] = [const { AtomicU32::new(0) }; 8];
-const EVENT_NAMES: [&str; 8] = ["block_broken", "block_placed", "item_picked_up", "entity_died", "entity_hurt", "player_joined", "item_used", "smelted"];
+const EVENT_NAMES: [&str; 8] =
+    ["block_broken", "block_placed", "item_picked_up", "entity_died", "entity_hurt", "player_joined", "item_used", "smelted"];
 
 use base_api::SMELTED;
 static GOLD: Block = Block::named("base:gold_block");
@@ -54,17 +55,31 @@ pub fn register(r: &mut Registry) {
     static VARIED_PLANT: Block = Block::named("varied_plant");
     static VARIED_BOX: Block = Block::named("varied_box");
     r.block(&VARIED_PLANT).texture("varied").plant().no_item();
-    r.block(&VARIED_BOX).texture("varied").model_box([2.0, 0.0, 2.0], [14.0, 16.0, 14.0]).no_item();
+    r.block(&VARIED_BOX)
+        .texture("varied")
+        .model_box([2.0, 0.0, 2.0], [14.0, 16.0, 14.0])
+        .no_item();
     static VARIED_CUBE: Block = Block::named("varied_cube");
     r.block(&VARIED_CUBE).texture("varied_cube").no_item();
     // A mod's own redstone: a gate on when both its rear and a side have power, another wire.
     static AND_GATE: Block = Block::named("and_gate");
     static BLUE_WIRE: Block = Block::named("blue_wire");
-    r.block(&DRILL).on_pass(|_| {
-        PASSES.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-    }).texture("varied").no_item();
-    r.block(&AND_GATE).signal_logic(2, |s| if s.rear() > 0 && s.sides().iter().any(|v| *v > 0) { 15 } else { 0 }).model_box([0.0, 0.0, 0.0], [16.0, 2.0, 16.0]).not_solid().texture("varied").no_item();
-    r.block(&BLUE_WIRE).wire().textures("varied", "varied", "varied").no_item();
+    r.block(&DRILL)
+        .on_pass(|_| {
+            PASSES.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        })
+        .texture("varied")
+        .no_item();
+    r.block(&AND_GATE)
+        .signal_logic(2, |s| if s.rear() > 0 && s.sides().iter().any(|v| *v > 0) { 15 } else { 0 })
+        .model_box([0.0, 0.0, 0.0], [16.0, 2.0, 16.0])
+        .not_solid()
+        .texture("varied")
+        .no_item();
+    r.block(&BLUE_WIRE)
+        .wire()
+        .textures("varied", "varied", "varied")
+        .no_item();
     r.entity_component(&MARK, 0, component_flags::SYNC_WATCHERS);
     r.attach(&PIG, &MARK);
     r.config(&COUNT_MARKS).bool(false).world();
@@ -85,7 +100,9 @@ pub fn register(r: &mut Registry) {
     r.config(&PEACE).bool(false).world();
     r.intercept(&question::ATTACK, |q| {
         let w = q.world();
-        let mob = w.entity(q.entity()).is_some_and(|e| !w.each_player().any(|p| p == q.entity()) && e.health > 0.0);
+        let mob = w
+            .entity(q.entity())
+            .is_some_and(|e| !w.each_player().any(|p| p == q.entity()) && e.health > 0.0);
         if mob && PEACE.get() { Verdict::Deny } else { Verdict::Abstain }
     });
     r.config(&NO_HURT).bool(false).world();
@@ -170,7 +187,9 @@ fn pos(cmd: &Command, name: &str) -> Result<[i32; 3], String> {
 }
 
 fn int<T: TryFrom<i64>>(cmd: &Command, name: &str) -> Result<T, String> {
-    cmd.int(name).and_then(|v| T::try_from(v).ok()).ok_or_else(|| format!("missing {name}"))
+    cmd.int(name)
+        .and_then(|v| T::try_from(v).ok())
+        .ok_or_else(|| format!("missing {name}"))
 }
 
 fn word<'a>(cmd: &'a Command, name: &str) -> Result<&'a str, String> {
@@ -210,7 +229,10 @@ fn run(w: &World, cmd: &Command) -> Result<String, String> {
     let player = cmd.player();
     let me = w.entity(player).map(|e| e.block_pos()).unwrap_or_default();
     // The operation is the literal that came first; a parameter may share its name (`slot`).
-    let op = OPS.iter().find(|o| cmd.text(o.0) == Some(o.0)).ok_or("no operation")?;
+    let op = OPS
+        .iter()
+        .find(|o| cmd.text(o.0) == Some(o.0))
+        .ok_or("no operation")?;
     (op.2)(w, cmd, player, me)
 }
 
@@ -264,10 +286,18 @@ const OPS: &[(&str, &str, Run)] = &[
         Ok(String::new())
     }),
     ("bodygo", "<id:int> <x:float> <y:float> <z:float> <ticks:int>", |w, cmd, _, _| {
-        w.body_go(int(cmd, "id")?, [cmd.float("x").ok_or("x")? as f64, cmd.float("y").ok_or("y")? as f64, cmd.float("z").ok_or("z")? as f64], int(cmd, "ticks")?);
+        w.body_go(
+            int(cmd, "id")?,
+            [cmd.float("x").ok_or("x")? as f64, cmd.float("y").ok_or("y")? as f64, cmd.float("z").ok_or("z")? as f64],
+            int(cmd, "ticks")?,
+        );
         Ok(String::new())
     }),
-    ("passes", "", |_, _, _, _| Ok(PASSES.load(std::sync::atomic::Ordering::Relaxed).to_string())),
+    ("passes", "", |_, _, _, _| {
+        Ok(PASSES
+            .load(std::sync::atomic::Ordering::Relaxed)
+            .to_string())
+    }),
     ("structureset", "<id:int> <x:int> <y:int> <z:int> <block:block>", |w, cmd, _, _| {
         let (id, p) = (int::<u64>(cmd, "id")?, [int::<i32>(cmd, "x")?, int::<i32>(cmd, "y")?, int::<i32>(cmd, "z")?]);
         if w.set_structure_block(id, p, self::id(cmd, "block")?) { Ok(String::new()) } else { Err(format!("no structure {id}")) }
@@ -370,13 +400,18 @@ const OPS: &[(&str, &str, Run)] = &[
         Ok(format!("{} {}", g.len(), (0..g.len()).filter(|&i| !g.get(i).is_empty()).count()))
     }),
     ("pings", "", |_, _, _, _| Ok(PINGS.load(Ordering::Relaxed).to_string())),
-    ("setprop", "<pos:pos> <prop:word> <value:word>", |w, cmd, _, _| Ok((w.set_prop(pos(cmd, "pos")?, word(cmd, "prop")?, word(cmd, "value")?) as u32).to_string())),
+    ("setprop", "<pos:pos> <prop:word> <value:word>", |w, cmd, _, _| {
+        Ok((w.set_prop(pos(cmd, "pos")?, word(cmd, "prop")?, word(cmd, "value")?) as u32).to_string())
+    }),
     ("sblock", "<id:int> <pos:pos> [block:block]", |w, cmd, _, _| {
         // A block of a moving structure, or set it.
         let (id_, p) = (int::<u64>(cmd, "id")?, pos(cmd, "pos")?);
         match cmd.id("block") {
             Some(b) => Ok((w.set_structure_block(id_, p, b) as u32).to_string()),
-            None => w.structure_block(id_, p).map(|s| block_name(s).to_string()).ok_or_else(|| "not a structure".to_string()),
+            None => w
+                .structure_block(id_, p)
+                .map(|s| block_name(s).to_string())
+                .ok_or_else(|| "not a structure".to_string()),
         }
     }),
     ("light", "<pos:pos>", |w, cmd, _, _| Ok(w.light(pos(cmd, "pos")?).to_string())),
@@ -387,12 +422,15 @@ const OPS: &[(&str, &str, Run)] = &[
     ("slot", "@owner <index:int>", |w, cmd, _, _| Ok(stack_text(w.inventory(owner(w, cmd)?).get(int(cmd, "index")?)))),
     ("put", "@owner <index:int> <item:item> [count:int]", |w, cmd, _, _| {
         let o = owner(w, cmd)?;
-        w.inventory(o).set(int(cmd, "index")?, ItemStack::new(id(cmd, "item")?, int(cmd, "count").unwrap_or(1)));
+        w.inventory(o)
+            .set(int(cmd, "index")?, ItemStack::new(id(cmd, "item")?, int(cmd, "count").unwrap_or(1)));
         Ok(String::new())
     }),
     ("give", "<item:item> [count:int]", |w, cmd, player, _| {
         let count: u32 = int(cmd, "count").unwrap_or(1);
-        let left = w.inventory(player).insert(ItemStack::new(id(cmd, "item")?, count));
+        let left = w
+            .inventory(player)
+            .insert(ItemStack::new(id(cmd, "item")?, count));
         Ok((count - left.count).to_string())
     }),
     ("insert", "<pos:pos> <item:item> [count:int]", |w, cmd, _, _| {
@@ -402,17 +440,24 @@ const OPS: &[(&str, &str, Run)] = &[
             id => id,
         };
         let count: u32 = int(cmd, "count").unwrap_or(1);
-        let left = w.inventory(o).insert(ItemStack::new(id(cmd, "item")?, count));
+        let left = w
+            .inventory(o)
+            .insert(ItemStack::new(id(cmd, "item")?, count));
         Ok((count - left.count).to_string())
     }),
     ("inv", "@owner", |w, cmd, _, _| {
         let inv = w.inventory(owner(w, cmd)?);
-        let parts: Vec<String> = (0..inv.size()).map(|i| (i, inv.get(i))).filter(|(_, s)| !s.is_empty()).map(|(i, s)| format!("{i}:{}:{}", item_name(s.item), s.count)).collect();
+        let parts: Vec<String> = (0..inv.size())
+            .map(|i| (i, inv.get(i)))
+            .filter(|(_, s)| !s.is_empty())
+            .map(|(i, s)| format!("{i}:{}:{}", item_name(s.item), s.count))
+            .collect();
         Ok(parts.join(" "))
     }),
     ("spawn", "<kind:entity> <pos:pos>", |w, cmd, _, _| {
         let p = pos(cmd, "pos")?;
-        Ok(w.spawn_kind(id(cmd, "kind")?, [p[0] as f64 + 0.5, p[1] as f64, p[2] as f64 + 0.5]).to_string())
+        Ok(w.spawn_kind(id(cmd, "kind")?, [p[0] as f64 + 0.5, p[1] as f64, p[2] as f64 + 0.5])
+            .to_string())
     }),
     ("entity", "@entity", |w, cmd, _, _| {
         let e = w.entity(owner(w, cmd)?).ok_or("no such entity")?;
@@ -426,7 +471,14 @@ const OPS: &[(&str, &str, Run)] = &[
         let p = pos(cmd, "pos")?;
         let r = cmd.float("r").ok_or("missing r")?;
         let ids = w.near([p[0] as f64 + 0.5, p[1] as f64, p[2] as f64 + 0.5], r, None);
-        let parts: Vec<String> = ids.iter().filter(|&&id| id != player).filter_map(|&id| w.entity(id).map(|e| format!("{id}:{}", name_of(ek::ENTITY, e.kind)))).collect();
+        let parts: Vec<String> = ids
+            .iter()
+            .filter(|&&id| id != player)
+            .filter_map(|&id| {
+                w.entity(id)
+                    .map(|e| format!("{id}:{}", name_of(ek::ENTITY, e.kind)))
+            })
+            .collect();
         Ok(parts.join(" "))
     }),
     ("animate", "@owner [name:word]", |w, cmd, _, _| {
@@ -458,7 +510,10 @@ const OPS: &[(&str, &str, Run)] = &[
         // `n` dropped stacks of a few kinds (blocks and sprites) in a grid north of the
         // player, 1.1 apart so they do not merge.
         let n: u32 = int(cmd, "n")?;
-        let kinds: Vec<u32> = ["base:dirt", "base:coal", "base:iron_pickaxe", "base:dandelion", "base:stick", "base:torch"].iter().filter_map(|k| Item::lookup(k)).collect();
+        let kinds: Vec<u32> = ["base:dirt", "base:coal", "base:iron_pickaxe", "base:dandelion", "base:stick", "base:torch"]
+            .iter()
+            .filter_map(|k| Item::lookup(k))
+            .collect();
         let side = (n as f64).sqrt().ceil() as u32;
         for i in 0..n {
             let (x, z) = ((i % side) as f64 * 1.1 - side as f64 * 0.55, -3.0 - (i / side) as f64 * 1.1);
@@ -486,7 +541,14 @@ const OPS: &[(&str, &str, Run)] = &[
         // How many of each block (`a,b`) lie within `r` of the player.
         let r: i32 = int(cmd, "r")?;
         let names: Vec<&str> = word(cmd, "blocks")?.split(',').collect();
-        let ids: Vec<u32> = names.iter().map(|n| Block::lookup(n).map(block_of).ok_or(format!("no block {n}"))).collect::<Result<_, _>>()?;
+        let ids: Vec<u32> = names
+            .iter()
+            .map(|n| {
+                Block::lookup(n)
+                    .map(block_of)
+                    .ok_or(format!("no block {n}"))
+            })
+            .collect::<Result<_, _>>()?;
         let mut counts = vec![0u32; ids.len()];
         for y in me[1] - r..=me[1] + r {
             for z in me[2] - r..=me[2] + r {
@@ -498,13 +560,25 @@ const OPS: &[(&str, &str, Run)] = &[
                 }
             }
         }
-        Ok(names.iter().zip(&counts).map(|(n, k)| format!("{n}={k}")).collect::<Vec<_>>().join(" "))
+        Ok(names
+            .iter()
+            .zip(&counts)
+            .map(|(n, k)| format!("{n}={k}"))
+            .collect::<Vec<_>>()
+            .join(" "))
     }),
     ("cube_top_plants", "<r:int>", |w, cmd, _, me| {
         // Land columns within `r` of the player, split by whether the ground is the top layer
         // of its cube, and how many of each carry a plant: `tops plants others plants`.
         let r: i32 = int(cmd, "r")?;
-        let plants: Vec<u32> = ["base:tall_grass", "base:dandelion", "base:rose"].iter().map(|n| Block::lookup(n).map(block_of).ok_or(format!("no block {n}"))).collect::<Result<_, _>>()?;
+        let plants: Vec<u32> = ["base:tall_grass", "base:dandelion", "base:rose"]
+            .iter()
+            .map(|n| {
+                Block::lookup(n)
+                    .map(block_of)
+                    .ok_or(format!("no block {n}"))
+            })
+            .collect::<Result<_, _>>()?;
         let mut n = [0u32; 4];
         for z in me[2] - r..=me[2] + r {
             for x in me[0] - r..=me[0] + r {
@@ -538,15 +612,23 @@ const OPS: &[(&str, &str, Run)] = &[
         let p = pos(cmd, "to")?;
         Ok((w.navigate(owner(w, cmd)?, [p[0] as f64 + 0.5, p[1] as f64, p[2] as f64 + 0.5], 1.0) as u32).to_string())
     }),
-    ("structure", "<name:word> <r:int>", |w, cmd, _, me| Ok(w.structure_near(word(cmd, "name")?, me, int(cmd, "r")?).map_or("none".into(), |a| format!("{} {} {}", a[0], a[1], a[2])))),
+    ("structure", "<name:word> <r:int>", |w, cmd, _, me| {
+        Ok(w.structure_near(word(cmd, "name")?, me, int(cmd, "r")?)
+            .map_or("none".into(), |a| format!("{} {} {}", a[0], a[1], a[2])))
+    }),
     // A timer on the player: `after 60`, then `rings` counts the ones that fired.
     ("after", "<ticks:int>", |w, cmd, player, _| {
         w.after(player, int(cmd, "ticks")?, &RANG, player);
         Ok(String::new())
     }),
     ("rings", "", |_, _, _, _| Ok(RINGS.load(Ordering::Relaxed).to_string())),
-    ("look", "", |w, _, player, _| Ok(w.look_at(player, 5.0, false).map_or("none".into(), |l| format!("{} {} {} {} {}", l.frame, l.pos[0], l.pos[1], l.pos[2], block_name(l.state))))),
-    ("place", "<template:word> <pos:pos>", |w, cmd, _, _| Ok((w.place(&Template::generated(word(cmd, "template")?.to_string()), pos(cmd, "pos")?) as u32).to_string())),
+    ("look", "", |w, _, player, _| {
+        Ok(w.look_at(player, 5.0, false)
+            .map_or("none".into(), |l| format!("{} {} {} {} {}", l.frame, l.pos[0], l.pos[1], l.pos[2], block_name(l.state))))
+    }),
+    ("place", "<template:word> <pos:pos>", |w, cmd, _, _| {
+        Ok((w.place(&Template::generated(word(cmd, "template")?.to_string()), pos(cmd, "pos")?) as u32).to_string())
+    }),
     ("heal", "", |w, _, player, _| {
         let mut st = w.entity(player).ok_or("no player")?;
         st.health = st.max_health;
@@ -560,19 +642,26 @@ const OPS: &[(&str, &str, Run)] = &[
     }),
     ("drive", "<id:int> <dx:float> <dz:float> <ticks:int>", |_, cmd, _, _| {
         let dir = [cmd.float("dx").unwrap_or(0.0) as f32, cmd.float("dz").unwrap_or(0.0) as f32];
-        DRIVEN.lock().unwrap().push((int(cmd, "id")?, dir, int(cmd, "ticks")?));
+        DRIVEN
+            .lock()
+            .unwrap()
+            .push((int(cmd, "id")?, dir, int(cmd, "ticks")?));
         Ok(String::new())
     }),
     ("health", "[id:int]", |w, cmd, player, _| {
         let id = cmd.int("id").map_or(player, |i| i as u64);
-        Ok(w.entity(id).map_or("none".into(), |e| format!("{}", e.health)))
+        Ok(w.entity(id)
+            .map_or("none".into(), |e| format!("{}", e.health)))
     }),
     ("time", "<ticks:int>", |w, cmd, _, _| {
         w.set_day_time(int(cmd, "ticks")?);
         Ok(String::new())
     }),
     ("mode", "survival | creative | spectator", |w, cmd, player, _| {
-        let m = ["survival", "creative", "spectator"].iter().position(|m| cmd.has(m)).ok_or("no game mode")?;
+        let m = ["survival", "creative", "spectator"]
+            .iter()
+            .position(|m| cmd.has(m))
+            .ok_or("no game mode")?;
         w.set_game_mode(player, m as u32);
         Ok(String::new())
     }),
@@ -606,7 +695,8 @@ const OPS: &[(&str, &str, Run)] = &[
         Ok(String::new())
     }),
     ("mark", "<id:int> <value:int>", |w, cmd, _, _| {
-        *w.component_mut(int(cmd, "id")?, &MARK).ok_or("no mark component")? = int(cmd, "value")?;
+        *w.component_mut(int(cmd, "id")?, &MARK)
+            .ok_or("no mark component")? = int(cmd, "value")?;
         Ok(String::new())
     }),
     ("secret", "@owner <index:int> [value:int]", |w, cmd, _, _| {
@@ -618,14 +708,21 @@ const OPS: &[(&str, &str, Run)] = &[
                 inv.set(slot, s.with(&SECRET, v as u32));
                 Ok(String::new())
             }
-            None => Ok(SECRET.stack_only(&s).map_or("none".into(), |v| v.to_string())),
+            None => Ok(SECRET
+                .stack_only(&s)
+                .map_or("none".into(), |v| v.to_string())),
         }
     }),
     ("events", " | reset", |_, cmd, _, _| {
         if cmd.has("reset") {
             COUNTS.iter().for_each(|c| c.store(0, Ordering::Relaxed));
         }
-        Ok(EVENT_NAMES.iter().zip(&COUNTS).map(|(n, c)| format!("{n}={}", c.load(Ordering::Relaxed))).collect::<Vec<_>>().join(" "))
+        Ok(EVENT_NAMES
+            .iter()
+            .zip(&COUNTS)
+            .map(|(n, c)| format!("{n}={}", c.load(Ordering::Relaxed)))
+            .collect::<Vec<_>>()
+            .join(" "))
     }),
     ("attr", "@owner <attribute:word>", |w, cmd, _, _| {
         let (v, text) = w.explain_attribute(owner(w, cmd)?, Attribute::generated(word(cmd, "attribute")?.to_string()));
@@ -634,7 +731,14 @@ const OPS: &[(&str, &str, Run)] = &[
     ("attr_mod", "@owner <attribute:word> <mod:word> <op:int> <amount:float> <ticks:int>", |w, cmd, _, _| {
         let o = owner(w, cmd)?;
         let amount = cmd.float("amount").ok_or("missing amount")?;
-        w.add_modifier(o, Attribute::generated(word(cmd, "attribute")?.to_string()), word(cmd, "mod")?, int(cmd, "op")?, amount, int(cmd, "ticks")?);
+        w.add_modifier(
+            o,
+            Attribute::generated(word(cmd, "attribute")?.to_string()),
+            word(cmd, "mod")?,
+            int(cmd, "op")?,
+            amount,
+            int(cmd, "ticks")?,
+        );
         Ok(String::new())
     }),
     ("attr_rm", "@owner <attribute:word> <mod:word>", |w, cmd, _, _| {
@@ -660,10 +764,16 @@ const OPS: &[(&str, &str, Run)] = &[
                 *totals.entry(item_name(s.item).to_string()).or_default() += s.count;
             }
         }
-        Ok(totals.iter().map(|(k, v)| format!("{k}={v}")).collect::<Vec<_>>().join(" "))
+        Ok(totals
+            .iter()
+            .map(|(k, v)| format!("{k}={v}"))
+            .collect::<Vec<_>>()
+            .join(" "))
     }),
     ("break", "<pos:pos> [tool:item]", |w, cmd, player, _| {
-        let tool = cmd.id("tool").map_or(ItemStack::EMPTY, |t| ItemStack::new(t, 1));
+        let tool = cmd
+            .id("tool")
+            .map_or(ItemStack::EMPTY, |t| ItemStack::new(t, 1));
         Ok((w.break_block(pos(cmd, "pos")?, tool, player, true) as u32).to_string())
     }),
     ("damage", "<amount:float> [cause:int]", |w, cmd, player, _| {
@@ -680,7 +790,14 @@ const OPS: &[(&str, &str, Run)] = &[
     ("near_bodies", "<pos:pos> <r:float>", |w, cmd, _, _| {
         let p = pos(cmd, "pos")?;
         let ids = w.near_bodies([p[0] as f64 + 0.5, p[1] as f64, p[2] as f64 + 0.5], cmd.float("r").ok_or("missing r")?);
-        Ok(ids.iter().filter_map(|&id| w.entity(id).map(|e| name_of(ek::ENTITY, e.kind).to_string())).collect::<Vec<_>>().join(" "))
+        Ok(ids
+            .iter()
+            .filter_map(|&id| {
+                w.entity(id)
+                    .map(|e| name_of(ek::ENTITY, e.kind).to_string())
+            })
+            .collect::<Vec<_>>()
+            .join(" "))
     }),
     ("protect", "<pos:pos> | off", |_, cmd, _, _| {
         *PROTECTED.lock().unwrap() = if cmd.has("off") { None } else { Some(pos(cmd, "pos")?) };

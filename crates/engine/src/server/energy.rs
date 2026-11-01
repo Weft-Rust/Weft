@@ -32,7 +32,9 @@ pub fn write(e: &mut Entities, c: &Content, id: u64, v: Energy) {
 
 pub fn insert(e: &mut Entities, c: &Content, id: u64, amount: i64, simulate: bool) -> i64 {
     let Some(mut v) = read(e, c, id) else { return 0 };
-    let n = amount.clamp(0, v.max_in.max(0)).min((v.capacity - v.stored).max(0));
+    let n = amount
+        .clamp(0, v.max_in.max(0))
+        .min((v.capacity - v.stored).max(0));
     if !simulate && n > 0 {
         v.stored += n;
         write(e, c, id, v);
@@ -53,15 +55,26 @@ pub fn extract(e: &mut Entities, c: &Content, id: u64, amount: i64, simulate: bo
 impl Grid {
     pub fn cube_loaded(&mut self, c: &Content, pos: IVec3, cube: &Cube) {
         // A machine arriving next to cables that are here already belongs to their network.
-        if !self.conductors.is_empty() && cube.palette().iter().any(|&s| c.game.block_entities.contains_key(&c.states[s as usize].block)) {
+        if !self.conductors.is_empty()
+            && cube.palette().iter().any(|&s| {
+                c.game
+                    .block_entities
+                    .contains_key(&c.states[s as usize].block)
+            })
+        {
             self.dirty = true;
         }
-        if !cube.palette().iter().any(|&s| c.states[s as usize].conductor) {
+        if !cube
+            .palette()
+            .iter()
+            .any(|&s| c.states[s as usize].conductor)
+        {
             return;
         }
         for i in 0..4096usize {
             if c.states[cube.get(i) as usize].conductor {
-                self.conductors.insert(pos * 16 + crate::world::cube::offset(i));
+                self.conductors
+                    .insert(pos * 16 + crate::world::cube::offset(i));
             }
         }
         self.dirty = true;

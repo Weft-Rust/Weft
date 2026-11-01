@@ -73,12 +73,14 @@ fn glow_color(glow: u32, along: f32) -> Vec3 {
 /// color so far (not linear), how strong, and how far along.
 fn glows(dim: usize, d: &DimensionDef, time: f64) -> impl Iterator<Item = (Vec3, Vec3, f32, f32)> {
     let list = content().game.sky.get(dim).map_or(&[][..], |l| &l[..]);
-    list.iter().filter(|s| s.glow != 0 && s.kind == sky_kind::BODY).filter_map(move |s| {
-        let toward = frame_of(s, turn_of(s, d, time)).x_axis;
-        let (strength, along) = sunset(toward.y)?;
-        let flat = Vec3::new(toward.x, 0.0, toward.z).try_normalize()?;
-        Some((flat, glow_color(s.glow, along), strength, along))
-    })
+    list.iter()
+        .filter(|s| s.glow != 0 && s.kind == sky_kind::BODY)
+        .filter_map(move |s| {
+            let toward = frame_of(s, turn_of(s, d, time)).x_axis;
+            let (strength, along) = sunset(toward.y)?;
+            let flat = Vec3::new(toward.x, 0.0, toward.z).try_normalize()?;
+            Some((flat, glow_color(s.glow, along), strength, along))
+        })
 }
 
 /// A fog color (not linear) warmed by the sunsets the camera looks at, like vanilla's.
@@ -137,10 +139,18 @@ pub struct Overlay {
 fn average_color(assets: &Assets, l: &crate::content::LiquidDef) -> Vec3 {
     let c = content();
     let st = &c.states[l.first_state as usize];
-    let img = c.textures.get(st.textures[0] as usize).and_then(|n| assets.read(n, "textures", "png")).and_then(|b| decode_png(&b));
+    let img = c
+        .textures
+        .get(st.textures[0] as usize)
+        .and_then(|n| assets.read(n, "textures", "png"))
+        .and_then(|b| decode_png(&b));
     let Some(img) = img else { return Vec3::splat(0.5) };
     let (mut sum, mut weight) = (Vec3::ZERO, 0.0);
-    for p in img.rgba.chunks_exact(4).take((img.width * img.width) as usize) {
+    for p in img
+        .rgba
+        .chunks_exact(4)
+        .take((img.width * img.width) as usize)
+    {
         let a = p[3] as f32 / 255.0;
         sum += Vec3::new(p[0] as f32, p[1] as f32, p[2] as f32) / 255.0 * a;
         weight += a;
@@ -151,7 +161,17 @@ fn average_color(assets: &Assets, l: &crate::content::LiquidDef) -> Vec3 {
 
 impl Sky {
     pub fn new(gpu: &mut dyn Backend, assets: &Assets) -> Sky {
-        let mut s = Sky { pipe: None, clouds_pipe: None, slots: Vec::new(), buffers: Vec::new(), pictures: FxHashMap::default(), assets: assets.clone(), list: Vec::new(), liquid_colors: Vec::new(), overlay: None };
+        let mut s = Sky {
+            pipe: None,
+            clouds_pipe: None,
+            slots: Vec::new(),
+            buffers: Vec::new(),
+            pictures: FxHashMap::default(),
+            assets: assets.clone(),
+            list: Vec::new(),
+            liquid_colors: Vec::new(),
+            overlay: None,
+        };
         s.reload(gpu, assets);
         s
     }
@@ -160,40 +180,50 @@ impl Sky {
     pub fn reload(&mut self, gpu: &mut dyn Backend, assets: &Assets) {
         self.assets = assets.clone();
         self.drop_pictures(gpu);
-        self.liquid_colors = content().liquids.iter().map(|l| l.fog_color.map_or_else(|| average_color(assets, l), rgb).powf(2.2)).collect();
+        self.liquid_colors = content()
+            .liquids
+            .iter()
+            .map(|l| {
+                l.fog_color
+                    .map_or_else(|| average_color(assets, l), rgb)
+                    .powf(2.2)
+            })
+            .collect();
         let snippets = crate::shaders::snippets(assets, &HOOK);
-        let made = crate::packs::compose(assets, "sky.wgsl", &[(&HOOK, &snippets)]).map_err(|e| e.0).and_then(|(shader, mut slots)| {
-            let pipe = gpu
-                .create_pipeline(&PipelineDesc {
-                    label: "sky",
-                    shader: &shader,
-                    vertex: "vs",
-                    fragment: Some("fs"),
-                    color: Some(Format::Surface),
-                    // Depth 0 is the far plane: it passes only where nothing was drawn.
-                    depth: Some(DepthState { write: false, compare: Compare::GreaterEqual }),
-                    blend: Blend::Premultiplied,
-                    cull_back: false,
-                    topology: Topology::Triangles,
-                })
-                .map_err(|e| e.0)?;
-            // Clouds are things in the world: they hide what is behind them, and the shader says
-            // how far each pixel is. At the far end of their reach they fade out.
-            let clouds = gpu
-                .create_pipeline(&PipelineDesc {
-                    label: "clouds",
-                    shader: &shader,
-                    vertex: "vs_clouds",
-                    fragment: Some("fs_clouds"),
-                    color: Some(Format::Surface),
-                    depth: Some(DepthState { write: true, compare: Compare::GreaterEqual }),
-                    blend: Blend::Premultiplied,
-                    cull_back: false,
-                    topology: Topology::Triangles,
-                })
-                .map_err(|e| e.0)?;
-            Ok((pipe, clouds, slots.pop().unwrap_or_default()))
-        });
+        let made = crate::packs::compose(assets, "sky.wgsl", &[(&HOOK, &snippets)])
+            .map_err(|e| e.0)
+            .and_then(|(shader, mut slots)| {
+                let pipe = gpu
+                    .create_pipeline(&PipelineDesc {
+                        label: "sky",
+                        shader: &shader,
+                        vertex: "vs",
+                        fragment: Some("fs"),
+                        color: Some(Format::Surface),
+                        // Depth 0 is the far plane: it passes only where nothing was drawn.
+                        depth: Some(DepthState { write: false, compare: Compare::GreaterEqual }),
+                        blend: Blend::Premultiplied,
+                        cull_back: false,
+                        topology: Topology::Triangles,
+                    })
+                    .map_err(|e| e.0)?;
+                // Clouds are things in the world: they hide what is behind them, and the shader says
+                // how far each pixel is. At the far end of their reach they fade out.
+                let clouds = gpu
+                    .create_pipeline(&PipelineDesc {
+                        label: "clouds",
+                        shader: &shader,
+                        vertex: "vs_clouds",
+                        fragment: Some("fs_clouds"),
+                        color: Some(Format::Surface),
+                        depth: Some(DepthState { write: true, compare: Compare::GreaterEqual }),
+                        blend: Blend::Premultiplied,
+                        cull_back: false,
+                        topology: Topology::Triangles,
+                    })
+                    .map_err(|e| e.0)?;
+                Ok((pipe, clouds, slots.pop().unwrap_or_default()))
+            });
         match made {
             Ok((pipe, clouds, slots)) => {
                 if let Some(old) = self.pipe.replace(pipe) {
@@ -209,7 +239,10 @@ impl Sky {
     }
 
     pub fn liquid_color(&self, liquid: u16) -> Vec3 {
-        self.liquid_colors.get(liquid as usize).copied().unwrap_or(Vec3::ZERO)
+        self.liquid_colors
+            .get(liquid as usize)
+            .copied()
+            .unwrap_or(Vec3::ZERO)
     }
 
     /// What goes over the screen, after the hand.
@@ -242,8 +275,19 @@ impl Sky {
     }
 
     fn set_slots(&mut self, slots: &Slots) {
-        self.slots = content().game.sky.iter().map(|list| list.iter().map(|o| slots.slot(&o.shader)).collect()).collect();
-        for o in content().game.sky.iter().flatten().filter(|o| !o.shader.is_empty() && slots.slot(&o.shader) == 0) {
+        self.slots = content()
+            .game
+            .sky
+            .iter()
+            .map(|list| list.iter().map(|o| slots.slot(&o.shader)).collect())
+            .collect();
+        for o in content()
+            .game
+            .sky
+            .iter()
+            .flatten()
+            .filter(|o| !o.shader.is_empty() && slots.slot(&o.shader) == 0)
+        {
             log::warn!("sky object {}: no shader {}", o.name, o.shader);
         }
     }
@@ -256,7 +300,10 @@ impl Sky {
 
     pub fn destroy(&mut self, gpu: &mut dyn Backend) {
         self.drop_pictures(gpu);
-        for p in [self.pipe.take(), self.clouds_pipe.take()].into_iter().flatten() {
+        for p in [self.pipe.take(), self.clouds_pipe.take()]
+            .into_iter()
+            .flatten()
+        {
             gpu.destroy_pipeline(p);
         }
         for (b, _) in self.buffers.drain(..) {
@@ -269,12 +316,18 @@ impl Sky {
             return None;
         }
         if !self.pictures.contains_key(name) {
-            let loaded = self.assets.read(name, "textures", "png").and_then(|b| decode_png(&b));
+            let loaded = self
+                .assets
+                .read(name, "textures", "png")
+                .and_then(|b| decode_png(&b));
             if loaded.is_none() {
                 log::error!("sky: no picture {name}");
             }
             let picture = loaded.map(|img| {
-                let texture = gpu.create_texture(&TextureDesc { width: img.width, height: img.height, mips: 1, format: Format::Rgba8Srgb, render_target: false }, "sky picture");
+                let texture = gpu.create_texture(
+                    &TextureDesc { width: img.width, height: img.height, mips: 1, format: Format::Rgba8Srgb, render_target: false },
+                    "sky picture",
+                );
                 gpu.write_texture(texture, 0, &img.rgba);
                 Picture { texture, index: gpu.texture_index(texture), size: [img.width, img.height] }
             });
@@ -286,7 +339,20 @@ impl Sky {
     /// `time`: game ticks with the fraction of the current one. `eye_y`: where the horizon's dark
     /// lower half starts to show.
     #[allow(clippy::too_many_arguments)]
-    pub fn draw(&mut self, gpu: &mut dyn Backend, list: &mut CommandList, frame: &FrameInfo, cam: &Camera, scene: BufferId, dim: usize, time: f64, eye_y: f64, in_liquid: bool, rain: f32, overlays: &[Overlay]) {
+    pub fn draw(
+        &mut self,
+        gpu: &mut dyn Backend,
+        list: &mut CommandList,
+        frame: &FrameInfo,
+        cam: &Camera,
+        scene: BufferId,
+        dim: usize,
+        time: f64,
+        eye_y: f64,
+        in_liquid: bool,
+        rain: f32,
+        overlays: &[Overlay],
+    ) {
         self.overlay = None;
         let Some(pipe) = self.pipe else { return };
         let c = content();
@@ -296,7 +362,15 @@ impl Sky {
             self.list.clear();
             let n = self.overlay_entries(gpu, overlays);
             if n > 0 {
-                let buf = crate::gpu_layout::frame_buffer(gpu, &mut self.buffers, frame.slot, n, size_of::<GpuSky>() as u64, usage::STORAGE, "sky");
+                let buf = crate::gpu_layout::frame_buffer(
+                    gpu,
+                    &mut self.buffers,
+                    frame.slot,
+                    n,
+                    size_of::<GpuSky>() as u64,
+                    usage::STORAGE,
+                    "sky",
+                );
                 gpu.mapped(buf)[..self.list.len() * size_of::<GpuSky>()].copy_from_slice(bytemuck::cast_slice(&self.list));
                 self.overlay = Some((buf, 0, n));
             }
@@ -316,7 +390,10 @@ impl Sky {
         self.list.push(GpuSky {
             axes: axes(Mat3::from_cols(px - o, py - o, o)),
             uv: [below as u32 as f32, 0.0, 0.0, 0.0],
-            color: rained(rgb(d.sky_color) * if d.sky_light { light } else { 1.0 }, rain, 0.75).powf(2.2).extend(1.0).to_array(),
+            color: rained(rgb(d.sky_color) * if d.sky_light { light } else { 1.0 }, rain, 0.75)
+                .powf(2.2)
+                .extend(1.0)
+                .to_array(),
             ids: [u32::MAX, kind::GRADIENT, 0, 0],
             extra: [0.0; 4],
         });
@@ -330,17 +407,33 @@ impl Sky {
             if s.kind == sky_kind::CLOUDS {
                 let Some((index, [w, h])) = self.picture(gpu, &s.texture) else { continue };
                 const CELL: f64 = 12.0;
-                let setting = |name: &str| c.game.config_names.get(name).map_or(0.0, |&id| crate::config::get(id));
+                let setting = |name: &str| {
+                    c.game
+                        .config_names
+                        .get(name)
+                        .map_or(0.0, |&id| crate::config::get(id))
+                };
                 // Past all the terrain there is, distant terrain too; the cost doesn't depend on it.
-                let reach = (setting("core:view_distance") * 16.0).max(super::lod::Lod::distance() as f64).max(1365.0) * 1.5;
+                let reach = (setting("core:view_distance") * 16.0)
+                    .max(super::lod::Lod::distance() as f64)
+                    .max(1365.0)
+                    * 1.5;
                 let lifted = s.height as f64 + setting("core:cloud_height");
                 let (x, z) = ((cam.pos.x + time * s.drift as f64) / CELL, cam.pos.z / CELL);
                 let brightness = (light * 0.9 + 0.1).max(0.1);
                 clouds = Some(self.list.len() as u32);
                 self.list.push(GpuSky {
                     axes: [[0.0; 4]; 3],
-                    uv: [x.rem_euclid(1.0) as f32, z.rem_euclid(1.0) as f32, x.floor().rem_euclid(4096.0) as f32, z.floor().rem_euclid(4096.0) as f32],
-                    color: rained(rgb(s.color) * brightness, rain, 0.75).powf(2.2).extend(1.0).to_array(),
+                    uv: [
+                        x.rem_euclid(1.0) as f32,
+                        z.rem_euclid(1.0) as f32,
+                        x.floor().rem_euclid(4096.0) as f32,
+                        z.floor().rem_euclid(4096.0) as f32,
+                    ],
+                    color: rained(rgb(s.color) * brightness, rain, 0.75)
+                        .powf(2.2)
+                        .extend(1.0)
+                        .to_array(),
                     ids: [index, kind::CLOUDS, w, h],
                     extra: [CELL as f32, 4.0, (lifted - cam.pos.y) as f32, reach as f32],
                 });
@@ -350,11 +443,23 @@ impl Sky {
                 continue;
             }
             let t = turn_of(s, d, time);
-            let spin = if s.spin != 0.0 { Mat3::from_rotation_x((time / s.spin as f64 * std::f64::consts::TAU) as f32) } else { Mat3::IDENTITY };
+            let spin =
+                if s.spin != 0.0 { Mat3::from_rotation_x((time / s.spin as f64 * std::f64::consts::TAU) as f32) } else { Mat3::IDENTITY };
             let m = frame_of(s, t) * spin;
             let picture = self.picture(gpu, &s.texture);
-            let slot = self.slots.get(dim).and_then(|l| l.get(i)).copied().unwrap_or(0);
-            let ticks = if s.frame_ticks != 0 { s.frame_ticks as u64 } else if d.day_length != 0 { d.day_length as u64 } else { 24000 };
+            let slot = self
+                .slots
+                .get(dim)
+                .and_then(|l| l.get(i))
+                .copied()
+                .unwrap_or(0);
+            let ticks = if s.frame_ticks != 0 {
+                s.frame_ticks as u64
+            } else if d.day_length != 0 {
+                d.day_length as u64
+            } else {
+                24000
+            };
             let frame_at = (time as u64 / ticks) % (s.frames[0] * s.frames[1]) as u64;
             let (cols, rows) = (s.frames[0] as f32, s.frames[1] as f32);
             let (u, v) = ((frame_at % s.frames[0] as u64) as f32 / cols, (frame_at / s.frames[0] as u64) as f32 / rows);
@@ -378,7 +483,11 @@ impl Sky {
             draws.push((vertices, at));
         }
         // Sunsets over the sky and the stars, under the bodies: right after the domes and stars.
-        let first_body = draws.iter().skip(1).position(|&(_, at)| self.list[at as usize].ids[1] == kind::BODY).map_or(draws.len(), |p| p + 1);
+        let first_body = draws
+            .iter()
+            .skip(1)
+            .position(|&(_, at)| self.list[at as usize].ids[1] == kind::BODY)
+            .map_or(draws.len(), |p| p + 1);
         let glowing: Vec<(Vec3, Vec3, f32, f32)> = glows(dim, d, time).collect();
         for (n, (flat, color, strength, along)) in glowing.into_iter().enumerate() {
             let at = self.list.len() as u32;
@@ -413,4 +522,3 @@ impl Sky {
         }
     }
 }
-

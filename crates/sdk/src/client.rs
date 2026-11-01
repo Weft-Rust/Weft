@@ -102,7 +102,12 @@ impl Client {
 
     /// Turns the local player, in degrees like the F3 screen.
     pub fn look(&self, yaw_deg: f32, pitch_deg: f32) {
-        self.control(&abi::PlayerControl { mask: abi::control_mask::LOOK, yaw: yaw_deg.to_radians(), pitch: pitch_deg.to_radians(), ..abi::PlayerControl::DEFAULT });
+        self.control(&abi::PlayerControl {
+            mask: abi::control_mask::LOOK,
+            yaw: yaw_deg.to_radians(),
+            pitch: pitch_deg.to_radians(),
+            ..abi::PlayerControl::DEFAULT
+        });
     }
 
     /// Puts the local player's feet at `pos` (the server takes it as a move).
@@ -197,7 +202,11 @@ impl Client {
     }
 
     fn text(&self, which: u32, index: u32) -> String {
-        unsafe { (host().client_text)(self.raw, which, index).as_str().to_string() }
+        unsafe {
+            (host().client_text)(self.raw, which, index)
+                .as_str()
+                .to_string()
+        }
     }
 
     pub fn ticket(&self) -> String {
@@ -301,7 +310,9 @@ impl Client {
     #[allow(clippy::too_many_arguments)]
     fn draw(&self, group: Option<&crate::GizmoGroup>, kind: u32, a: [f64; 3], b: [f64; 3], color: u32, key: &str, args: &[crate::Arg]) {
         let raw = crate::ui::raw_args(args);
-        unsafe { (host().client_draw)(self.raw, s(group.map_or("", |g| g.name())), kind, &a, &b, color, s(key), crate::abi::Slice::new(&raw)) }
+        unsafe {
+            (host().client_draw)(self.raw, s(group.map_or("", |g| g.name())), kind, &a, &b, color, s(key), crate::abi::Slice::new(&raw))
+        }
     }
 
     /// The server's `draw_*` for this frame only: always, or with a `group` while the player
@@ -571,7 +582,9 @@ impl Registry {
     /// instead of the engine's steps, idle noises and death smoke; `e.engine_effects()` keeps
     /// those. One per kind: a later mod's replaces an earlier one's.
     pub fn client_entity_tick(&mut self, kind: &crate::Entity, f: impl Fn(&Client, &ClientEntity) + Send + Sync + 'static) {
-        let cb = callback(move |a: &mut abi::ClientEntityArgs| f(&Client::from_raw(a.client), unsafe { &*(a as *const abi::ClientEntityArgs as *const ClientEntity) }));
+        let cb = callback(move |a: &mut abi::ClientEntityArgs| {
+            f(&Client::from_raw(a.client), unsafe { &*(a as *const abi::ClientEntityArgs as *const ClientEntity) })
+        });
         unsafe { (host().reg_client_entity_tick)(self.raw, s(kind.name()), cb) }
     }
 

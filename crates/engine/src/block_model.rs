@@ -66,7 +66,12 @@ pub fn load(name: &str, read: &dyn Fn(&str) -> Option<String>) -> Result<Option<
     for _ in 0..16 {
         let root: Value = serde_json::from_str(&src).map_err(|e| format!("model {current}: {e}"))?;
         let ns = current.split_once(':').map_or("", |x| x.0).to_string();
-        for (k, v) in root.get("textures").and_then(Value::as_object).into_iter().flatten() {
+        for (k, v) in root
+            .get("textures")
+            .and_then(Value::as_object)
+            .into_iter()
+            .flatten()
+        {
             if let Some(v) = v.as_str() {
                 textures.entry(k.clone()).or_insert_with(|| qualify(&ns, v));
             }
@@ -77,7 +82,16 @@ pub fn load(name: &str, read: &dyn Fn(&str) -> Option<String>) -> Result<Option<
         let Some(parent) = root.get("parent").and_then(Value::as_str) else { break };
         let parent = qualify(&ns, parent);
         let short = parent.split_once(':').map_or(parent.as_str(), |x| x.1);
-        if matches!(short, "block/cube_all" | "block/cube" | "block/cube_column" | "block/cube_bottom_top" | "item/generated" | "item/handheld" | "block/block") {
+        if matches!(
+            short,
+            "block/cube_all"
+                | "block/cube"
+                | "block/cube_column"
+                | "block/cube_bottom_top"
+                | "item/generated"
+                | "item/handheld"
+                | "block/block"
+        ) {
             builtin = Some(short.to_string());
             break;
         }
@@ -101,21 +115,43 @@ pub fn load(name: &str, read: &dyn Fn(&str) -> Option<String>) -> Result<Option<
     if let Some(list) = elements {
         for (i, e) in list.iter().enumerate() {
             let v3 = |k: &str| -> Result<[f32; 3], String> {
-                let a = e.get(k).and_then(Value::as_array).filter(|a| a.len() == 3).ok_or_else(|| format!("model {name}: element {i} without `{k}`"))?;
+                let a = e
+                    .get(k)
+                    .and_then(Value::as_array)
+                    .filter(|a| a.len() == 3)
+                    .ok_or_else(|| format!("model {name}: element {i} without `{k}`"))?;
                 Ok(std::array::from_fn(|j| a[j].as_f64().unwrap_or(0.0) as f32))
             };
             let (from, to) = (v3("from")?, v3("to")?);
-            let mut b = FileBox { min: std::array::from_fn(|j| from[j].min(to[j])), max: std::array::from_fn(|j| from[j].max(to[j])), textures: Default::default(), uv: [[NO_FACE, 0.0, 0.0, 0.0]; 6], turn: [0; 6], tilt: tilt(e) };
+            let mut b = FileBox {
+                min: std::array::from_fn(|j| from[j].min(to[j])),
+                max: std::array::from_fn(|j| from[j].max(to[j])),
+                textures: Default::default(),
+                uv: [[NO_FACE, 0.0, 0.0, 0.0]; 6],
+                turn: [0; 6],
+                tilt: tilt(e),
+            };
             let faces = e.get("faces").and_then(Value::as_object);
             for (d, face) in FACES.iter().enumerate() {
                 let Some(f) = faces.and_then(|f| f.get(*face)) else { continue };
-                b.textures[d] = f.get("texture").and_then(Value::as_str).map_or(String::new(), |t| resolve(t));
-                b.uv[d] = match f.get("uv").and_then(Value::as_array).filter(|a| a.len() == 4) {
+                b.textures[d] = f
+                    .get("texture")
+                    .and_then(Value::as_str)
+                    .map_or(String::new(), |t| resolve(t));
+                b.uv[d] = match f
+                    .get("uv")
+                    .and_then(Value::as_array)
+                    .filter(|a| a.len() == 4)
+                {
                     Some(a) => std::array::from_fn(|j| a[j].as_f64().unwrap_or(0.0) as f32),
                     None => [-1.0; 4],
                 };
                 // Files turn a picture clockwise, `ModelBox::turn` goes the other way round.
-                let quarters = f.get("rotation").and_then(Value::as_i64).unwrap_or(0).div_euclid(90);
+                let quarters = f
+                    .get("rotation")
+                    .and_then(Value::as_i64)
+                    .unwrap_or(0)
+                    .div_euclid(90);
                 b.turn[d] = (-quarters).rem_euclid(4) as u8;
             }
             out.boxes.push(b);
@@ -144,7 +180,11 @@ fn tilt(e: &Value) -> weft_abi::BoxTilt {
         Some("z") => [0.0, 0.0, 1.0],
         _ => return weft_abi::BoxTilt::NONE,
     };
-    let origin = r.get("origin").and_then(Value::as_array).filter(|a| a.len() == 3).map_or([8.0; 3], |a| std::array::from_fn(|j| a[j].as_f64().unwrap_or(8.0) as f32));
+    let origin = r
+        .get("origin")
+        .and_then(Value::as_array)
+        .filter(|a| a.len() == 3)
+        .map_or([8.0; 3], |a| std::array::from_fn(|j| a[j].as_f64().unwrap_or(8.0) as f32));
     weft_abi::BoxTilt { origin, axis, degrees }
 }
 
@@ -181,7 +221,14 @@ mod tests {
         assert_eq!((b.textures[5].as_str(), b.uv[0][0]), ("", NO_FACE));
         let log = load("m:block/log", &read).unwrap().unwrap();
         assert_eq!(log.cube.unwrap()[3], "m:block/log_top");
-        assert_eq!(load("m:item/gem", &read).unwrap().unwrap().sprite.as_deref(), Some("m:item/gem"));
+        assert_eq!(
+            load("m:item/gem", &read)
+                .unwrap()
+                .unwrap()
+                .sprite
+                .as_deref(),
+            Some("m:item/gem")
+        );
         assert!(load("m:block/none", &read).unwrap().is_none());
     }
 }

@@ -247,7 +247,8 @@ impl T {
     pub async fn flat(&self) -> R {
         self.world(1).await?;
         self.cmd("/dim base:flatlands").await?;
-        self.until("flatlands", Duration::from_secs(20), |t| t.state().dim != 0 || t.state().pos[1] < 10.0).await?;
+        self.until("flatlands", Duration::from_secs(20), |t| t.state().dim != 0 || t.state().pos[1] < 10.0)
+            .await?;
         self.loaded().await?;
         self.op("mode survival").await?;
         self.idle().await
@@ -266,6 +267,9 @@ impl T {
     /// Counts entities of a kind near the player as the server has them.
     pub async fn count_near(&self, kind: &str, r: f64) -> Result<usize, String> {
         let list = self.op(&format!("near ~ ~ ~ {r}")).await?;
-        Ok(list.split_whitespace().filter(|e| e.ends_with(&format!(":{kind}"))).count())
+        Ok(list
+            .split_whitespace()
+            .filter(|e| e.ends_with(&format!(":{kind}")))
+            .count())
     }
 }

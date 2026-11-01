@@ -166,5 +166,3 @@ pub fn block_name(state: u32) -> &'static str {
 pub fn item_name(item: u32) -> &'static str {
     name_of(abi::entry_kind::ITEM, item)
 }
-
-

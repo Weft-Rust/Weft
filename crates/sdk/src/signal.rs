@@ -1,4 +1,4 @@
-﻿//! Models that lie on any face: boxes written for a floor with the front to the north, placed for
+//! Models that lie on any face: boxes written for a floor with the front to the north, placed for
 //! what holds the block and where it faces.
 
 use crate::{Dir, abi};
@@ -19,7 +19,11 @@ impl Frame {
     /// `attach`: where what holds it is, `front`: where it faces, along that. One that can't be
     /// (front along attach) faces another way.
     pub fn new(attach: Dir, front: Dir) -> Frame {
-        let (attach, front) = if attach.face() / 2 == front.face() / 2 { (attach, if attach.horizontal() { Dir::Up } else { Dir::North }) } else { (attach, front) };
+        let (attach, front) = if attach.face() / 2 == front.face() / 2 {
+            (attach, if attach.horizontal() { Dir::Up } else { Dir::North })
+        } else {
+            (attach, front)
+        };
         let (up, n) = (attach.opposite().offset(), front.offset());
         Frame { east: [n[1] * up[2] - n[2] * up[1], n[2] * up[0] - n[0] * up[2], n[0] * up[1] - n[1] * up[0]], up, north: n }
     }
@@ -67,13 +71,19 @@ impl Frame {
     fn face(&self, face: usize) -> usize {
         let d = Dir::from_face(face as u32).offset();
         let w = self.vector(d);
-        Dir::ALL.iter().find(|x| x.offset() == w).map_or(face, |x| x.face() as usize)
+        Dir::ALL
+            .iter()
+            .find(|x| x.offset() == w)
+            .map_or(face, |x| x.face() as usize)
     }
 
     /// Quarter turns for a face's picture to read as it does on the floor.
     fn turn(&self, face: usize, to: usize) -> u8 {
         let first = self.corner(abi::FACE_CORNERS[face][0]);
-        abi::FACE_CORNERS[to].iter().position(|c| *c == first).unwrap_or(0) as u8
+        abi::FACE_CORNERS[to]
+            .iter()
+            .position(|c| *c == first)
+            .unwrap_or(0) as u8
     }
 
     /// A box and its faces turned: (min, max, per world face what was given for it, and its turn).

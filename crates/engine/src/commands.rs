@@ -57,13 +57,25 @@ pub fn parse_usage(usage: &str) -> Result<Vec<Alt>, String> {
                     continue;
                 }
             };
-            let inner = tok.strip_prefix(open).and_then(|t| t.strip_suffix(close)).ok_or_else(|| format!("bad parameter {tok}"))?;
-            let (name, ty) = inner.split_once(':').ok_or_else(|| format!("parameter {tok} needs a type"))?;
+            let inner = tok
+                .strip_prefix(open)
+                .and_then(|t| t.strip_suffix(close))
+                .ok_or_else(|| format!("bad parameter {tok}"))?;
+            let (name, ty) = inner
+                .split_once(':')
+                .ok_or_else(|| format!("parameter {tok} needs a type"))?;
             let kind = match ty {
                 "int" => Kind::Int,
                 "float" => Kind::Float,
                 "word" => Kind::Word(Vec::new()),
-                w if w.starts_with("word(") && w.ends_with(')') => Kind::Word(w[5..w.len() - 1].split(',').map(str::trim).filter(|s| !s.is_empty()).map(String::from).collect()),
+                w if w.starts_with("word(") && w.ends_with(')') => Kind::Word(
+                    w[5..w.len() - 1]
+                        .split(',')
+                        .map(str::trim)
+                        .filter(|s| !s.is_empty())
+                        .map(String::from)
+                        .collect(),
+                ),
                 "text" => Kind::Text,
                 "item" => Kind::Item,
                 "block" => Kind::Block,
@@ -136,12 +148,18 @@ fn parse_selector(c: &Content, tok: &str, players: &[String]) -> Result<Selector
         return Ok(s);
     };
     let mut chars = rest.chars();
-    s.base = chars.next().filter(|b| "paesr".contains(*b)).ok_or_else(|| err("unknown_selector", tok))?;
+    s.base = chars
+        .next()
+        .filter(|b| "paesr".contains(*b))
+        .ok_or_else(|| err("unknown_selector", tok))?;
     let filters = chars.as_str();
     if filters.is_empty() {
         return Ok(s);
     }
-    let inner = filters.strip_prefix('[').and_then(|f| f.strip_suffix(']')).ok_or_else(|| err("bad_selector", tok))?;
+    let inner = filters
+        .strip_prefix('[')
+        .and_then(|f| f.strip_suffix(']'))
+        .ok_or_else(|| err("bad_selector", tok))?;
     for f in inner.split(',').filter(|f| !f.is_empty()) {
         let (k, v) = f.split_once('=').ok_or_else(|| err("bad_filter", f))?;
         match k.trim() {
@@ -176,7 +194,10 @@ pub struct Args {
 
 impl Args {
     pub fn get(&self, name: &str) -> Option<&Value> {
-        self.names.iter().position(|n| n == name).and_then(|i| self.values[i].as_ref())
+        self.names
+            .iter()
+            .position(|n| n == name)
+            .and_then(|i| self.values[i].as_ref())
     }
     pub fn int(&self, name: &str) -> Option<i64> {
         match self.get(name)? {
@@ -210,11 +231,16 @@ pub fn resolve<'a>(names: impl Iterator<Item = &'a String> + Clone, typed: &str)
     if typed.contains(':') {
         return names.into_iter().find(|n| n.as_str() == typed).cloned();
     }
-    let matches: Vec<&String> = names.filter(|n| n.split_once(':').is_some_and(|(_, p)| p == typed)).collect();
+    let matches: Vec<&String> = names
+        .filter(|n| n.split_once(':').is_some_and(|(_, p)| p == typed))
+        .collect();
     match matches.as_slice() {
         [one] => Some((*one).clone()),
         [] => None,
-        many => many.iter().find(|n| n.starts_with("base:")).map(|n| (*n).clone()),
+        many => many
+            .iter()
+            .find(|n| n.starts_with("base:"))
+            .map(|n| (*n).clone()),
     }
 }
 
@@ -367,7 +393,13 @@ impl CommandDef {
         let mut first_err = None;
         for (i, alt) in self.alts.iter().enumerate() {
             let owner = self.owners[i];
-            let own: Vec<Alt> = self.alts.iter().zip(&self.owners).filter(|(_, o)| **o == owner).map(|(a, _)| a.clone()).collect();
+            let own: Vec<Alt> = self
+                .alts
+                .iter()
+                .zip(&self.owners)
+                .filter(|(_, o)| **o == owner)
+                .map(|(a, _)| a.clone())
+                .collect();
             match parse_alt(c, alt, tokens, here, players, &slots(&own)) {
                 Ok(a) => return Ok((a, if owner == 0 { self.handler } else { Some(self.branches[owner - 1]) })),
                 Err(e) => {
@@ -424,7 +456,6 @@ pub fn usage_text(alts: &[Alt]) -> String {
         .join(" | ")
 }
 
-
 /// Command values as mods receive them; `selected` holds resolved targets per slot. The values
 /// point into `args` and `selected`.
 pub fn abi_values(args: &Args, selected: &[Option<String>]) -> Vec<weft_abi::CommandValue> {
@@ -433,7 +464,14 @@ pub fn abi_values(args: &Args, selected: &[Option<String>]) -> Vec<weft_abi::Com
         .iter()
         .enumerate()
         .map(|(i, v)| {
-            let mut out = weft_abi::CommandValue { kind: cv::NONE, int: 0, float: 0.0, text: Str::new(""), pos: [0.0; 3], name: Str::new(&args.names[i]) };
+            let mut out = weft_abi::CommandValue {
+                kind: cv::NONE,
+                int: 0,
+                float: 0.0,
+                text: Str::new(""),
+                pos: [0.0; 3],
+                name: Str::new(&args.names[i]),
+            };
             match v {
                 None => {}
                 Some(Value::Int(n)) => (out.kind, out.int, out.float) = (cv::INT, *n, *n as f64),
@@ -486,7 +524,13 @@ pub fn complete(c: &Content, line: &str, players: &[String], permission: u32) ->
     let done: Vec<&str> = line[..from].split_whitespace().collect();
     let mut out = Completion { suggestions: Vec::new(), from, hint: String::new() };
     if done.is_empty() {
-        let mut names: Vec<String> = c.commands.iter().filter(|d| d.level <= permission).map(|d| d.name.clone()).filter(|n| n.starts_with(partial)).collect();
+        let mut names: Vec<String> = c
+            .commands
+            .iter()
+            .filter(|d| d.level <= permission)
+            .map(|d| d.name.clone())
+            .filter(|n| n.starts_with(partial))
+            .collect();
         names.sort();
         out.suggestions = names;
         return out;
@@ -499,7 +543,13 @@ pub fn complete(c: &Content, line: &str, players: &[String], permission: u32) ->
         let mut at = 0;
         let mut found = None;
         for (pi, p) in alt.iter().enumerate() {
-            let width = if p.kind == Kind::Pos { 3 } else if p.kind == Kind::Text { usize::MAX / 2 } else { 1 };
+            let width = if p.kind == Kind::Pos {
+                3
+            } else if p.kind == Kind::Text {
+                usize::MAX / 2
+            } else {
+                1
+            };
             // An optional selector or position the typed word cannot be skips to what follows.
             let fits = |w: &str| match p.kind {
                 Kind::Targets => w.starts_with('@') || players.iter().any(|n| n == w),
@@ -526,7 +576,11 @@ pub fn complete(c: &Content, line: &str, players: &[String], permission: u32) ->
         let names_from = |keys: Vec<&String>| -> Vec<String> {
             let mut v: Vec<String> = keys
                 .into_iter()
-                .filter(|n| n.starts_with(partial) || n.split_once(':').is_some_and(|(_, path)| path.starts_with(partial)))
+                .filter(|n| {
+                    n.starts_with(partial)
+                        || n.split_once(':')
+                            .is_some_and(|(_, path)| path.starts_with(partial))
+                })
                 .cloned()
                 .collect();
             v.sort();
@@ -535,16 +589,47 @@ pub fn complete(c: &Content, line: &str, players: &[String], permission: u32) ->
         let list = match &p.kind {
             Kind::Literal(l) if l.starts_with(partial) => vec![l.clone()],
             Kind::Word(options) => {
-                let set = |o: &String| o.strip_prefix('#').map(|s| c.word_sets.get(s).cloned().unwrap_or_default()).unwrap_or_else(|| vec![o.clone()]);
-                names_from(options.iter().flat_map(set).collect::<Vec<_>>().iter().collect())
+                let set = |o: &String| {
+                    o.strip_prefix('#')
+                        .map(|s| c.word_sets.get(s).cloned().unwrap_or_default())
+                        .unwrap_or_else(|| vec![o.clone()])
+                };
+                names_from(
+                    options
+                        .iter()
+                        .flat_map(set)
+                        .collect::<Vec<_>>()
+                        .iter()
+                        .collect(),
+                )
             }
             Kind::Item => names_from(c.item_names.keys().collect()),
             Kind::Block => names_from(c.block_names.keys().collect()),
-            Kind::Entity => names_from(c.game.entity_names.iter().filter(|(_, k)| !c.game.is_block_entity(**k)).map(|(n, _)| n).collect()),
+            Kind::Entity => names_from(
+                c.game
+                    .entity_names
+                    .iter()
+                    .filter(|(_, k)| !c.game.is_block_entity(**k))
+                    .map(|(n, _)| n)
+                    .collect(),
+            ),
             Kind::Dim => names_from(c.dim_names.keys().collect()),
-            Kind::Player => players.iter().filter(|n| n.starts_with(partial)).cloned().collect(),
-            Kind::Targets => ["@p", "@a", "@e", "@s", "@r"].iter().map(|s| s.to_string()).chain(players.iter().cloned()).filter(|n| n.starts_with(partial)).collect(),
-            Kind::Time => TIMES.iter().map(|t| t.0.to_string()).filter(|n| n.starts_with(partial)).collect(),
+            Kind::Player => players
+                .iter()
+                .filter(|n| n.starts_with(partial))
+                .cloned()
+                .collect(),
+            Kind::Targets => ["@p", "@a", "@e", "@s", "@r"]
+                .iter()
+                .map(|s| s.to_string())
+                .chain(players.iter().cloned())
+                .filter(|n| n.starts_with(partial))
+                .collect(),
+            Kind::Time => TIMES
+                .iter()
+                .map(|t| t.0.to_string())
+                .filter(|n| n.starts_with(partial))
+                .collect(),
             Kind::Pos if partial.is_empty() || partial == "~" => vec![if within == 0 { "~ ~ ~".to_string() } else { "~".to_string() }],
             Kind::Pos if partial == "^" => vec![if within == 0 { "^ ^ ^".to_string() } else { "^".to_string() }],
             _ => Vec::new(),

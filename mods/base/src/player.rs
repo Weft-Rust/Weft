@@ -18,7 +18,6 @@ static HUD_AIR: HudElement = HudElement::named("air");
 static HUD_ATTACK: HudElement = HudElement::named("attack_indicator");
 static WATER_LIKE: Tag = Tag::named("water");
 
-
 const MAX_AIR: f32 = 300.0;
 
 /// Head to feet.
@@ -27,12 +26,21 @@ pub const EQUIPMENT: [&EquipmentSlot; 4] = [&HEAD, &base_api::CHEST, &LEGS, &FEE
 /// Armor points and toughness of what `entity` wears.
 fn armor_of(w: &World, entity: u64) -> (u32, f32) {
     let Some(worn) = w.inventory(entity).find_group(EQUIPMENT_GROUP) else { return (0, 0.0) };
-    (0..worn.len()).filter_map(|i| ARMOR.on_item(worn.get(i).item)).fold((0, 0.0), |t, a| (t.0 + a.points, t.1 + a.toughness))
+    (0..worn.len())
+        .filter_map(|i| ARMOR.on_item(worn.get(i).item))
+        .fold((0, 0.0), |t, a| (t.0 + a.points, t.1 + a.toughness))
 }
 
 pub fn register(r: &mut Registry) {
-    r.player_inventory().group("hotbar", Slots::row(9).hotbar()).group("main", Slots::grid(9, 3));
-    for (slot, parts, piece) in [(&HEAD, worn_parts::HEAD, "helmet"), (&base_api::CHEST, worn_parts::BODY | worn_parts::ARMS, "chestplate"), (&LEGS, worn_parts::BODY | worn_parts::LEGS, "leggings"), (&FEET, worn_parts::LEGS, "boots")] {
+    r.player_inventory()
+        .group("hotbar", Slots::row(9).hotbar())
+        .group("main", Slots::grid(9, 3));
+    for (slot, parts, piece) in [
+        (&HEAD, worn_parts::HEAD, "helmet"),
+        (&base_api::CHEST, worn_parts::BODY | worn_parts::ARMS, "chestplate"),
+        (&LEGS, worn_parts::BODY | worn_parts::LEGS, "leggings"),
+        (&FEET, worn_parts::LEGS, "boots"),
+    ] {
         r.equipment_slot(slot, parts, &format!("slot_{piece}"));
     }
     r.entity_component(
@@ -44,7 +52,10 @@ pub fn register(r: &mut Registry) {
     r.world_tick(tick_players);
     // Not hungry, it doesn't start eating; the other way round it would only find out at the end.
     r.intercept(&question::USE_ITEM, |q| {
-        let full = FOOD.on_item(q.item()).is_some() && q.world().component(q.entity(), &HUNGER).is_some_and(|h| h.food >= 20.0);
+        let full = FOOD.on_item(q.item()).is_some()
+            && q.world()
+                .component(q.entity(), &HUNGER)
+                .is_some_and(|h| h.food >= 20.0);
         if full { Verdict::Deny } else { Verdict::Abstain }
     });
     // Modern's exhaustion, by what the player does.
@@ -119,7 +130,12 @@ pub fn register(r: &mut Registry) {
     r.hud_element(&HUD_ARMOR, hud_anchor::HOTBAR_LEFT, 1, |ui| {
         ui.icons("armor", 10, |c| {
             // From what the client knows of its own inventory, like the server's damage chain.
-            let points: u32 = c.inventory_group(EQUIPMENT_GROUP).iter().filter_map(|s| ARMOR.on_item(s.item)).map(|a| a.points).sum();
+            let points: u32 = c
+                .inventory_group(EQUIPMENT_GROUP)
+                .iter()
+                .filter_map(|s| ARMOR.on_item(s.item))
+                .map(|a| a.points)
+                .sum();
             if points > 0 && !c.creative() { points as f32 } else { -1.0 }
         })
     });
@@ -197,7 +213,8 @@ fn armor_applies(cause: u32) -> bool {
 fn craft_result(m: &MenuCtx) {
     let grid = m.group("grid");
     let cells: Vec<ItemStack> = (0..grid.len()).map(|i| grid.get(i)).collect();
-    m.group("result").set(0, recipe_match(&crate::recipes::CRAFTING, &cells, grid.cols(), grid.rows()));
+    m.group("result")
+        .set(0, recipe_match(&crate::recipes::CRAFTING, &cells, grid.cols(), grid.rows()));
 }
 
 /// Takes one of each ingredient; the last of a stack leaves its `remainder` (a bucket).
@@ -212,7 +229,10 @@ fn consume_grid(m: &MenuCtx) {
 }
 
 fn tire(w: &World, player: u64, amount: f32) {
-    if let Some(h) = w.component_mut(player, &HUNGER).filter(|_| !w.creative(player)) {
+    if let Some(h) = w
+        .component_mut(player, &HUNGER)
+        .filter(|_| !w.creative(player))
+    {
         h.exhaustion += amount;
     }
 }
@@ -276,7 +296,14 @@ fn tick_players(w: &World) {
         }
         let Some(h) = w.component_mut(id, &HUNGER) else { continue };
         // Modern's: 0.1 a block sprinting, 0.01 swimming, 0 walking; jumps are counted from `Move`.
-        h.exhaustion += st.moved * if st.sprinting != 0 { 0.1 } else if st.in_liquid != 0 { 0.01 } else { 0.0 };
+        h.exhaustion += st.moved
+            * if st.sprinting != 0 {
+                0.1
+            } else if st.in_liquid != 0 {
+                0.01
+            } else {
+                0.0
+            };
         if h.exhaustion > 4.0 {
             h.exhaustion -= 4.0;
             if h.saturation > 0.0 {

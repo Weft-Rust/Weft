@@ -30,7 +30,10 @@ fn table() -> &'static RwLock<Interner> {
 
 pub fn get(data: u32) -> Data {
     let t = table().read();
-    t.list.get(data as usize).cloned().unwrap_or_else(|| t.list[0].clone())
+    t.list
+        .get(data as usize)
+        .cloned()
+        .unwrap_or_else(|| t.list[0].clone())
 }
 
 /// Value of `comp` in `data`. The bytes live as long as the process (data is never freed).
@@ -74,7 +77,9 @@ pub fn with(data: u32, comp: u32, bytes: Option<&[u8]>) -> u32 {
 }
 
 pub fn u32_of(stack: &ItemStack, comp: Option<u32>) -> u32 {
-    comp.and_then(|c| value(stack.data, c)).filter(|b| b.len() >= 4).map_or(0, |b| u32::from_le_bytes([b[0], b[1], b[2], b[3]]))
+    comp.and_then(|c| value(stack.data, c))
+        .filter(|b| b.len() >= 4)
+        .map_or(0, |b| u32::from_le_bytes([b[0], b[1], b[2], b[3]]))
 }
 
 /// Damage taken (the `damage` stack component), 0 for a fresh stack.
@@ -105,10 +110,18 @@ fn without(data: u32, flag: u32) -> u32 {
         return data;
     }
     let d = get(data);
-    if !d.iter().any(|(id, _)| c.stack_flags.get(id).is_some_and(|f| f & flag != 0)) {
+    if !d
+        .iter()
+        .any(|(id, _)| c.stack_flags.get(id).is_some_and(|f| f & flag != 0))
+    {
         return data;
     }
-    intern(d.iter().filter(|(id, _)| !c.stack_flags.get(id).is_some_and(|f| f & flag != 0)).cloned().collect())
+    intern(
+        d.iter()
+            .filter(|(id, _)| !c.stack_flags.get(id).is_some_and(|f| f & flag != 0))
+            .cloned()
+            .collect(),
+    )
 }
 
 /// The stack as clients may see it: without `SERVER_ONLY` components.
@@ -124,22 +137,42 @@ pub fn for_save(data: u32) -> u32 {
 /// Components by name, for saves and the network; names the reader does not know are dropped.
 pub fn to_names(data: u32) -> Vec<(String, Vec<u8>)> {
     let Some(c) = crate::content::try_content() else { return Vec::new() };
-    get(data).iter().map(|(id, b)| (c.components.names[*id as usize].clone(), b.to_vec())).collect()
+    get(data)
+        .iter()
+        .map(|(id, b)| (c.components.names[*id as usize].clone(), b.to_vec()))
+        .collect()
 }
 
 /// `damage=05000000,mymod:charge=10270000` for text files; empty for plain stacks.
 pub fn to_text(data: u32) -> String {
-    to_names(data).iter().map(|(n, b)| format!("{n}={}", b.iter().map(|x| format!("{x:02x}")).collect::<String>())).collect::<Vec<_>>().join(",")
+    to_names(data)
+        .iter()
+        .map(|(n, b)| format!("{n}={}", b.iter().map(|x| format!("{x:02x}")).collect::<String>()))
+        .collect::<Vec<_>>()
+        .join(",")
 }
 
 pub fn from_text(s: &str) -> u32 {
-    let unhex = |h: &str| (0..h.len() / 2).filter_map(|i| u8::from_str_radix(&h[i * 2..i * 2 + 2], 16).ok()).collect::<Vec<u8>>();
-    from_names(s.split(',').filter_map(|kv| kv.split_once('=')).map(|(k, v)| (k.to_string(), unhex(v))).collect())
+    let unhex = |h: &str| {
+        (0..h.len() / 2)
+            .filter_map(|i| u8::from_str_radix(&h[i * 2..i * 2 + 2], 16).ok())
+            .collect::<Vec<u8>>()
+    };
+    from_names(
+        s.split(',')
+            .filter_map(|kv| kv.split_once('='))
+            .map(|(k, v)| (k.to_string(), unhex(v)))
+            .collect(),
+    )
 }
 
 pub fn from_names(list: Vec<(String, Vec<u8>)>) -> u32 {
     let Some(c) = crate::content::try_content() else { return 0 };
-    intern(list.into_iter().filter_map(|(name, b)| c.components.id(&name).map(|id| (id, b.into_boxed_slice()))).collect())
+    intern(
+        list.into_iter()
+            .filter_map(|(name, b)| c.components.id(&name).map(|id| (id, b.into_boxed_slice())))
+            .collect(),
+    )
 }
 
 #[cfg(test)]

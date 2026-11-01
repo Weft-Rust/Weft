@@ -238,7 +238,13 @@ struct Slot {
 
 impl Slot {
     const fn new() -> Slot {
-        Slot { bits: AtomicPtr::new(std::ptr::null_mut()), words: AtomicU32::new(0), entries: AtomicU32::new(0), data: AtomicPtr::new(std::ptr::null_mut()), stride: AtomicU32::new(0) }
+        Slot {
+            bits: AtomicPtr::new(std::ptr::null_mut()),
+            words: AtomicU32::new(0),
+            entries: AtomicU32::new(0),
+            data: AtomicPtr::new(std::ptr::null_mut()),
+            stride: AtomicU32::new(0),
+        }
     }
 }
 
@@ -276,7 +282,8 @@ impl Lookup {
                 return false;
             }
         }
-        entry < s.entries.load(Ordering::Relaxed) && unsafe { *bits.add((entry * s.words.load(Ordering::Relaxed)) as usize) } >> (self.id.load(Ordering::Relaxed) % 64) & 1 != 0
+        entry < s.entries.load(Ordering::Relaxed)
+            && unsafe { *bits.add((entry * s.words.load(Ordering::Relaxed)) as usize) } >> (self.id.load(Ordering::Relaxed) % 64) & 1 != 0
     }
 
     #[inline]
@@ -286,7 +293,13 @@ impl Lookup {
         }
         let s = &self.slots[kind as usize];
         let stride = s.stride.load(Ordering::Relaxed);
-        (stride as usize == size_of::<T>()).then(|| unsafe { std::ptr::read_unaligned(s.data.load(Ordering::Relaxed).add((entry * stride) as usize) as *const T) })
+        (stride as usize == size_of::<T>()).then(|| unsafe {
+            std::ptr::read_unaligned(
+                s.data
+                    .load(Ordering::Relaxed)
+                    .add((entry * stride) as usize) as *const T,
+            )
+        })
     }
 
     #[cold]

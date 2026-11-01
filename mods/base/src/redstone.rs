@@ -1,4 +1,4 @@
-﻿//! Redstone blocks. The engine runs them from what they say they are (`signal_*`); this is their
+//! Redstone blocks. The engine runs them from what they say they are (`signal_*`); this is their
 //! look and what they do with a player. Gates and switches go on any face.
 
 use weft_sdk::*;
@@ -78,7 +78,14 @@ pub fn register(r: &mut Registry) {
         .tag("ores/redstone")
         .tab(&crate::tabs::NATURAL);
 
-    r.block(&REDSTONE_BLOCK).signal_block().sound_group("stone").hardness(5.0).mineable("pickaxe").needs_tool(0).tag("ore_blocks/redstone").tab(&crate::tabs::REDSTONE);
+    r.block(&REDSTONE_BLOCK)
+        .signal_block()
+        .sound_group("stone")
+        .hardness(5.0)
+        .mineable("pickaxe")
+        .needs_tool(0)
+        .tag("ore_blocks/redstone")
+        .tab(&crate::tabs::REDSTONE);
 
     r.block(&LAMP)
         .signal_sink()
@@ -115,7 +122,12 @@ pub fn register(r: &mut Registry) {
         })
         .on_use(|u| {
             let (w, p) = (u.world(), u.pos());
-            let next = w.prop(p, "delay").and_then(|d| d.parse::<u32>().ok()).unwrap_or(1) % 4 + 1;
+            let next = w
+                .prop(p, "delay")
+                .and_then(|d| d.parse::<u32>().ok())
+                .unwrap_or(1)
+                % 4
+                + 1;
             w.set_prop(p, "delay", &next.to_string());
             true
         })
@@ -134,7 +146,12 @@ pub fn register(r: &mut Registry) {
             s.framed_box(p.frame(), [0.0, 0.0, 0.0], [16.0, 2.0, 16.0], slab(top))
                 .framed_box(p.frame(), [4.0, 2.0, 11.0], [6.0, 7.0, 13.0], short_post(torch))
                 .framed_box(p.frame(), [10.0, 2.0, 11.0], [12.0, 7.0, 13.0], short_post(torch))
-                .framed_box(p.frame(), [7.0, 2.0, 2.0], [9.0, 5.0, 4.0], short_post(if subtract { "redstone_torch" } else { "redstone_torch_off" }))
+                .framed_box(
+                    p.frame(),
+                    [7.0, 2.0, 2.0],
+                    [9.0, 5.0, 4.0],
+                    short_post(if subtract { "redstone_torch" } else { "redstone_torch_off" }),
+                )
         })
         .on_use(|u| {
             let (w, p) = (u.world(), u.pos());
@@ -154,9 +171,23 @@ pub fn register(r: &mut Registry) {
             // Vanilla's: the handle over one way or the other, about the middle of the base.
             let lean = if p.is("power", "on") { -45.0 } else { 45.0 };
             let (top, side, end) = ([5.0, 4.0, 11.0, 12.0], [5.0, 0.0, 11.0, 3.0], [4.0, 0.0, 12.0, 3.0]);
-            let base = [("cobblestone", end), ("cobblestone", end), ("cobblestone", top), ("cobblestone", top), ("cobblestone", side), ("cobblestone", side)];
+            let base = [
+                ("cobblestone", end),
+                ("cobblestone", end),
+                ("cobblestone", top),
+                ("cobblestone", top),
+                ("cobblestone", side),
+                ("cobblestone", side),
+            ];
             s.framed_box(p.frame(), [5.0, 0.0, 4.0], [11.0, 3.0, 12.0], base)
-                .framed_box_with(p.frame(), [7.0, 1.0, 7.0], [9.0, 11.0, 9.0], post("lever"), [0; 6], Some(([8.0, 1.0, 8.0], Dir::East, lean)))
+                .framed_box_with(
+                    p.frame(),
+                    [7.0, 1.0, 7.0],
+                    [9.0, 11.0, 9.0],
+                    post("lever"),
+                    [0; 6],
+                    Some(([8.0, 1.0, 8.0], Dir::East, lean)),
+                )
                 .framed_selection(p.frame(), [5.0, 0.0, 4.0], [11.0, 6.0, 12.0])
         })
         .on_use(|u| toggle(u))
@@ -190,7 +221,9 @@ pub fn register(r: &mut Registry) {
         .texture("button")
         .tab(&crate::tabs::REDSTONE);
 
-    for (piston, head, sticky, name) in [(&PISTON, &PISTON_HEAD, false, "base:piston_head"), (&STICKY_PISTON, &STICKY_PISTON_HEAD, true, "base:sticky_piston_head")] {
+    for (piston, head, sticky, name) in
+        [(&PISTON, &PISTON_HEAD, false, "base:piston_head"), (&STICKY_PISTON, &STICKY_PISTON_HEAD, true, "base:sticky_piston_head")]
+    {
         let top = if sticky { "piston_top_sticky" } else { "piston_top" };
         r.block(piston)
             .facing(Facings::ALL, Toward::Player)
@@ -204,7 +237,8 @@ pub fn register(r: &mut Registry) {
                     s.framed_box(p.frame_up(), [0.0, 0.0, 0.0], [16.0, 12.0, 16.0], f)
                 } else {
                     f[3].0 = top;
-                    s.framed_box(p.frame_up(), [0.0, 0.0, 0.0], [16.0, 16.0, 16.0], f).opacity(15)
+                    s.framed_box(p.frame_up(), [0.0, 0.0, 0.0], [16.0, 16.0, 16.0], f)
+                        .opacity(15)
                 }
             })
             .sound_group("stone")
@@ -236,7 +270,14 @@ pub fn register(r: &mut Registry) {
             .no_item();
     }
 
-    r.block(&SLIME_BLOCK).sticky().translucent().opacity(1).friction(0.8).hardness(0.0).sound_group("cloth").tab(&crate::tabs::REDSTONE);
+    r.block(&SLIME_BLOCK)
+        .sticky()
+        .translucent()
+        .opacity(1)
+        .friction(0.8)
+        .hardness(0.0)
+        .sound_group("cloth")
+        .tab(&crate::tabs::REDSTONE);
 
     // In a row being pushed it stops the push, also of a platform on its way; touching slime it
     // just stays behind.
@@ -267,7 +308,8 @@ pub fn register(r: &mut Registry) {
             };
             let whole = [0.0, 0.0, 16.0, 16.0];
             let faces = [(side, whole), (side, whole), (side, whole), (side, whole), ("floater_front", whole), ("floater_back", whole)];
-            s.framed_box_with(p.frame_front(), [0.0, 0.0, 0.0], [16.0, 16.0, 16.0], faces, [1, 3, 2, 0, 0, 0], None).opacity(15)
+            s.framed_box_with(p.frame_front(), [0.0, 0.0, 0.0], [16.0, 16.0, 16.0], faces, [1, 3, 2, 0, 0, 0], None)
+                .opacity(15)
         })
         .signal_read(|w, p| match w.prop(p, "power") {
             Some("1") => 1,
@@ -309,8 +351,16 @@ pub fn register(r: &mut Registry) {
         .states(|p, s| {
             let back = if p.is("power", "on") { "observer_back_on" } else { "observer_back" };
             let whole = [0.0, 0.0, 16.0, 16.0];
-            let faces = [("observer_side", whole), ("observer_side", whole), ("observer_top", whole), ("observer_top", [0.0, 16.0, 16.0, 0.0]), ("observer_front", whole), (back, whole)];
-            s.framed_box(p.frame_front(), [0.0, 0.0, 0.0], [16.0, 16.0, 16.0], faces).opacity(15)
+            let faces = [
+                ("observer_side", whole),
+                ("observer_side", whole),
+                ("observer_top", whole),
+                ("observer_top", [0.0, 16.0, 16.0, 0.0]),
+                ("observer_front", whole),
+                (back, whole),
+            ];
+            s.framed_box(p.frame_front(), [0.0, 0.0, 0.0], [16.0, 16.0, 16.0], faces)
+                .opacity(15)
         })
         .sound_group("stone")
         .hardness(3.0)
@@ -338,7 +388,11 @@ pub fn register(r: &mut Registry) {
                         return;
                     }
                     let (w, p) = (e.world(), e.pos());
-                    let dir = w.prop(p, "facing").and_then(Dir::from_name).unwrap_or(Dir::Up).offset();
+                    let dir = w
+                        .prop(p, "facing")
+                        .and_then(Dir::from_name)
+                        .unwrap_or(Dir::Up)
+                        .offset();
                     let items = w.inventory(w.block_entity(p));
                     for i in 0..items.size() {
                         let stack = items.get(i);

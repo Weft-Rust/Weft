@@ -87,7 +87,11 @@ impl Dim {
             log::error!("event {}: value of {} bytes, others had {size}", def.name, bytes.len());
             return;
         }
-        self.space.event_queue.entry(event).or_default().extend_from_slice(bytes);
+        self.space
+            .event_queue
+            .entry(event)
+            .or_default()
+            .extend_from_slice(bytes);
     }
 
     /// Engine events by name, with their `abi` struct as the value.
@@ -188,12 +192,18 @@ impl Dim {
     fn base_attribute(&self, c: &Content, entity: u64, attr: u32) -> Option<f64> {
         let e = self.entities.get(entity)?;
         let def = &c.game.attributes[attr as usize];
-        let own = def.comp.and_then(|id| c.components.get::<f64>(crate::components::ENTITY, e.kind, id));
+        let own = def.comp.and_then(|id| {
+            c.components
+                .get::<f64>(crate::components::ENTITY, e.kind, id)
+        });
         Some(own.unwrap_or(def.default))
     }
 
     fn modifiers_of(&self, c: &Content, entity: u64) -> Vec<AttrMod> {
-        self.entities.comps.get(&(entity, c.game.modifiers_comp)).map_or_else(Vec::new, |b| decode_mods(b))
+        self.entities
+            .comps
+            .get(&(entity, c.game.modifiers_comp))
+            .map_or_else(Vec::new, |b| decode_mods(b))
     }
 
     /// Value of attribute `attr` for an entity; with `explain` the steps go to `explanation`.
@@ -216,11 +226,26 @@ impl Dim {
             }
             return ((base + add) * (1.0 + mul_base) * mul_total).clamp(def.min, def.max);
         }
-        let mods: Vec<AttrMod> = self.modifiers_of(c, entity).into_iter().filter(|m| m.attr == def.hash && (m.until == 0 || m.until > self.time)).collect();
-        let add: f64 = mods.iter().filter(|m| m.op as u32 == abi::attr_op::ADD).map(|m| m.amount).sum();
-        let mul_base: f64 = mods.iter().filter(|m| m.op as u32 == abi::attr_op::MUL_BASE).map(|m| m.amount).sum();
+        let mods: Vec<AttrMod> = self
+            .modifiers_of(c, entity)
+            .into_iter()
+            .filter(|m| m.attr == def.hash && (m.until == 0 || m.until > self.time))
+            .collect();
+        let add: f64 = mods
+            .iter()
+            .filter(|m| m.op as u32 == abi::attr_op::ADD)
+            .map(|m| m.amount)
+            .sum();
+        let mul_base: f64 = mods
+            .iter()
+            .filter(|m| m.op as u32 == abi::attr_op::MUL_BASE)
+            .map(|m| m.amount)
+            .sum();
         let mut v = (base + add) * (1.0 + mul_base);
-        for m in mods.iter().filter(|m| m.op as u32 == abi::attr_op::MUL_TOTAL) {
+        for m in mods
+            .iter()
+            .filter(|m| m.op as u32 == abi::attr_op::MUL_TOTAL)
+        {
             v *= 1.0 + m.amount;
         }
         let v = v.clamp(def.min, def.max);
@@ -247,7 +272,9 @@ impl Dim {
         let now = self.time;
         mods.retain(|m| !(m.attr == hash && m.id == id) && (m.until == 0 || m.until > now));
         mods.push(AttrMod { attr: hash, op: op.min(2) as u8, amount, until: if ticks == 0 { 0 } else { now + ticks }, id: id.to_string() });
-        self.entities.comps.insert((entity, c.game.modifiers_comp), encode_mods(&mods));
+        self.entities
+            .comps
+            .insert((entity, c.game.modifiers_comp), encode_mods(&mods));
     }
 
     pub fn remove_attr_modifier(&mut self, c: &Content, entity: u64, attr: u32, id: &str) {
@@ -257,7 +284,9 @@ impl Dim {
         if mods.is_empty() {
             self.entities.comps.remove(&(entity, c.game.modifiers_comp));
         } else {
-            self.entities.comps.insert((entity, c.game.modifiers_comp), encode_mods(&mods));
+            self.entities
+                .comps
+                .insert((entity, c.game.modifiers_comp), encode_mods(&mods));
         }
     }
 
@@ -281,4 +310,3 @@ impl Dim {
         crate::loot::roll(c, t, ctx, &mut rng)
     }
 }
-

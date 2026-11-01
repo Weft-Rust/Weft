@@ -159,7 +159,9 @@ pub fn ramp(v: i32, from: i32, to: i32) -> i32 {
 /// To Q12 (and Q4 below), rounded, for parameters given as decimals; out of range (an open
 /// range's infinity) saturates at +-2^18, far past any field.
 pub fn q12(v: f64) -> i32 {
-    (v * 4096.0).round().clamp(-(1 << 18) as f64, (1 << 18) as f64) as i32
+    (v * 4096.0)
+        .round()
+        .clamp(-(1 << 18) as f64, (1 << 18) as f64) as i32
 }
 
 pub fn q4(v: f64) -> i32 {
