@@ -25,7 +25,10 @@ impl Dirs {
 /// What to start to run the game again. In an AppImage the executable is in a mount that goes
 /// away with this process, so it is the image.
 pub fn own_program() -> std::io::Result<PathBuf> {
-    match std::env::var_os("APPIMAGE").map(PathBuf::from).filter(|p| p.has_root()) {
+    match std::env::var_os("APPIMAGE")
+        .map(PathBuf::from)
+        .filter(|p| p.has_root())
+    {
         Some(image) => Ok(image),
         None => std::env::current_exe(),
     }
