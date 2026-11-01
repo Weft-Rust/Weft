@@ -192,7 +192,12 @@ pub struct SetDesc {
     pub value: CompValue,
     pub remove: u32,
 }
-defaults!(SetDesc { target_kind: 0, target: Str::EMPTY, value: CompValue { name: Str::EMPTY, schema: Str::EMPTY, value: Slice::EMPTY }, remove: 0 });
+defaults!(SetDesc {
+    target_kind: 0,
+    target: Str::EMPTY,
+    value: CompValue { name: Str::EMPTY, schema: Str::EMPTY, value: Slice::EMPTY },
+    remove: 0
+});
 
 /// Frozen components of one entry kind, readable directly by mods: whether entry `e` has
 /// component `c` is bit `c % 64` of `bits[e * words + c / 64]`; its value (if the component has
@@ -249,9 +254,13 @@ pub mod comp {
     pub const TOOL_LEVEL: &str = "tool_level";
     /// The block drops its loot only to a fitting tool of at least this level (0 = any tier).
     pub const HARVEST_LEVEL: &str = "harvest_level";
+    /// How many times a block's loot is rolled when it breaks (two slabs in one block).
+    pub const LOOT_ROLLS: &str = "loot_rolls";
     pub const DAMAGE: &str = "damage";
     /// Block: seconds to break by hand at speed 1 (`f32`, 1 by default); negative = unbreakable.
     pub const HARDNESS: &str = "hardness";
+    /// Tag of blocks that burn what touches them, which a liquid of 1000 degrees has by itself.
+    pub const HOT: &str = "hot";
     /// Block: how slippery its top is (`f32`, 0.6 by default; ice 0.98).
     pub const FRICTION: &str = "friction";
     /// Block: movement speed multiplier inside it (`f32`, 1 by default; cobweb, liquids).
@@ -307,6 +316,12 @@ pub mod comp {
     pub const WEAR_PER_HIT: &str = "wear_per_hit";
     /// Tag of biomes players may start in (the engine's spawn search tries them first).
     pub const SPAWN_BIOME: &str = "spawn_biome";
+    /// Block: mean seconds between growth steps (`f32`). A step needs at least `grow_light` light
+    /// (sky light by the daylight of that moment, or block light) and is timed by world time, so a
+    /// block in an unloaded area catches up when it loads again.
+    pub const GROW_TIME: &str = "grow_time";
+    /// `u32`, see `grow_time`.
+    pub const GROW_LIGHT: &str = "grow_light";
     /// Block: spreads onto blocks with this tag (`tag`; grass onto dirt) within 1 block
     /// sideways, 3 down and 1 up, where the target has light (`spread_light`) and nothing
     /// opaque on top. In `spread_time` seconds on average, sooner with more of it around.
@@ -322,7 +337,6 @@ pub mod comp {
     /// Block: a particle kind (`str`) clients show around it now and then, near the player only
     /// (vanilla's torch smoke); nothing of it reaches the server.
     pub const AMBIENT_PARTICLE: &str = "ambient_particle";
-
 }
 
 /// Harvest levels (`tool_level` of a tool, `harvest_level` of a block) of the vanilla tiers.
@@ -359,6 +373,8 @@ pub mod block_flags {
     /// On a moving body it shoves, but can't be stood on and be taken along by: a piston's head
     /// sliding out from under whoever stands on the piston.
     pub const NOT_STOOD_ON: u32 = 2048;
+    /// Keeps the liquid source it is placed in, and a bucket fills it (waterlogging).
+    pub const HOLDS_LIQUID: u32 = 4096;
 }
 
 #[repr(u32)]
@@ -413,14 +429,36 @@ pub struct ModelBox {
     pub max: [f32; 3],
     /// Per face; empty takes the state's texture of that face.
     pub textures: [Str; 6],
-    /// Per face texel rectangle (u0, v0, u1, v1, 0..16); negative: from the box's position, like
-    /// a cube's face.
+    /// Per face texel rectangle (u0, v0, u1, v1, 0..16), `UV_FROM_BOX` or `UV_NO_FACE`.
     pub uv: [[f32; 4]; 6],
     /// Per face quarter turns of the picture (`FACE_CORNERS`).
     pub turn: [u8; 6],
     pub tilt: BoxTilt,
 }
-defaults!(ModelBox { min: [0.0; 3], max: [16.0; 3], textures: [Str::EMPTY; 6], uv: [[-1.0; 4]; 6], turn: [0; 6], tilt: BoxTilt::NONE });
+defaults!(ModelBox { min: [0.0; 3], max: [16.0; 3], textures: [Str::EMPTY; 6], uv: [UV_FROM_BOX; 6], turn: [0; 6], tilt: BoxTilt::NONE });
+
+/// A box's texel rectangle saying to take it from where the box is, as a cube's face would.
+pub const UV_FROM_BOX: [f32; 4] = [-1.0, 0.0, 0.0, 0.0];
+/// A box's texel rectangle saying it has no such face.
+pub const UV_NO_FACE: [f32; 4] = [-2.0, 0.0, 0.0, 0.0];
+
+/// The texels a box between `min` and `max` (texels too) shows on a face when it says nothing, a
+/// box reaching out of its cell going on with the edge of the picture.
+pub fn box_face_uv(face: usize, min: [f32; 3], max: [f32; 3]) -> [f32; 4] {
+    let (min, max) = (min.map(|v| v.clamp(0.0, 16.0)), max.map(|v| v.clamp(0.0, 16.0)));
+    match face {
+        0 => [min[2], 16.0 - max[1], max[2], 16.0 - min[1]],
+        1 => [16.0 - max[2], 16.0 - max[1], 16.0 - min[2], 16.0 - min[1]],
+        2 | 3 => [min[0], min[2], max[0], max[2]],
+        4 => [16.0 - max[0], 16.0 - max[1], 16.0 - min[0], 16.0 - min[1]],
+        _ => [min[0], 16.0 - max[1], max[0], 16.0 - min[1]],
+    }
+}
+
+/// The six directions, in the order of faces everywhere (-X, +X, -Y, +Y, -Z, +Z).
+pub const FACE_DIRS: [[i32; 3]; 6] = [[-1, 0, 0], [1, 0, 0], [0, -1, 0], [0, 1, 0], [0, 0, -1], [0, 0, 1]];
+/// What they are called in properties and model files.
+pub const FACE_NAMES: [&str; 6] = ["west", "east", "down", "up", "north", "south"];
 
 /// A face's corners, in the order its picture goes around them (-X, +X, -Y, +Y, -Z, +Z).
 pub const FACE_CORNERS: [[[i32; 3]; 4]; 6] = [
@@ -456,7 +494,7 @@ pub mod signal_kind {
     pub const PISTON_HEAD: u32 = 10;
     /// With power it takes all it is stuck to and carries it along `front`, faster the more power;
     /// without, that lands. `mode` 1 breaks what is in the way, instead of stopping at it.
-    pub const MOTOR: u32 = 11;
+    pub const FLOATER: u32 = 11;
 }
 
 /// Per state. A property named `power` holds its level: two values are off and full.
@@ -518,11 +556,10 @@ pub struct StateDesc {
     pub model: Model,
     pub textures: [Str; 6],
     pub boxes: Slice<ModelBox>,
-    /// Collision boxes in 1/16 units; ignored for full cubes.
-    pub collision: Slice<[f32; 6]>,
-    /// What the crosshair picks, outlines and cracks, in 1/16 units; empty: the collision boxes,
-    /// else the model's boxes, else a plant's cross, else the whole block.
-    pub selection: Slice<[f32; 6]>,
+    /// Its shape in fractions of a block: what stops a walker if it is solid, and what the
+    /// crosshair picks, outlines and cracks. Empty: the model's boxes, else a plant's cross, else
+    /// the whole block.
+    pub hitbox: Slice<[f32; 6]>,
     /// Components of this state only, on top of the block's (hardness, light, support and tint
     /// are components too, `comp::HARDNESS` ...).
     pub components: Slice<CompValue>,
@@ -536,8 +573,7 @@ defaults!(StateDesc {
     model: Model::Cube,
     textures: [Str::EMPTY; 6],
     boxes: Slice::EMPTY,
-    collision: Slice::EMPTY,
-    selection: Slice::EMPTY,
+    hitbox: Slice::EMPTY,
     components: Slice::EMPTY,
     signal: SignalDesc::DEFAULT,
 });
@@ -568,11 +604,6 @@ pub struct BlockDesc {
     pub placement: Callback,
     /// Non-zero: replaces a block of the same name registered by a mod this one depends on.
     pub replace: u32,
-    /// Growth over time: mean seconds between growth steps (0 = none). A step needs at least
-    /// `grow_light` light (sky light by the daylight of that moment, or block light). Steps are
-    /// timed by world time, so a block in an unloaded area catches up when it loads again.
-    pub grow_seconds: f32,
-    pub grow_light: u32,
     /// `BlockEventArgs`, a growth step; without it a step moves to the next state and the last
     /// state stops growing.
     pub on_grow: Callback,
@@ -590,6 +621,16 @@ pub struct BlockDesc {
     pub signal_logic: Callback,
     /// `SignalReadArgs`: what a comparator behind it reads, instead of how full it is.
     pub signal_read: Callback,
+    /// `PlaceArgs`: its own item placed in its cell, as `placed`. Another state in `state` takes
+    /// the item (a second slab making the block whole), the same one leaves it to be placed as
+    /// usual.
+    pub merge: Callback,
+    /// What may share a cell with it though their shapes overlap (`#tags`, names).
+    pub shares_cell: Slice<Str>,
+    /// Non-empty: no block of its own but a template, one for each full cube among these names
+    /// and `#tags`, named as that one plus `derive_suffix`, see `Registry::shapes_of`.
+    pub derive_from: Str,
+    pub derive_suffix: Str,
 }
 defaults!(BlockDesc {
     name: Str::EMPTY,
@@ -604,8 +645,6 @@ defaults!(BlockDesc {
     on_pass: Callback::NONE,
     placement: Callback::NONE,
     replace: 0,
-    grow_seconds: 0.0,
-    grow_light: 0,
     on_grow: Callback::NONE,
     own_states: 1,
     retexture: Slice::EMPTY,
@@ -613,6 +652,10 @@ defaults!(BlockDesc {
     on_signal: Callback::NONE,
     signal_logic: Callback::NONE,
     signal_read: Callback::NONE,
+    merge: Callback::NONE,
+    derive_from: Str::EMPTY,
+    derive_suffix: Str::EMPTY,
+    shares_cell: Slice::EMPTY,
 });
 
 #[repr(C)]
@@ -636,7 +679,14 @@ pub struct ItemDesc {
     /// `ItemUseArgs`.
     pub on_use: Callback,
 }
-defaults!(ItemDesc { name: Str::EMPTY, cell: core::ptr::null(), texture: Str::EMPTY, block: Str::EMPTY, components: Slice::EMPTY, on_use: Callback::NONE });
+defaults!(ItemDesc {
+    name: Str::EMPTY,
+    cell: core::ptr::null(),
+    texture: Str::EMPTY,
+    block: Str::EMPTY,
+    components: Slice::EMPTY,
+    on_use: Callback::NONE
+});
 
 #[repr(C)]
 #[derive(Clone, Copy)]
@@ -855,8 +905,15 @@ pub struct PlaceArgs {
     pub face: u32,
     /// Player look direction.
     pub look: [f32; 3],
-    /// In/out: starts as the first state.
+    /// In/out: starts as the first state (for `BlockDesc::merge`, the state there now).
     pub state: u32,
+    /// The block's first state.
+    pub first: u32,
+    /// Just outside where it was clicked, from `pos`'s corner: 0..1 inside this cell, past that
+    /// when it had no room and goes in the next.
+    pub hit: [f32; 3],
+    /// For `BlockDesc::merge`: the state its item would be placed in.
+    pub placed: u32,
 }
 
 #[repr(C)]
@@ -920,6 +977,8 @@ pub mod entity_flags {
     pub const KINEMATIC: u32 = 128;
     /// A solid body hurts what it squeezes against blocks instead of only pushing.
     pub const CRUSHES: u32 = 256;
+    /// Only what it holds: nothing sees, hits or saves it, and no cube owns it (a virtual inventory).
+    pub const NOT_IN_WORLD: u32 = 512;
     /// Not a kind flag: set in `EntityState::flags` when its last move ran into a wall.
     pub const BLOCKED: u32 = 1 << 31;
 }
@@ -1003,12 +1062,15 @@ pub struct EntityDesc {
     /// `Host::reg_entity_category`); empty = `core:misc`.
     pub category_name: Str,
 }
+/// Eye height as a share of an entity's height unless it says otherwise (vanilla's default).
+pub const EYE_SHARE: f32 = 0.85;
+
 defaults!(EntityDesc {
     name: Str::EMPTY,
     cell: core::ptr::null(),
     width: 0.6,
     height: 1.8,
-    eye: 1.6,
+    eye: 1.8 * EYE_SHARE,
     speed: 3.0,
     flags: entity_flags::FALL_DAMAGE | entity_flags::PUSHABLE,
     texture: Str::EMPTY,
@@ -1035,11 +1097,8 @@ pub struct EntityTickArgs {
 pub struct EntityEventArgs {
     pub world: *mut WorldCtx,
     pub entity: u64,
-    /// Attacker / interacting player, 0 if none.
+    /// The player interacting.
     pub other: u64,
-    /// In/out for `on_hurt`: change it to reduce damage (armor).
-    pub amount: f32,
-    pub cause: u32,
     pub handled: u32,
 }
 
@@ -1062,6 +1121,27 @@ pub mod damage {
     pub const EXPLOSION: u32 = 10;
     /// Its head stuck in a block.
     pub const SUFFOCATE: u32 = 9 | BYPASSES_ARMOR;
+}
+
+/// What `Host::entities_near` looks for.
+pub mod near {
+    /// Only what can be hit: no dropped items, block entities, spectators or the dead.
+    pub const BODIES: u32 = 1;
+}
+
+/// Where a group of slots is: its first, how many and how many a row.
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct SlotGroup {
+    pub start: u32,
+    pub len: u32,
+    pub cols: u32,
+}
+
+pub mod game_mode {
+    pub const SURVIVAL: u32 = 0;
+    pub const CREATIVE: u32 = 1;
+    pub const SPECTATOR: u32 = 2;
 }
 
 /// What `EntityState::pose` says.
@@ -1104,6 +1184,11 @@ pub struct EntityState {
 }
 
 impl EntityState {
+    /// Where its eyes are.
+    pub fn eye(&self) -> [f64; 3] {
+        [self.pos[0], self.pos[1] + self.size[2] as f64, self.pos[2]]
+    }
+
     /// The block its feet are in.
     pub fn block_pos(&self) -> [i32; 3] {
         // No `floor` here: this crate has no std.
@@ -1262,7 +1347,14 @@ pub struct RecipeKindDesc {
     /// `RecipeUiArgs`, client: builds one recipe instead of the default layout.
     pub display: Callback,
 }
-defaults!(RecipeKindDesc { name: Str::EMPTY, input_grid: [0; 2], output_grid: [0; 2], info: Str::EMPTY, info_values: Slice::EMPTY, display: Callback::NONE });
+defaults!(RecipeKindDesc {
+    name: Str::EMPTY,
+    input_grid: [0; 2],
+    output_grid: [0; 2],
+    info: Str::EMPTY,
+    info_values: Slice::EMPTY,
+    display: Callback::NONE
+});
 
 /// A recipe the viewer shows with a kind's own `display`.
 #[repr(C)]
@@ -1689,7 +1781,9 @@ pub struct Host {
     pub reg_hud_element: unsafe extern "C" fn(reg: *mut Registrar, name: Str, anchor: Str, order: i32, cb: Callback),
     /// Chat command `/name`, arguments described by `usage` (see the engine's command syntax);
     /// `cb` gets `CommandArgs` with one value per named parameter.
-    pub reg_command: unsafe extern "C" fn(reg: *mut Registrar, name: Str, usage: Str, cb: Callback),
+    /// `client` non-zero: it runs on the client that types it, never sent to the server, `cb` getting
+    /// `CommandArgs` with `client` set.
+    pub reg_command: unsafe extern "C" fn(reg: *mut Registrar, name: Str, usage: Str, client: u32, cb: Callback),
     pub reg_ore: unsafe extern "C" fn(reg: *mut Registrar, desc: *const OreDesc),
     pub reg_scatter: unsafe extern "C" fn(reg: *mut Registrar, desc: *const ScatterDesc),
     /// `cb` (`GenArgs`) runs after a cube was generated, in the dimensions named (space
@@ -1711,6 +1805,9 @@ pub struct Host {
     /// `state` with property `name` set to `value`, the others kept; `u32::MAX` if the block has
     /// no such property or value.
     pub state_with: unsafe extern "C" fn(state: u32, name: Str, value: Str) -> u32,
+    /// `state` with property `name` at its next value, the first after the last; `u32::MAX` if the
+    /// block has no such property.
+    pub state_next: unsafe extern "C" fn(state: u32, name: Str) -> u32,
     pub state_flags: unsafe extern "C" fn(state: u32) -> u32,
     /// Component id by name, `u32::MAX` if nothing uses it. A non-empty `schema` that differs from
     /// the registered one is an error (logged) and also gives `u32::MAX`.
@@ -1722,13 +1819,20 @@ pub struct Host {
     /// Stack data with `comp` set to `value` (or removed when `remove` is non-zero).
     pub stack_with: unsafe extern "C" fn(data: u32, comp: u32, value: Slice<u8>, remove: u32) -> u32,
 
-    pub get_block: unsafe extern "C" fn(world: *mut WorldCtx, pos: *const [i32; 3]) -> u32,
-    /// `u32::MAX` if the position is not loaded where this callback runs.
-    pub get_block_loaded: unsafe extern "C" fn(world: *mut WorldCtx, pos: *const [i32; 3]) -> u32,
+    /// In `frame`: 0 for where the running callback is (the world, or the body a block of it is
+    /// on), else a moving structure's entity, in its own coordinates with block (0, 0, 0) centered
+    /// on it. `u32::MAX` for what isn't loaded or isn't a structure.
+    pub block_in: unsafe extern "C" fn(world: *mut WorldCtx, frame: u64, pos: *const [i32; 3]) -> u32,
     /// The id of the dimension this callback runs in.
     pub world_dimension: unsafe extern "C" fn(world: *mut WorldCtx) -> u32,
     /// Returns 0 if the position is not loaded.
-    pub set_block: unsafe extern "C" fn(world: *mut WorldCtx, pos: *const [i32; 3], state: u32) -> u32,
+    pub set_block_in: unsafe extern "C" fn(world: *mut WorldCtx, frame: u64, pos: *const [i32; 3], state: u32) -> u32,
+    /// What is in a cell, the one `block_in` gives first: writes up to `cap`, returns how many.
+    pub cell_parts: unsafe extern "C" fn(world: *mut WorldCtx, pos: *const [i32; 3], out: *mut u32, cap: u32) -> u32,
+    /// Puts another block in a cell; 0 if not loaded or two parts would both want to be its main.
+    pub add_part: unsafe extern "C" fn(world: *mut WorldCtx, pos: *const [i32; 3], state: u32) -> u32,
+    /// Replaces a part of a cell with another state, air taking it out; 0 if it isn't there.
+    pub replace_part: unsafe extern "C" fn(world: *mut WorldCtx, pos: *const [i32; 3], old: u32, new: u32) -> u32,
     pub schedule_tick: unsafe extern "C" fn(world: *mut WorldCtx, pos: *const [i32; 3], delay: u32),
     pub world_time: unsafe extern "C" fn(world: *mut WorldCtx) -> u64,
     /// Deterministic per-world random stream.
@@ -1756,20 +1860,33 @@ pub struct Host {
     /// its state + 1 (0 = nothing), position and face hit.
     /// The block entity `id` looks at within `max` (the world's or a moving structure's: `frame`
     /// is its entity, 0 for the world, `pos` in its blocks); state + 1, or 0 for none.
-    pub entity_look_at: unsafe extern "C" fn(world: *mut WorldCtx, id: u64, max: f64, liquids: u32, pos: *mut [i32; 3], face: *mut u32, frame: *mut u64) -> u32,
-    /// Fills `out` with ids near `pos` (all kinds if `kind` is u32::MAX), returns how many matched.
-    /// Like `entities_near`, only what can be hit: no dropped items, block entities, spectators or the dead.
-    pub entities_near_bodies: unsafe extern "C" fn(world: *mut WorldCtx, pos: *const [f64; 3], radius: f64, out: *mut u64, max: usize) -> usize,
+    pub entity_look_at: unsafe extern "C" fn(
+        world: *mut WorldCtx,
+        id: u64,
+        max: f64,
+        liquids: u32,
+        pos: *mut [i32; 3],
+        face: *mut u32,
+        frame: *mut u64,
+    ) -> u32,
     pub in_liquid: unsafe extern "C" fn(world: *mut WorldCtx, pos: *const [f64; 3]) -> u32,
     pub entity_swing_strength: unsafe extern "C" fn(world: *mut WorldCtx, id: u64) -> f32,
-    pub entities_near: unsafe extern "C" fn(world: *mut WorldCtx, pos: *const [f64; 3], radius: f64, kind: u32, out: *mut u64, max: usize) -> usize,
+    pub entities_near: unsafe extern "C" fn(
+        world: *mut WorldCtx,
+        pos: *const [f64; 3],
+        radius: f64,
+        kind: u32,
+        flags: u32,
+        out: *mut u64,
+        max: usize,
+    ) -> usize,
     /// An entity's component bytes, null if it has none. Changes are found by comparing with
     /// what was last sent, so writing through the pointer is enough.
     pub component: unsafe extern "C" fn(world: *mut WorldCtx, id: u64, comp: u32) -> *mut u8,
     pub player_count: unsafe extern "C" fn(world: *mut WorldCtx) -> u32,
     pub player_at: unsafe extern "C" fn(world: *mut WorldCtx, index: u32) -> u64,
-    /// Non-zero for a player in creative mode (no damage, hunger or item use costs).
-    pub is_creative: unsafe extern "C" fn(world: *mut WorldCtx, entity: u64) -> u32,
+    /// `game_mode`, survival for what isn't a player.
+    pub game_mode: unsafe extern "C" fn(world: *mut WorldCtx, entity: u64) -> u32,
 
     pub inv_size: unsafe extern "C" fn(world: *mut WorldCtx, owner: u64) -> u32,
     pub inv_get: unsafe extern "C" fn(world: *mut WorldCtx, owner: u64, slot: u32) -> ItemStack,
@@ -1783,10 +1900,10 @@ pub struct Host {
 
     /// Group `name` of an open menu: its first menu slot and how many slots it has. 0 if none.
     /// Group `name` of an open menu: its first slot, slot count and columns.
-    pub menu_group: unsafe extern "C" fn(menu: *mut MenuCtx, name: Str, out: *mut [u32; 3]) -> u32,
+    pub menu_group: unsafe extern "C" fn(menu: *mut MenuCtx, name: Str, out: *mut SlotGroup) -> u32,
     /// Group `name` of a machine (`MenuDesc::entity`) in `entity`'s inventory: first index and
     /// count. 0 if the entity has no such group.
-    pub inventory_group: unsafe extern "C" fn(world: *mut WorldCtx, entity: u64, name: Str, out: *mut [u32; 2]) -> u32,
+    pub inventory_group: unsafe extern "C" fn(world: *mut WorldCtx, entity: u64, name: Str, out: *mut SlotGroup) -> u32,
     pub menu_get: unsafe extern "C" fn(menu: *mut MenuCtx, slot: u32) -> ItemStack,
     pub menu_set: unsafe extern "C" fn(menu: *mut MenuCtx, slot: u32, stack: ItemStack),
 
@@ -1825,8 +1942,8 @@ pub struct Host {
     /// Synced component of an entity the client knows (own player always), null if unknown.
     pub client_component: unsafe extern "C" fn(client: *mut ClientCtx, id: u64, comp: u32) -> *const u8,
     pub client_entity: unsafe extern "C" fn(client: *mut ClientCtx, id: u64, out: *mut EntityState) -> u32,
-    /// Non-zero when the local player is in creative mode (client side, for HUDs and screens).
-    pub client_creative: unsafe extern "C" fn(client: *mut ClientCtx) -> u32,
+    /// `game_mode` of the local player (client side, for HUDs and screens).
+    pub client_game_mode: unsafe extern "C" fn(client: *mut ClientCtx) -> u32,
 
     /// Energy contract (`energy` component): returns how much was (or would be, when `simulate`
     /// is non-zero) accepted / taken, respecting capacity and rate limits.
@@ -1840,7 +1957,17 @@ pub struct Host {
     /// Debug shape for players showing `group`: `kind` 0 line from `a` to `b`, 1 box between
     /// corners `a` and `b`, 2 the translation `key` with `args` at `a`, 3 filled box; `color` is
     /// 0xRRGGBBAA, kept for `ticks`.
-    pub gizmo: unsafe extern "C" fn(world: *mut WorldCtx, group: Str, kind: u32, a: *const [f64; 3], b: *const [f64; 3], color: u32, ticks: u32, key: Str, args: Slice<UiArg>),
+    pub gizmo: unsafe extern "C" fn(
+        world: *mut WorldCtx,
+        group: Str,
+        kind: u32,
+        a: *const [f64; 3],
+        b: *const [f64; 3],
+        color: u32,
+        ticks: u32,
+        key: Str,
+        args: Slice<UiArg>,
+    ),
 
     // ------------------------------------------------ client side and mod channels
     /// Client callback, see `client_hook`.
@@ -1906,9 +2033,7 @@ pub struct Host {
     /// (`client_op::RUN_COMMAND`) was answered, 0 before. An answer is read once.
     pub client_command_reply: unsafe extern "C" fn(client: *mut ClientCtx, id: u32, out: *mut Str) -> u32,
     /// Block the client has at `pos`, `u32::MAX` if that cube is not loaded there.
-    pub client_block: unsafe extern "C" fn(client: *mut ClientCtx, pos: *const [i32; 3]) -> u32,
-    /// The block the client has at `pos` of moving structure `entity`, `u32::MAX` if it has none.
-    pub client_structure_block: unsafe extern "C" fn(client: *mut ClientCtx, entity: u64, pos: *const [i32; 3]) -> u32,
+    pub client_block_in: unsafe extern "C" fn(client: *mut ClientCtx, frame: u64, pos: *const [i32; 3]) -> u32,
     /// 1 if the cube holding `pos` is here and has been drawn.
     pub client_cube_shown: unsafe extern "C" fn(client: *mut ClientCtx, pos: *const [i32; 3]) -> u32,
     /// Light the client has at `pos` (sky level in the low byte, then block red, green, blue),
@@ -1916,7 +2041,7 @@ pub struct Host {
     pub client_light: unsafe extern "C" fn(client: *mut ClientCtx, pos: *const [i32; 3]) -> u32,
     /// Group `name` of the player inventory (`reg_player_inventory`, equipment slots,
     /// `core:equipment`): first slot and count.
-    pub player_group: unsafe extern "C" fn(name: Str, out: *mut [u32; 2]) -> u32,
+    pub player_group: unsafe extern "C" fn(name: Str, out: *mut SlotGroup) -> u32,
     /// `container` 0 own inventory, 1 the open menu's slots, 2 the menu cursor.
     pub client_slot: unsafe extern "C" fn(client: *mut ClientCtx, container: u32, slot: u32) -> ItemStack,
     /// Open menu as (kind, window, slot count); 0 if none.
@@ -1932,7 +2057,16 @@ pub struct Host {
     /// window), 4 filled box (see-through by its alpha: range previews, blueprints); color
     /// 0xRRGGBBAA.
     /// A `gizmo_kind` shape for this frame; with a `group` only while the player shows it.
-    pub client_draw: unsafe extern "C" fn(client: *mut ClientCtx, group: Str, kind: u32, a: *const [f64; 3], b: *const [f64; 3], color: u32, key: Str, args: Slice<UiArg>),
+    pub client_draw: unsafe extern "C" fn(
+        client: *mut ClientCtx,
+        group: Str,
+        kind: u32,
+        a: *const [f64; 3],
+        b: *const [f64; 3],
+        color: u32,
+        key: Str,
+        args: Slice<UiArg>,
+    ),
     /// Client: sends `data` on channel `name` to the server.
     pub client_send_packet: unsafe extern "C" fn(client: *mut ClientCtx, name: Str, schema: Str, data: Slice<u8>),
 
@@ -2006,7 +2140,6 @@ pub struct Host {
     pub reg_system: unsafe extern "C" fn(reg: *mut Registrar, name: Str, schema: Str, cb: Callback),
     /// A command that runs on the client that types it (never sent to the server), same usage
     /// syntax as `reg_command`; `cb` gets `CommandArgs` with `client` set.
-    pub reg_client_command: unsafe extern "C" fn(reg: *mut Registrar, name: Str, usage: Str, cb: Callback),
     /// Adds alternatives (`usage` syntax) to an existing command, handled by `cb` with
     /// `CommandArgs` laid out by this usage; runs where the command runs.
     /// The `permission` level a server command asks for (by default `GAME_MASTER`).
@@ -2078,6 +2211,8 @@ pub struct Host {
     /// Places template `name` with its lowest corner at `pos`; 0 if it doesn't exist or part of
     /// it isn't loaded (nothing is placed then).
     pub world_place: unsafe extern "C" fn(world: *mut WorldCtx, name: Str, pos: *const [i32; 3]) -> u32,
+    /// The world's seed, the one terrain is generated from.
+    pub world_seed: unsafe extern "C" fn(world: *mut WorldCtx) -> u64,
     /// The nearest structure `name` within `radius` blocks of `pos` (whether generated yet or
     /// not): its lowest corner in `out`. Returns 0 if none.
     pub structure_near: unsafe extern "C" fn(world: *mut WorldCtx, name: Str, pos: *const [i32; 3], radius: i32, out: *mut [i32; 3]) -> u32,
@@ -2121,11 +2256,8 @@ pub struct Host {
     /// Draws an entity with another kind's model, texture and animations (it stays what it is);
     /// empty goes back to its own.
     pub set_entity_look: unsafe extern "C" fn(world: *mut WorldCtx, entity: u64, kind: Str),
-    /// A block of moving structure `entity` (its own coordinates); `u32::MAX` if it is none.
-    pub structure_block: unsafe extern "C" fn(world: *mut WorldCtx, entity: u64, pos: *const [i32; 3]) -> u32,
-    /// Sets a block of moving structure `entity` like `set_block` (updates, callbacks); 0 if it
-    /// is none.
-    pub set_structure_block: unsafe extern "C" fn(world: *mut WorldCtx, entity: u64, pos: *const [i32; 3], state: u32) -> u32,
+    /// Writes a kind's box (width, height, eye height); 0 if there is no such kind.
+    pub entity_kind_size: unsafe extern "C" fn(kind: Str, out: *mut [f32; 3]) -> u32,
     /// Takes blocks of the world out into a new moving structure: `center` is its block
     /// (0, 0, 0), they keep their places around that. Returns its entity, 0 if nothing came.
     pub lift_blocks: unsafe extern "C" fn(world: *mut WorldCtx, center: *const [i32; 3], cells: *const [i32; 3], count: usize) -> u64,
@@ -2193,7 +2325,9 @@ pub mod light {
     }
     /// The strongest block light channel.
     pub fn block(l: u32) -> u32 {
-        ((l >> 8) & 0xFF).max((l >> 16) & 0xFF).max((l >> 24) & 0xFF)
+        ((l >> 8) & 0xFF)
+            .max((l >> 16) & 0xFF)
+            .max((l >> 24) & 0xFF)
     }
     /// What spawning and growth go by: sky light dimmed by the daylight (0..1), or block light,
     /// whichever is more.
@@ -2275,7 +2409,15 @@ pub struct SoundDesc {
     /// `Host::reg_sound_category`.
     pub category_name: Str,
 }
-defaults!(SoundDesc { name: Str::EMPTY, cell: core::ptr::null(), files: Slice::EMPTY, volume: 1.0, pitch: [1.0, 1.0], range: 16.0, category_name: Str::EMPTY });
+defaults!(SoundDesc {
+    name: Str::EMPTY,
+    cell: core::ptr::null(),
+    files: Slice::EMPTY,
+    volume: 1.0,
+    pitch: [1.0, 1.0],
+    range: 16.0,
+    category_name: Str::EMPTY
+});
 
 /// When background music may play; 0 = always.
 pub mod music_when {
@@ -2346,7 +2488,19 @@ pub struct ConfigDesc {
     /// The default of a `TEXT` setting.
     pub text: Str,
 }
-defaults!(ConfigDesc { name: Str::EMPTY, cell: core::ptr::null(), kind: config_kind::BOOL, default: 0.0, min: 0.0, max: 1.0, step: 0.0, choices: Slice::EMPTY, flags: 0, scope: config_scope::CLIENT, text: Str::EMPTY });
+defaults!(ConfigDesc {
+    name: Str::EMPTY,
+    cell: core::ptr::null(),
+    kind: config_kind::BOOL,
+    default: 0.0,
+    min: 0.0,
+    max: 1.0,
+    step: 0.0,
+    choices: Slice::EMPTY,
+    flags: 0,
+    scope: config_scope::CLIENT,
+    text: Str::EMPTY
+});
 
 #[repr(C)]
 pub struct TextConditionArgs {
@@ -2919,7 +3073,20 @@ pub struct LiquidDesc {
     pub overlay: Str,
     pub overlay_opacity: f32,
 }
-defaults!(LiquidDesc { name: Str::EMPTY, delay: 5, drop_off: 1, slope_find: 4, renewable: u32::MAX, density: 1000, temperature: 300, swimmable: 1, fog_color: u32::MAX, fog_distance: 96.0, overlay: Str::EMPTY, overlay_opacity: 0.1 });
+defaults!(LiquidDesc {
+    name: Str::EMPTY,
+    delay: 5,
+    drop_off: 1,
+    slope_find: 4,
+    renewable: u32::MAX,
+    density: 1000,
+    temperature: 300,
+    swimmable: 1,
+    fog_color: u32::MAX,
+    fog_distance: 96.0,
+    overlay: Str::EMPTY,
+    overlay_opacity: 0.1
+});
 
 /// What another mod's liquid should change, without touching its flow. Everything starts out "not
 /// set": `u32::MAX`, NaN, empty.
@@ -2933,7 +3100,14 @@ pub struct LiquidChange {
     pub overlay: Str,
     pub overlay_opacity: f32,
 }
-defaults!(LiquidChange { name: Str::EMPTY, swimmable: u32::MAX, fog_color: u32::MAX, fog_distance: f32::NAN, overlay: Str::EMPTY, overlay_opacity: f32::NAN });
+defaults!(LiquidChange {
+    name: Str::EMPTY,
+    swimmable: u32::MAX,
+    fog_color: u32::MAX,
+    fog_distance: f32::NAN,
+    overlay: Str::EMPTY,
+    overlay_opacity: f32::NAN
+});
 
 /// What happens where two liquids meet. `liquid` and `touching` are block names or `#tags` of
 /// liquid blocks. When `liquid` has `touching` beside or above it, it turns into `source` (if
@@ -3186,7 +3360,17 @@ pub struct PlayerControl {
     /// With `LYING`.
     pub lying: f32,
 }
-defaults!(PlayerControl { lying: 0.0, mask: 0, pos: [0.0; 3], vel: [0.0; 3], yaw: 0.0, pitch: 0.0, flying: 0, fly_speed: 1.0, selected: 0 });
+defaults!(PlayerControl {
+    lying: 0.0,
+    mask: 0,
+    pos: [0.0; 3],
+    vel: [0.0; 3],
+    yaw: 0.0,
+    pitch: 0.0,
+    flying: 0,
+    fly_speed: 1.0,
+    selected: 0
+});
 
 /// `Host::client_command` operations.
 pub mod client_op {
@@ -3258,7 +3442,16 @@ pub struct OreDesc {
     /// Only in biomes with this tag (the block's own column of its cube), empty: anywhere.
     pub biome: Str,
 }
-defaults!(OreDesc { dimensions: Str::EMPTY, block: Str::EMPTY, replace: Str::EMPTY, min_y: i32::MIN, max_y: i32::MAX, veins: 4, blocks: 8, biome: Str::EMPTY });
+defaults!(OreDesc {
+    dimensions: Str::EMPTY,
+    block: Str::EMPTY,
+    replace: Str::EMPTY,
+    min_y: i32::MIN,
+    max_y: i32::MAX,
+    veins: 4,
+    blocks: 8,
+    biome: Str::EMPTY
+});
 
 /// Surface height and biome of one column of a terrain.
 #[repr(C)]

@@ -63,16 +63,15 @@ Layout works like flexbox, and all sizes are in GUI pixels, so the GUI scale in 
 Text and bars can change while a screen is open. A binding's closure runs every frame, and the part is redrawn when the value changed.
 - `text_bind(|view, out| out.set("examplemod.energy", &[Arg::Int(stored), Arg::Int(capacity)]))` for text from data
 - `progress_bind(class, s, |view| 0.0..1.0)` for a bar, hidden while the value is negative, and `progress_bind_dir(.., dir, ..)` to fill another way, `abi::ui_dir::UP` for a flame
-- `icons_shaking(class, count, |view| value)` the same, jumping about at 4 or less, like hearts near the end,
-- `icons(class, count, |view| value)` for a row of icons that shows a number in half-icon steps, like hearts. `icons_rtl` fills from the right, like hunger. A negative value hides the row
+- `icons(class, count, |view| value)` for a row of icons that shows a number in half-icon steps, like hearts. `.rtl()` fills it from the right, like hunger, `.dir(abi::ui_dir::UP)` any other way, and `.shaking()` makes it jump about at 4 or less, like hearts near the end. A negative value hides the row
 
-`view` is a read-only look at the client, the same in HUD bindings, screens and frame hooks (`c.view()`): `view.me()` has your health and position, `view.inventory_group("core:equipment")` the stacks of a group of your inventory, `view.component(&C)` a synced component of yours, `view.creative()` the game mode, and `view.menu_component(&C)` a component of the machine whose menu is open (it needs the `SYNC_MENU` flag on that component, see the [machines guide](machines.md#creating-a-machine)).
+`view` is a read-only look at the client, the same in HUD bindings, screens and frame hooks (`c.view()`): `view.me()` has your health and position, `view.inventory_group("core:equipment")` the stacks of a group of your inventory, `view.component(&C)` a synced component of yours, `view.game_mode()` the game mode (`view.creative()`, `view.exempt()` for anything but survival), and `view.menu_component(&C)` a component of the machine whose menu is open (it needs the `SYNC_MENU` flag on that component, see the [machines guide](machines.md#creating-a-machine)).
 Anything the client already has is better read than mirrored into a component: base's armor bar adds up the points of what you wear, the way the server's damage does. A component read without the flag that sends it there says so in the log.
 
 ```rust
 static HEALTH: HudElement = HudElement::named("health");
 r.hud_element(&HEALTH, hud_anchor::HOTBAR_LEFT, 0, |ui| {
-    ui.icons("hearts", 10, |c| if c.creative() { -1.0 } else { c.me().map_or(20.0, |s| s.health.ceil()) })
+    ui.icons("heart", 10, |c| if c.exempt() { -1.0 } else { c.me().map_or(20.0, |s| s.health.ceil()) });
 });
 ```
 The `class` ("heart", "arrow", "flame") names the textures, see [looks](#looks).
@@ -82,7 +81,7 @@ The `class` ("heart", "arrow", "flame") names the textures, see [looks](#looks).
 - `.pauses()`: single player stops while it is open
 - `.keep_on_escape()`: Escape doesn't close it (the death screen)
 - `.closes_on_respawn()`
-- `.on_key(|view, key| ..)`: keys pressed while it is on top (`Enter`, `KeyE`), before Escape
+- `.on_key(|view, key| ..)`: keys pressed while it is on top (`Enter`, `KeyE`, `mouse3`), before Escape
 - `.shows_chat()`: like the chat screen, the HUD leaves the messages to it and Enter sends the text of its input of class `chat`
 
 ```rust
@@ -100,9 +99,9 @@ Registering an engine screen's handle replaces that screen, so `r.screen(&screen
 
 Most of the time a whole new screen is more than you need. A screen part adds to a place of a screen and leaves the rest alone, so several mods can add their buttons to the main menu side by side:
 ```rust
-r.screen_part("core:title", "buttons", 0, |ui| {
+r.screen_part(&screens::TITLE, "buttons", 0, |ui| {
     ui.button("examplemod.guide", S::default(), |c| {
-        c.client().open_screen("examplemod:guide");
+        c.client().open_screen(&GUIDE);
     });
 });
 ```

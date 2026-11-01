@@ -144,12 +144,53 @@ const CTM47: [u8; 256] = [
 /// all round, 2 connected up/down, 3 connected left/right, 4 inner corner. Tile 41 differs from
 /// Angelica's generator, which repeats tile 27 there and loses the inner corner.
 const COMPACT: [[u8; 4]; 47] = [
-    [0, 0, 0, 0], [0, 3, 0, 3], [3, 3, 3, 3], [3, 0, 3, 0], [0, 3, 2, 4], [3, 0, 4, 2], [2, 4, 2, 4], [3, 3, 4, 4],
-    [4, 1, 4, 4], [4, 4, 4, 1], [1, 4, 1, 4], [1, 1, 4, 4], [0, 0, 2, 2], [0, 3, 2, 1], [3, 3, 1, 1], [3, 0, 1, 2],
-    [2, 4, 0, 3], [4, 2, 3, 0], [4, 4, 3, 3], [4, 2, 4, 2], [1, 4, 4, 4], [4, 4, 1, 4], [4, 4, 1, 1], [4, 1, 4, 1],
-    [2, 2, 2, 2], [2, 1, 2, 1], [1, 1, 1, 1], [1, 2, 1, 2], [2, 4, 2, 1], [3, 3, 1, 4], [2, 1, 2, 4], [3, 3, 4, 1],
-    [1, 1, 1, 4], [1, 1, 4, 1], [4, 1, 1, 4], [1, 4, 4, 1], [2, 2, 0, 0], [2, 1, 0, 3], [1, 1, 3, 3], [1, 2, 3, 0],
-    [4, 1, 3, 3], [1, 2, 4, 2], [1, 4, 3, 3], [4, 2, 1, 2], [1, 4, 1, 1], [4, 1, 1, 1], [4, 4, 4, 4],
+    [0, 0, 0, 0],
+    [0, 3, 0, 3],
+    [3, 3, 3, 3],
+    [3, 0, 3, 0],
+    [0, 3, 2, 4],
+    [3, 0, 4, 2],
+    [2, 4, 2, 4],
+    [3, 3, 4, 4],
+    [4, 1, 4, 4],
+    [4, 4, 4, 1],
+    [1, 4, 1, 4],
+    [1, 1, 4, 4],
+    [0, 0, 2, 2],
+    [0, 3, 2, 1],
+    [3, 3, 1, 1],
+    [3, 0, 1, 2],
+    [2, 4, 0, 3],
+    [4, 2, 3, 0],
+    [4, 4, 3, 3],
+    [4, 2, 4, 2],
+    [1, 4, 4, 4],
+    [4, 4, 1, 4],
+    [4, 4, 1, 1],
+    [4, 1, 4, 1],
+    [2, 2, 2, 2],
+    [2, 1, 2, 1],
+    [1, 1, 1, 1],
+    [1, 2, 1, 2],
+    [2, 4, 2, 1],
+    [3, 3, 1, 4],
+    [2, 1, 2, 4],
+    [3, 3, 4, 1],
+    [1, 1, 1, 4],
+    [1, 1, 4, 1],
+    [4, 1, 1, 4],
+    [1, 4, 4, 1],
+    [2, 2, 0, 0],
+    [2, 1, 0, 3],
+    [1, 1, 3, 3],
+    [1, 2, 3, 0],
+    [4, 1, 3, 3],
+    [1, 2, 4, 2],
+    [1, 4, 3, 3],
+    [4, 2, 1, 2],
+    [1, 4, 1, 1],
+    [4, 1, 1, 1],
+    [4, 4, 4, 4],
 ];
 
 /// Texture u (right) and up directions of each face, matching the corner order in the mesher.
@@ -193,7 +234,9 @@ fn ranges(v: &str) -> Vec<(i32, i32)> {
 fn tile_names(v: &str, texture: &str) -> Vec<Option<String>> {
     let dir = match texture.rfind('/') {
         Some(i) => texture[..=i].to_string(),
-        None => texture.split_once(':').map_or(String::new(), |(ns, _)| format!("{ns}:")),
+        None => texture
+            .split_once(':')
+            .map_or(String::new(), |(ns, _)| format!("{ns}:")),
     };
     let full = |rel: &str| if rel.contains(':') { rel.to_string() } else { format!("{dir}{rel}") };
     let mut out = Vec::new();
@@ -204,7 +247,10 @@ fn tile_names(v: &str, texture: &str) -> Vec<Option<String>> {
         }
         let (prefix, last) = t.rsplit_once('/').map_or(("", t), |(p, l)| (p, l));
         let prefix = if prefix.is_empty() { String::new() } else { format!("{prefix}/") };
-        match last.split_once('-').and_then(|(a, b)| Some((a.parse::<u32>().ok()?, b.parse::<u32>().ok()?))) {
+        match last
+            .split_once('-')
+            .and_then(|(a, b)| Some((a.parse::<u32>().ok()?, b.parse::<u32>().ok()?)))
+        {
             Some((a, b)) => out.extend((a..=b).map(|i| Some(full(&format!("{prefix}{i}"))))),
             None => out.push(Some(full(t))),
         }
@@ -221,7 +267,11 @@ fn off_cube(d: &Drawn, tex: u32, faces: u8) -> bool {
 /// picture of the same name if there is one, else `plain`.
 fn tile_model(assets: &Assets, name: &str, plain: u32, names: &mut Names) -> Option<Vec<ModelBox>> {
     assets.path(name, "models", "json")?;
-    let read = |n: &str| assets.read(n, "models", "json").map(|b| String::from_utf8_lossy(&b).into_owned());
+    let read = |n: &str| {
+        assets
+            .read(n, "models", "json")
+            .map(|b| String::from_utf8_lossy(&b).into_owned())
+    };
     let m = crate::block_model::load(name, &read).unwrap_or_else(|e| {
         log::error!("tile {e}");
         None
@@ -251,7 +301,12 @@ pub fn load(assets: &Assets, c: &Content, looks: &Looks, mut names: Names) -> (C
         if assets.path(&over, "textures", "png").is_some() {
             overlays.push((tex, names.id(&over) + 1));
         }
-        let Some(src) = assets.read(&name, "textures", "ctm").map(|b| String::from_utf8_lossy(&b).into_owned()) else { continue };
+        let Some(src) = assets
+            .read(&name, "textures", "ctm")
+            .map(|b| String::from_utf8_lossy(&b).into_owned())
+        else {
+            continue;
+        };
         let start = ctm.rules.len() as u32;
         for section in crate::kv::sections(&src) {
             let kv: FxHashMap<&str, &str> = section.iter().map(|p| (p.1, p.2)).collect();
@@ -306,8 +361,16 @@ pub fn load(assets: &Assets, c: &Content, looks: &Looks, mut names: Names) -> (C
                 Method::Horizontal | Method::Vertical => 4,
                 Method::HorizontalVertical | Method::VerticalHorizontal => 7,
                 Method::Repeat => {
-                    let w = kv.get("width").and_then(|v| v.parse::<usize>().ok()).unwrap_or(1).max(1);
-                    let h = kv.get("height").and_then(|v| v.parse::<usize>().ok()).unwrap_or(1).max(1);
+                    let w = kv
+                        .get("width")
+                        .and_then(|v| v.parse::<usize>().ok())
+                        .unwrap_or(1)
+                        .max(1);
+                    let h = kv
+                        .get("height")
+                        .and_then(|v| v.parse::<usize>().ok())
+                        .unwrap_or(1)
+                        .max(1);
                     w * h
                 }
                 _ => 1,
@@ -321,7 +384,9 @@ pub fn load(assets: &Assets, c: &Content, looks: &Looks, mut names: Names) -> (C
                 models.clear();
             }
             if is_compact && has_models {
-                let why = format!("{name}.ctm: compact ctm doesn't support custom models, and its tiles have model files: use ctm with all 47 tiles");
+                let why = format!(
+                    "{name}.ctm: compact ctm doesn't support custom models, and its tiles have model files: use ctm with all 47 tiles"
+                );
                 log::error!("{why}");
                 panic!("{why}");
             }
@@ -331,9 +396,15 @@ pub fn load(assets: &Assets, c: &Content, looks: &Looks, mut names: Names) -> (C
                 tiles.clear();
             }
             let pick = if method == Method::Random {
-                let given: Vec<u32> = kv.get("weights").map_or(Vec::new(), |w| w.split_whitespace().filter_map(|x| x.parse().ok()).collect());
+                let given: Vec<u32> = kv.get("weights").map_or(Vec::new(), |w| {
+                    w.split_whitespace()
+                        .filter_map(|x| x.parse().ok())
+                        .collect()
+                });
                 let avg = if given.is_empty() { 1 } else { (given.iter().sum::<u32>() / given.len() as u32).max(1) };
-                let weights: Vec<u32> = (0..tiles.len()).map(|i| given.get(i).copied().unwrap_or(avg)).collect();
+                let weights: Vec<u32> = (0..tiles.len())
+                    .map(|i| given.get(i).copied().unwrap_or(avg))
+                    .collect();
                 let total: u32 = weights.iter().sum::<u32>().max(1);
                 let mut lut = Vec::with_capacity(256);
                 let (mut acc, mut i) = (0u32, 0usize);
@@ -351,7 +422,9 @@ pub fn load(assets: &Assets, c: &Content, looks: &Looks, mut names: Names) -> (C
             // References like anywhere else: names, `name[prop=value]`, `#tag`, `#pattern/*`.
             let mut blocks = Vec::new();
             for b in kv.get("blocks").map_or("", |v| *v).split_whitespace() {
-                match crate::refs::Ref::parse(b).and_then(|r| crate::refs::blocks(&r, &c.block_names, &c.blocks, &c.components, c.states.len() as u32)) {
+                match crate::refs::Ref::parse(b)
+                    .and_then(|r| crate::refs::blocks(&r, &c.block_names, &c.blocks, &c.components, c.states.len() as u32))
+                {
                     Ok(list) => blocks.extend(list),
                     Err(e) => log::error!("{name}.ctm: blocks: {e}"),
                 }
@@ -360,8 +433,12 @@ pub fn load(assets: &Assets, c: &Content, looks: &Looks, mut names: Names) -> (C
                 let (invert, list) = v.strip_prefix('!').map_or((false, *v), |r| (true, r));
                 let mut set = vec![0u64; c.biomes.len() / 64 + 1];
                 for b in list.split_whitespace() {
-                    match crate::refs::Ref::parse(b).and_then(|r| crate::refs::biomes(&r, &c.biome_names, &c.components, c.biomes.len() as u32)) {
-                        Ok(list) => list.into_iter().for_each(|i| set[i as usize / 64] |= 1 << (i % 64)),
+                    match crate::refs::Ref::parse(b)
+                        .and_then(|r| crate::refs::biomes(&r, &c.biome_names, &c.components, c.biomes.len() as u32))
+                    {
+                        Ok(list) => list
+                            .into_iter()
+                            .for_each(|i| set[i as usize / 64] |= 1 << (i % 64)),
                         Err(e) => log::error!("{name}.ctm: biomes: {e}"),
                     }
                 }
@@ -391,8 +468,14 @@ pub fn load(assets: &Assets, c: &Content, looks: &Looks, mut names: Names) -> (C
                     _ => 1,
                 },
                 size: (
-                    kv.get("width").and_then(|v| v.parse().ok()).unwrap_or(1).max(1),
-                    kv.get("height").and_then(|v| v.parse().ok()).unwrap_or(1).max(1),
+                    kv.get("width")
+                        .and_then(|v| v.parse().ok())
+                        .unwrap_or(1)
+                        .max(1),
+                    kv.get("height")
+                        .and_then(|v| v.parse().ok())
+                        .unwrap_or(1)
+                        .max(1),
                 ),
             });
         }
@@ -407,20 +490,36 @@ pub fn load(assets: &Assets, c: &Content, looks: &Looks, mut names: Names) -> (C
         let name = &names.list[tex as usize];
         let on = c.states.iter().enumerate().find_map(|(st, s)| {
             let hit = (r.blocks.is_empty() || r.blocks.contains(&s.block)) && off_cube(&looks.drawn(st as u32, s), tex, r.faces);
-            hit.then(|| c.block_names.iter().find(|n| *n.1 == s.block).map_or("a block", |n| n.0.as_str()))
+            hit.then(|| {
+                c.block_names
+                    .iter()
+                    .find(|n| *n.1 == s.block)
+                    .map_or("a block", |n| n.0.as_str())
+            })
         });
         if let Some(on) = on {
-            let why = format!("{name}.ctm: compact ctm doesn't support custom models, and {on} shows this texture on one: use ctm with all 47 tiles (or leave it out with blocks =)");
+            let why = format!(
+                "{name}.ctm: compact ctm doesn't support custom models, and {on} shows this texture on one: use ctm with all 47 tiles (or leave it out with blocks =)"
+            );
             log::error!("{why}");
             panic!("{why}");
         }
-        if ctm.models.iter().flatten().any(|b| (0..6).any(|d| r.faces & (1 << d) != 0 && super::mesher::box_face(b, d).is_some() && b.textures[d] == tex)) {
-            let why = format!("{name}.ctm: compact ctm doesn't support custom models, and a tile's model shows this texture: use ctm with all 47 tiles");
+        if ctm
+            .models
+            .iter()
+            .flatten()
+            .any(|b| (0..6).any(|d| r.faces & (1 << d) != 0 && super::mesher::box_face(b, d).is_some() && b.textures[d] == tex))
+        {
+            let why = format!(
+                "{name}.ctm: compact ctm doesn't support custom models, and a tile's model shows this texture: use ctm with all 47 tiles"
+            );
             log::error!("{why}");
             panic!("{why}");
         }
         let start = first_composite + extra.composites.len() as u32;
-        extra.composites.extend(COMPACT.iter().map(|q| q.map(|code| src[code as usize])));
+        extra
+            .composites
+            .extend(COMPACT.iter().map(|q| q.map(|code| src[code as usize])));
         ctm.rules[rule].tiles = (start..start + 47).collect();
     }
     ctm.overlay = vec![0; names.list.len()];
@@ -430,7 +529,13 @@ pub fn load(assets: &Assets, c: &Content, looks: &Looks, mut names: Names) -> (C
     extra.names = names.list.split_off(base);
     if !ctm.rules.is_empty() {
         ctm.see_states(c, looks);
-        log::info!("connected textures: {} rules, {} models, {} textures, {} generated", ctm.rules.len(), ctm.models.len(), extra.names.len(), extra.composites.len());
+        log::info!(
+            "connected textures: {} rules, {} models, {} textures, {} generated",
+            ctm.rules.len(),
+            ctm.models.len(),
+            extra.names.len(),
+            extra.composites.len()
+        );
     }
     (ctm, extra)
 }
@@ -457,7 +562,12 @@ impl Ctm {
         if !any_models && !any_open {
             return;
         }
-        for (st, s) in c.states.iter().enumerate().filter(|(_, s)| s.liquid.is_none()) {
+        for (st, s) in c
+            .states
+            .iter()
+            .enumerate()
+            .filter(|(_, s)| s.liquid.is_none())
+        {
             let d = looks.drawn(st as u32, s);
             for dir in 0..6 {
                 for tex in d.on_face(dir) {
@@ -504,10 +614,15 @@ impl Ctm {
     /// The model a rule picks for the block at `(x, y, z)` in the cube, if any.
     #[inline]
     pub fn model(&self, c: &Content, n: &Neighborhood, x: i32, y: i32, z: i32, state: u32) -> Option<&[ModelBox]> {
-        let &(dir, tex) = self.model_from.get(state as usize).filter(|f| f.1 != NO_MODEL)?;
+        let &(dir, tex) = self
+            .model_from
+            .get(state as usize)
+            .filter(|f| f.1 != NO_MODEL)?;
         let &(start, len) = self.by_texture.get(tex as usize)?;
         let (rule, tile) = self.pick(c, n, x, y, z, dir as usize, tex, start as usize..(start + len) as usize)?;
-        self.models.get(*rule.models.get(tile)? as usize).map(Vec::as_slice)
+        self.models
+            .get(*rule.models.get(tile)? as usize)
+            .map(Vec::as_slice)
     }
 
     /// Texture for face `dir` of the block at `(x, y, z)` in the cube, `tex` being its plain one.
@@ -515,7 +630,9 @@ impl Ctm {
     #[allow(clippy::too_many_arguments)]
     pub fn resolve(&self, c: &Content, n: &Neighborhood, x: i32, y: i32, z: i32, dir: usize, tex: u32) -> u32 {
         match self.by_texture.get(tex as usize) {
-            Some(&(start, len)) if len > 0 => self.pick(c, n, x, y, z, dir, tex, start as usize..(start + len) as usize).map_or(tex, |(rule, tile)| rule.tiles.get(tile).copied().unwrap_or(tex)),
+            Some(&(start, len)) if len > 0 => self
+                .pick(c, n, x, y, z, dir, tex, start as usize..(start + len) as usize)
+                .map_or(tex, |(rule, tile)| rule.tiles.get(tile).copied().unwrap_or(tex)),
             _ => tex,
         }
     }
@@ -530,7 +647,17 @@ impl Ctm {
 
     /// The first rule that goes for this face, and which of its tiles it wants.
     #[allow(clippy::too_many_arguments)]
-    fn pick(&self, c: &Content, n: &Neighborhood, x: i32, y: i32, z: i32, dir: usize, tex: u32, rules: std::ops::Range<usize>) -> Option<(&Rule, usize)> {
+    fn pick(
+        &self,
+        c: &Content,
+        n: &Neighborhood,
+        x: i32,
+        y: i32,
+        z: i32,
+        dir: usize,
+        tex: u32,
+        rules: std::ops::Range<usize>,
+    ) -> Option<(&Rule, usize)> {
         let s = n.states[pidx(x, y, z)];
         let info = &c.states[s as usize];
         let world = [n.origin[0] + x, n.origin[1] + y, n.origin[2] + z];
@@ -543,7 +670,12 @@ impl Ctm {
             if rule.faces & (1 << dir) == 0 || (!rule.blocks.is_empty() && !rule.blocks.contains(&info.block)) {
                 continue;
             }
-            if !rule.heights.is_empty() && !rule.heights.iter().any(|&(lo, hi)| world[1] >= lo && world[1] <= hi) {
+            if !rule.heights.is_empty()
+                && !rule
+                    .heights
+                    .iter()
+                    .any(|&(lo, hi)| world[1] >= lo && world[1] <= hi)
+            {
                 continue;
             }
             if let Some((invert, set)) = &rule.biomes {
@@ -568,7 +700,10 @@ impl Ctm {
             let tile = match rule.method {
                 Method::Ctm => {
                     let mut bits = 0usize;
-                    for (bit, (a, b)) in [(-1, 0), (-1, -1), (0, -1), (1, -1), (1, 0), (1, 1), (0, 1), (-1, 1)].into_iter().enumerate() {
+                    for (bit, (a, b)) in [(-1, 0), (-1, -1), (0, -1), (1, -1), (1, 0), (1, 1), (0, 1), (-1, 1)]
+                        .into_iter()
+                        .enumerate()
+                    {
                         if connects(a, b) {
                             bits |= 1 << bit;
                         }
@@ -647,7 +782,7 @@ mod tests {
         assert!(!off_cube(&boxes, 7, sides_only), "not on the faces the rule is for");
         // A face the file leaves out holds a texture only to fill the field.
         let mut gone = ModelBox::whole([7; 6]);
-        gone.uv = [[crate::block_model::NO_FACE, 0.0, 0.0, 0.0]; 6];
+        gone.uv = [weft_abi::UV_NO_FACE; 6];
         let gone = [gone];
         assert!(!off_cube(&Drawn { model: Model::Boxes, boxes: &gone, textures: [0; 6] }, 7, 0b111111));
     }
@@ -683,6 +818,15 @@ mod tests {
     #[test]
     fn tile_ranges_expand() {
         let t = tile_names("glass/0-2 <default> other:x/y", "base:block/glass");
-        assert_eq!(t, vec![Some("base:block/glass/0".into()), Some("base:block/glass/1".into()), Some("base:block/glass/2".into()), None, Some("other:x/y".into())]);
+        assert_eq!(
+            t,
+            vec![
+                Some("base:block/glass/0".into()),
+                Some("base:block/glass/1".into()),
+                Some("base:block/glass/2".into()),
+                None,
+                Some("other:x/y".into())
+            ]
+        );
     }
 }

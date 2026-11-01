@@ -15,15 +15,17 @@ impl Server {
             }
             let view = self.view(&self.players[pi]);
             let full = self.full_view(&self.players[pi]);
-            let Server { players, dims, tick, storage, .. } = self;
+            let Server { players, dims, tick, storage, tick_rate, .. } = self;
             let p = &mut players[pi];
             let dim = &mut dims[p.dim as usize];
             let d = p.dim as usize;
             send_far(c, p, dim, storage.as_ref(), full, *tick);
             send_block_changes(p, dim);
             send_mining(p, &mining_now[d], *tick);
-            send_clock(p, dim, *tick);
-            let viewer = dim.entity(p.entity).map_or((DVec3::ZERO, GameMode::Survival), |e| (e.pos, e.mode));
+            send_clock(p, dim, *tick, *tick_rate);
+            let viewer = dim
+                .entity(p.entity)
+                .map_or((DVec3::ZERO, GameMode::Survival), |e| (e.pos, e.mode));
             send_entities(c, p, dim, &moved[d], *tick, view.radius, viewer);
             send_own_state(c, p, dim);
             if !p.gizmos.is_empty() {
@@ -41,18 +43,22 @@ impl Server {
         self.unload_unused(c);
     }
 
-    /// Who is breaking what, in tenths as crack pictures go, so most ticks nothing is sent.
-    fn mining_now(&self, c: &'static Content) -> Vec<Vec<(u64, IVec3, f32)>> {
-        let server_tick = self.tick;
-        let mut mining_now: Vec<Vec<(u64, IVec3, f32)>> = vec![Vec::new(); self.dims.len()];
-        for p in self.players.iter().filter(|p| p.joined) {
-            let Some((0, pos, start)) = p.mining else { continue };
-            let Some(r) = self.dims[p.dim as usize].entity_region_ref(p.entity) else { continue };
-            let (Some(e), Some(state)) = (r.entities.get(p.entity), r.get(pos)) else { continue };
-            let held = r.entities.inventories.get(&p.entity).and_then(|i| i.get(e.selected as usize)).map_or(0, |s| s.item);
-            let need = dim::mining_time(c, state, held, r.head_in_liquid(c, e), e.on_ground, r.attribute(c, e.id, extend::MINING_SPEED, false) as f32) * TPS as f32;
-            let progress = if need > 0.0 { ((server_tick - start) as f32 / need).min(0.99) } else { 0.0 };
-            mining_now[p.dim as usize].push((p.entity, pos, (progress * 10.0).floor() / 10.0));
+    /// Mining goes on by what each one holds and where it is this tick. Returns who is breaking
+    /// what, in tenths as crack pictures go, so most ticks nothing is sent.
+    fn mining_now(&mut self, c: &'static Content) -> Vec<Vec<crate::net::Crack>> {
+        // This also runs between ticks, where nothing goes on.
+        let ticked = std::mem::replace(&mut self.mining_tick, self.tick) != self.tick;
+        let mut mining_now: Vec<Vec<crate::net::Crack>> = vec![Vec::new(); self.dims.len()];
+        for pi in 0..self.players.len() {
+            let Some(m) = self.players[pi].mining.filter(|_| self.players[pi].joined) else { continue };
+            let Some((r, id)) = self.region(pi) else { continue };
+            let rate = if ticked { r.mining_rate_of(c, id, m.frame, m.pos, m.part) } else { 0.0 };
+            let progress = (m.progress + rate).min(1.0);
+            let p = &mut self.players[pi];
+            p.mining = Some(Mining { progress, ..m });
+            if m.frame == 0 {
+                mining_now[p.dim as usize].push((p.entity, m.pos, m.part, (progress.min(0.99) * 10.0).floor() / 10.0));
+            }
         }
         mining_now
     }
@@ -72,12 +78,24 @@ impl Server {
                 }
                 r.mirror_fields(c);
                 r.entities.find_changes(&c.game.synced_comps);
-                for e in r.entities.list.iter_mut().filter(|e| !e.removed && e.anchor.is_none()) {
+                for e in r
+                    .entities
+                    .list
+                    .iter_mut()
+                    .filter(|e| !e.removed && e.anchor.is_none())
+                {
                     let now = (e.pos, e.yaw, e.pitch, e.pose);
                     // Solid bodies every tick: clients show them between server positions, and a
                     // body that stops must say so (two equal positions).
                     let solid = c.game.entities[e.kind as usize].is(abi::entity_flags::SOLID);
-                    if solid || e.sent.is_none_or(|s| (s.0 - now.0).length_squared() > 1e-6 || (s.1 - now.1).abs() > 0.01 || (s.2 - now.2).abs() > 0.01 || s.3 != now.3) {
+                    if solid
+                        || e.sent.is_none_or(|s| {
+                            (s.0 - now.0).length_squared() > 1e-6
+                                || (s.1 - now.1).abs() > 0.01
+                                || (s.2 - now.2).abs() > 0.01
+                                || s.3 != now.3
+                        })
+                    {
                         if e.sent.is_some() {
                             m.push((e.id, e.pos, e.yaw, e.pitch, e.pose, e.frame.unwrap_or(0)));
                         }
@@ -99,12 +117,15 @@ impl Server {
                 for st in r.bodies.values_mut() {
                     st.resend.clear();
                     st.changes.clear();
+                    st.extra_changes.clear();
                     st.signals.level_changes.clear();
                     st.edited.clear();
                     st.world_light_changed = false;
                 }
                 r.space.resend.clear();
+                r.space.body_light_changes.clear();
                 r.space.changes.clear();
+                r.space.extra_changes.clear();
                 r.space.signals.level_changes.clear();
                 r.entities.killed.clear();
                 r.entities.taken.clear();
@@ -128,51 +149,102 @@ impl Server {
 
 fn send_block_changes(p: &mut Player, dim: &DimSet) {
     for reg in &dim.regions {
+        // For what the client works out itself; all of it when it gets here, then what changes.
+        let glow: Vec<(IVec3, [u8; 3])> =
+            if !p.glow_sent { reg.space.body_light.iter().map(|(c, v)| (*c, *v)).collect() } else { reg.space.body_light_changes.clone() };
+        if !glow.is_empty() {
+            p.conn.send(ToClient::BodyGlow { dim: p.dim, cells: glow });
+        }
         for (pos, cube) in &reg.space.resend {
             if p.sent.contains(pos) {
-                p.conn.send(ToClient::Cube { dim: p.dim, frame: 0, pos: *pos, cube: cube.clone(), edit: true });
+                p.conn
+                    .send(ToClient::Cube { dim: p.dim, frame: 0, pos: *pos, cube: cube.clone(), edit: true });
             }
         }
-        if !reg.space.changes.is_empty() {
-            let changes: Vec<(IVec3, u32)> = reg.space.changes.iter().filter(|(b, _)| p.sent.contains(&(*b >> 4))).copied().collect();
-            if !changes.is_empty() {
-                p.conn.send(ToClient::Blocks { dim: p.dim, frame: 0, changes });
+        if !reg.space.changes.is_empty() || !reg.space.extra_changes.is_empty() {
+            let changes: Vec<(IVec3, u32)> = reg
+                .space
+                .changes
+                .iter()
+                .filter(|(b, _)| p.sent.contains(&(*b >> 4)))
+                .copied()
+                .collect();
+            let extras: Vec<(IVec3, Vec<u32>)> = reg
+                .space
+                .extra_changes
+                .iter()
+                .filter(|(b, _)| p.sent.contains(&(*b >> 4)))
+                .cloned()
+                .collect();
+            if !changes.is_empty() || !extras.is_empty() {
+                p.conn
+                    .send(ToClient::Blocks { dim: p.dim, frame: 0, changes, extras });
             }
         }
         if !reg.space.signals.level_changes.is_empty() {
-            let changes: Vec<(IVec3, u8, u8)> = reg.space.signals.level_changes.iter().filter(|(b, ..)| p.sent.contains(&(*b >> 4))).copied().collect();
+            let changes: Vec<(IVec3, u8, u8)> = reg
+                .space
+                .signals
+                .level_changes
+                .iter()
+                .filter(|(b, ..)| p.sent.contains(&(*b >> 4)))
+                .copied()
+                .collect();
             if !changes.is_empty() {
-                p.conn.send(ToClient::Signals { dim: p.dim, frame: 0, changes });
+                p.conn
+                    .send(ToClient::Signals { dim: p.dim, frame: 0, changes });
             }
         }
     }
+    p.glow_sent = true;
 }
 
 /// Everyone else's mining in this dimension: cracks for those near, and their arms.
-fn send_mining(p: &mut Player, cracks: &[(u64, IVec3, f32)], tick: u64) {
-    let mine: Vec<(u64, IVec3, f32)> = cracks.iter().copied().filter(|m| m.0 != p.entity && p.known.contains(&m.0)).collect();
+fn send_mining(p: &mut Player, cracks: &[crate::net::Crack], tick: u64) {
+    let mine: Vec<crate::net::Crack> = cracks
+        .iter()
+        .copied()
+        .filter(|m| m.0 != p.entity && p.known.contains(&m.0))
+        .collect();
     if mine != p.sent_cracks {
         p.conn.send(ToClient::Cracks(mine.clone()));
         p.sent_cracks = mine;
     }
     if tick % 5 == 0 {
-        for m in cracks.iter().filter(|m| m.0 != p.entity && p.known.contains(&m.0)) {
+        for m in cracks
+            .iter()
+            .filter(|m| m.0 != p.entity && p.known.contains(&m.0))
+        {
             p.conn.send(ToClient::EntitySwing(m.0));
         }
     }
 }
 
-fn send_clock(p: &mut Player, dim: &DimSet, tick: u64) {
+fn send_clock(p: &mut Player, dim: &DimSet, tick: u64, rate: u32) {
+    if p.first_sync || p.sent_rate != rate {
+        p.sent_rate = rate;
+        p.conn.send(ToClient::TickRate(rate));
+    }
     if dim.weather_moved || p.first_sync {
-        p.conn.send(ToClient::Weather { raining: dim.raining, thunder: dim.thunder });
+        p.conn
+            .send(ToClient::Weather { raining: dim.raining, thunder: dim.thunder });
     }
     if tick % TPS as u64 == 0 || dim.day_moved {
-        p.conn.send(ToClient::Time { dim: p.dim, time: dim.day_time() });
+        p.conn
+            .send(ToClient::Time { dim: p.dim, time: dim.day_time() });
     }
 }
 
 /// Entities in range: spawn new ones, despawn gone ones, stream movement.
-fn send_entities(c: &'static Content, p: &mut Player, dim: &DimSet, moved: &[crate::net::Move], tick: u64, radius: i32, (me, me_mode): (DVec3, GameMode)) {
+fn send_entities(
+    c: &'static Content,
+    p: &mut Player,
+    dim: &DimSet,
+    moved: &[crate::net::Move],
+    tick: u64,
+    radius: i32,
+    (me, me_mode): (DVec3, GameMode),
+) {
     let range2 = ((radius * 16) as f64).powi(2);
     let mut spawn = Vec::new();
     let mut visible = FxHashSet::default();
@@ -180,23 +252,48 @@ fn send_entities(c: &'static Content, p: &mut Player, dim: &DimSet, moved: &[cra
         // Spectators are seen only by other spectators.
         let shown = |e: &&Entity| e.mode != GameMode::Spectator || me_mode == GameMode::Spectator;
         // A dead player is gone for the others (its death animation plays) until it respawns.
-        for e in reg.entities.list.iter().filter(|e| !e.removed && e.id != p.entity && e.anchor.is_none() && e.kind != c.game.virtual_kind && (!e.player || e.alive())).filter(shown) {
+        for e in reg
+            .entities
+            .list
+            .iter()
+            .filter(|e| e.in_world(c) && e.id != p.entity && (!e.player || e.alive()))
+            .filter(shown)
+        {
             if (e.pos - me).length_squared() > range2 {
                 continue;
             }
             visible.insert(e.id);
             if !p.known.contains(&e.id) {
-                spawn.push(EntityView { id: e.id, kind: e.kind, pos: e.pos, yaw: e.yaw, pitch: e.pitch, item: crate::stack::for_client(e.item) });
+                spawn.push(EntityView {
+                    id: e.id,
+                    kind: e.kind,
+                    pos: e.pos,
+                    yaw: e.yaw,
+                    pitch: e.pitch,
+                    item: crate::stack::for_client(e.item),
+                });
             }
         }
     }
-    let taken: Vec<(u64, u64)> = dim.regions.iter().flat_map(|r| r.entities.taken.iter()).filter(|t| p.known.contains(&t.0)).copied().collect();
+    let taken: Vec<(u64, u64)> = dim
+        .regions
+        .iter()
+        .flat_map(|r| r.entities.taken.iter())
+        .filter(|t| p.known.contains(&t.0))
+        .copied()
+        .collect();
     if !taken.is_empty() {
         p.conn.send(ToClient::Taken(taken));
     }
     // A mob killed this tick is gone already: the flag starts its death animation.
     let killed = |id: &u64| dim.regions.iter().any(|r| r.entities.killed.contains(id));
-    let gone: Vec<(u64, bool)> = p.known.iter().copied().filter(|id| !visible.contains(id)).map(|id| (id, killed(&id))).collect();
+    let gone: Vec<(u64, bool)> = p
+        .known
+        .iter()
+        .copied()
+        .filter(|id| !visible.contains(id))
+        .map(|id| (id, killed(&id)))
+        .collect();
     if !gone.is_empty() {
         p.conn.send(ToClient::Despawn(gone));
     }
@@ -204,13 +301,27 @@ fn send_entities(c: &'static Content, p: &mut Player, dim: &DimSet, moved: &[cra
     let mut shared: Vec<(u64, u32, Vec<u8>)> = Vec::new();
     for reg in &dim.regions {
         for &(id, comp) in &reg.entities.dirty_comp {
-            if id != p.entity && p.known.contains(&id) && visible.contains(&id) && c.game.components[comp as usize].flags & cf::SYNC_WATCHERS != 0 {
-                shared.extend(reg.entities.comps.get(&(id, comp)).map(|b| (id, comp, b.to_vec())));
+            if id != p.entity
+                && p.known.contains(&id)
+                && visible.contains(&id)
+                && c.game.components[comp as usize].flags & cf::SYNC_WATCHERS != 0
+            {
+                shared.extend(
+                    reg.entities
+                        .comps
+                        .get(&(id, comp))
+                        .map(|b| (id, comp, b.to_vec())),
+                );
             }
         }
         for v in &spawn {
             for &comp in &c.game.watched_comps {
-                shared.extend(reg.entities.comps.get(&(v.id, comp)).map(|b| (v.id, comp, b.to_vec())));
+                shared.extend(
+                    reg.entities
+                        .comps
+                        .get(&(v.id, comp))
+                        .map(|b| (v.id, comp, b.to_vec())),
+                );
             }
         }
     }
@@ -228,12 +339,18 @@ fn send_entities(c: &'static Content, p: &mut Player, dim: &DimSet, moved: &[cra
                     }
                 }
             } else if p.known.contains(&id) && visible.contains(&id) {
-                bodies.extend(st.resend.iter().map(|(pos, cube)| ToClient::Cube { dim: p.dim, frame: id, pos: *pos, cube: cube.clone(), edit: true }));
+                bodies.extend(st.resend.iter().map(|(pos, cube)| ToClient::Cube {
+                    dim: p.dim,
+                    frame: id,
+                    pos: *pos,
+                    cube: cube.clone(),
+                    edit: true,
+                }));
                 if st.world_light_changed {
                     bodies.push(ToClient::BodyLight { frame: id, lights: st.world_light.iter().map(|(p, l)| (*p, *l)).collect() });
                 }
-                if !st.changes.is_empty() {
-                    bodies.push(ToClient::Blocks { dim: p.dim, frame: id, changes: st.changes.clone() });
+                if !st.changes.is_empty() || !st.extra_changes.is_empty() {
+                    bodies.push(ToClient::Blocks { dim: p.dim, frame: id, changes: st.changes.clone(), extras: st.extra_changes.clone() });
                 }
                 if !st.signals.level_changes.is_empty() {
                     bodies.push(ToClient::Signals { dim: p.dim, frame: id, changes: st.signals.level_changes.clone() });
@@ -250,7 +367,11 @@ fn send_entities(c: &'static Content, p: &mut Player, dim: &DimSet, moved: &[cra
     if !shared.is_empty() {
         p.conn.send(ToClient::EntityComponents(shared));
     }
-    let moves: Vec<crate::net::Move> = moved.iter().filter(|m| p.known.contains(&m.0) && visible.contains(&m.0)).copied().collect();
+    let moves: Vec<crate::net::Move> = moved
+        .iter()
+        .filter(|m| p.known.contains(&m.0) && visible.contains(&m.0))
+        .copied()
+        .collect();
     if !moves.is_empty() {
         p.conn.send(ToClient::Moves { tick, moves });
     }
@@ -261,13 +382,19 @@ fn send_entities(c: &'static Content, p: &mut Player, dim: &DimSet, moved: &[cra
 fn send_own_state(c: &'static Content, p: &mut Player, dim: &mut DimSet) {
     let Some(reg) = dim.entity_region(p.entity) else { return };
     for &(_, push) in reg.entities.pushed.iter().filter(|h| h.0 == p.entity) {
-        p.conn.send(ToClient::Push(push));
+        p.conn.send(match push {
+            entity::Pushed::Knock(away) => ToClient::Knock { away },
+            entity::Pushed::Add(add) => ToClient::Velocity { add },
+        });
     }
     // The client moves its player and times its mining: it needs them all.
     if p.sent_attributes.is_empty() {
         p.sent_attributes = vec![f32::NAN; c.game.attributes.len()];
     }
-    let attributes: Vec<(u32, f32)> = (0..c.game.attributes.len() as u32).map(|a| (a, reg.attribute(c, p.entity, a, false) as f32)).filter(|&(a, v)| p.sent_attributes[a as usize] != v).collect();
+    let attributes: Vec<(u32, f32)> = (0..c.game.attributes.len() as u32)
+        .map(|a| (a, reg.attribute(c, p.entity, a, false) as f32))
+        .filter(|&(a, v)| p.sent_attributes[a as usize] != v)
+        .collect();
     if !attributes.is_empty() {
         for &(a, v) in &attributes {
             p.sent_attributes[a as usize] = v;
@@ -277,7 +404,12 @@ fn send_own_state(c: &'static Content, p: &mut Player, dim: &mut DimSet) {
     // Own inventory and synced components.
     if p.first_sync || reg.entities.dirty_inv.contains(&p.entity) {
         if let Some(inv) = reg.entities.inventories.get(&p.entity) {
-            p.conn.send(ToClient::Inventory(inv.iter().enumerate().map(|(i, s)| (i as u32, crate::stack::for_client(*s))).collect()));
+            p.conn.send(ToClient::Inventory(
+                inv.iter()
+                    .enumerate()
+                    .map(|(i, s)| (i as u32, crate::stack::for_client(*s)))
+                    .collect(),
+            ));
         }
     }
     let comps: Vec<(u32, Vec<u8>)> = reg
@@ -304,7 +436,12 @@ fn send_own_state(c: &'static Content, p: &mut Player, dim: &mut DimSet) {
             .menu_comps
             .iter()
             .filter(|&&comp| owner != 0 && (first || reg.entities.dirty_comp.contains(&(owner, comp))))
-            .filter_map(|&comp| reg.entities.comps.get(&(owner, comp)).map(|b| (owner, comp, b.to_vec())))
+            .filter_map(|&comp| {
+                reg.entities
+                    .comps
+                    .get(&(owner, comp))
+                    .map(|b| (owner, comp, b.to_vec()))
+            })
             .collect();
         if !comps.is_empty() {
             p.conn.send(ToClient::EntityComponents(comps));
@@ -341,7 +478,12 @@ fn send_cubes(p: &mut Player, dim: &DimSet, def: &crate::content::DimensionDef, 
         }
         p.sync_range = Some(view);
     }
-    p.unsent.extend(settled.iter().copied().filter(|&q| in_range(q) && !p.sent.contains(&q)));
+    p.unsent.extend(
+        settled
+            .iter()
+            .copied()
+            .filter(|&q| in_range(q) && !p.sent.contains(&q)),
+    );
     // Send a cube once its neighbors exist and its sky light is final.
     let mut to_send: Vec<(i32, IVec3)> = p
         .unsent
@@ -362,7 +504,8 @@ fn send_cubes(p: &mut Player, dim: &DimSet, def: &crate::content::DimensionDef, 
     let unsent = to_send.len().saturating_sub(SEND_PER_TICK) as u64;
     for &(_, pos) in to_send.iter().take(SEND_PER_TICK) {
         if let Some(cube) = dim.snapshot(pos) {
-            p.conn.send(ToClient::Cube { frame: 0, dim: p.dim, pos, cube, edit: false });
+            p.conn
+                .send(ToClient::Cube { frame: 0, dim: p.dim, pos, cube, edit: false });
             p.send_levels(dim, pos);
             p.sent.insert(pos);
             p.unsent.remove(&pos);
@@ -390,17 +533,33 @@ pub(super) fn gizmos_for(p: &Player, dim: &DimSet, tick: u64, me: DVec3) -> Vec<
     use crate::net::GizmoShape;
     let mut out: Vec<GizmoShape> = Vec::new();
     for r in &dim.regions {
-        out.extend(r.gizmos.iter().filter(|g| p.gizmos.contains(&g.group)).cloned());
+        out.extend(
+            r.gizmos
+                .iter()
+                .filter(|g| p.gizmos.contains(&g.group))
+                .cloned(),
+        );
     }
     if tick % TPS as u64 != 0 {
         return out;
     }
     let on = |g: &str| p.gizmos.iter().any(|x| x == g);
-    let shape = |group: &str, kind: u8, a: DVec3, b: DVec3, color: u32| GizmoShape { group: group.into(), kind, a, b, color, ticks: TPS + 2, text: Msg::default() };
+    let shape = |group: &str, kind: u8, a: DVec3, b: DVec3, color: u32| GizmoShape {
+        group: group.into(),
+        kind,
+        a,
+        b,
+        color,
+        ticks: TPS + 2,
+        text: Msg::default(),
+    };
     if on("regions") {
         const COLORS: [u32; 6] = [0xFF4040FF, 0x40FF40FF, 0x4080FFFF, 0xFFFF40FF, 0xFF40FFFF, 0x40FFFFFF];
         for (i, r) in dim.regions.iter().enumerate() {
-            let (Some(lo), Some(hi)) = (r.space.cubes.keys().copied().reduce(IVec3::min), r.space.cubes.keys().copied().reduce(IVec3::max)) else { continue };
+            let (Some(lo), Some(hi)) = (r.space.cubes.keys().copied().reduce(IVec3::min), r.space.cubes.keys().copied().reduce(IVec3::max))
+            else {
+                continue;
+            };
             let (a, b) = ((lo * 16).as_dvec3() + 0.05, ((hi + 1) * 16).as_dvec3() - 0.05);
             out.push(shape("regions", 1, a, b, COLORS[i % COLORS.len()]));
         }
@@ -425,10 +584,18 @@ pub(super) fn gizmos_for(p: &Player, dim: &DimSet, tick: u64, me: DVec3) -> Vec<
 impl Player {
     /// What has power in a cube this player just got.
     pub(super) fn send_levels(&mut self, dim: &DimSet, pos: IVec3) {
-        if let Some(r) = dim.regions.iter().find(|r| r.space.cubes.contains_key(&pos)) {
-            let changes = r.space.signals.levels_in(crate::content::content(), pos, r.space.cubes[&pos].as_ref());
+        if let Some(r) = dim
+            .regions
+            .iter()
+            .find(|r| r.space.cubes.contains_key(&pos))
+        {
+            let changes = r
+                .space
+                .signals
+                .levels_in(crate::content::content(), pos, r.space.cubes[&pos].as_ref());
             if !changes.is_empty() {
-                self.conn.send(ToClient::Signals { dim: self.dim, frame: 0, changes });
+                self.conn
+                    .send(ToClient::Signals { dim: self.dim, frame: 0, changes });
             }
         }
     }

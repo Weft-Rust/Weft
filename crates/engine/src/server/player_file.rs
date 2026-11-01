@@ -6,7 +6,9 @@ impl Server {
     pub(super) fn join(&mut self, c: &'static Content, pi: usize, name: String, key: String) {
         let key = if key.is_empty() { name.clone() } else { key };
         if self.players.iter().any(|p| p.joined && p.key == key) {
-            self.players[pi].conn.send(ToClient::Disconnect(format!("{name} is already playing")));
+            self.players[pi]
+                .conn
+                .send(ToClient::Disconnect(format!("{name} is already playing")));
             return;
         }
         // Read each time, so a key added takes effect with no restart. The key is what the
@@ -14,11 +16,16 @@ impl Server {
         if let Some(Ok(list)) = self.cfg.whitelist.as_ref().map(std::fs::read_to_string) {
             if !list.lines().any(|l| l.trim() == key) {
                 log::info!("{name} is not on the whitelist; to let them in, add this line: {key}");
-                self.players[pi].conn.send(ToClient::Disconnect("not on this server's whitelist".into()));
+                self.players[pi]
+                    .conn
+                    .send(ToClient::Disconnect("not on this server's whitelist".into()));
                 return;
             }
         }
-        let saved = self.storage.as_ref().and_then(|s| load_player(c, &s.lock(), &key));
+        let saved = self
+            .storage
+            .as_ref()
+            .and_then(|s| load_player(c, &s.lock(), &key));
         let spawn = || (c.spawn_dim, self.dims[c.spawn_dim as usize].spawn_point(c));
         let (dim, pos, health, inv, comps, look, selected, flying, fire) = match saved {
             // A dimension that is gone (its mod removed), or the void while a real one exists:
@@ -43,11 +50,21 @@ impl Server {
         let id = r.new_id();
         let mut e = Entity::new(id, c.game.player_kind, pos, health);
         e.player = true;
-        e.mode = self.storage.as_ref().map_or(GameMode::Survival, |s| saved_mode(&s.lock(), &key));
+        e.mode = self
+            .storage
+            .as_ref()
+            .map_or(GameMode::Survival, |s| saved_mode(&s.lock(), &key));
         (e.yaw, e.pitch) = (look[0], look[1]);
         (e.flying, e.fire) = (flying, fire);
         // The first connection is the one playing on this machine, the world's owner.
-        let permission = if pi == 0 && !self.cfg.dedicated { abi::permission::OWNER } else { self.storage.as_ref().and_then(|s| s.lock().meta.ops.iter().find(|o| o.0 == key).map(|o| o.1)).unwrap_or(abi::permission::EVERYONE) };
+        let permission = if pi == 0 && !self.cfg.dedicated {
+            abi::permission::OWNER
+        } else {
+            self.storage
+                .as_ref()
+                .and_then(|s| s.lock().meta.ops.iter().find(|o| o.0 == key).map(|o| o.1))
+                .unwrap_or(abi::permission::EVERYONE)
+        };
         e.permission = permission;
         e.selected = selected.min(c.game.player_layout.hotbar.saturating_sub(1));
         let selected = e.selected;
@@ -72,16 +89,26 @@ impl Server {
         p.joined = true;
         p.dim = dim;
         p.entity = id;
-        p.last_y = pos.y;
+        p.last_place = (None, pos);
         p.first_sync = true;
+        p.glow_sent = false;
         log::info!("{} joined", p.name);
         let line = Msg::new("multiplayer.joined", vec![Arg::Text(p.name.clone())]);
         for q in self.players.iter_mut().filter(|q| q.joined) {
             q.conn.send(ToClient::Chat(line.clone()));
         }
         let p = &mut self.players[pi];
-        p.conn.send(ToClient::Welcome { player: id, dim, pos, seed: self.cfg.seed, look, selected, flying });
-        p.conn.send(ToClient::Edits { dim, specs: self.dims[dim as usize].edits.iter().map(|e| e.spec(c)).collect(), all: true });
+        p.conn
+            .send(ToClient::Welcome { player: id, dim, pos, seed: self.cfg.seed, look, selected, flying });
+        p.conn.send(ToClient::Edits {
+            dim,
+            specs: self.dims[dim as usize]
+                .edits
+                .iter()
+                .map(|e| e.spec(c))
+                .collect(),
+            all: true,
+        });
         p.conn.send(ToClient::Configs(crate::config::synced()));
         p.conn.send(ToClient::Time { dim, time });
         p.conn.send(ToClient::GameMode(mode));
@@ -94,9 +121,16 @@ impl Server {
             p.conn.send(ToClient::Chat(void_note(c)));
         }
         // The skins of who is here already.
-        let skins: Vec<(u64, Arc<Vec<u8>>)> = self.players.iter().filter(|o| o.joined && o.entity != id).filter_map(|o| o.skin.clone().map(|s| (o.entity, s))).collect();
+        let skins: Vec<(u64, Arc<Vec<u8>>)> = self
+            .players
+            .iter()
+            .filter(|o| o.joined && o.entity != id)
+            .filter_map(|o| o.skin.clone().map(|s| (o.entity, s)))
+            .collect();
         for (entity, png) in skins {
-            self.players[pi].conn.send(ToClient::Skin { entity, png: png.to_vec() });
+            self.players[pi]
+                .conn
+                .send(ToClient::Skin { entity, png: png.to_vec() });
         }
     }
 }
@@ -119,13 +153,19 @@ pub(super) fn save_player(s: &Storage, p: &Player, d: &Dim) {
     if let Some(inv) = d.entities.inventories.get(&p.entity) {
         let items: Vec<String> = inv
             .iter()
-            .map(|s| if s.is_empty() { "-".into() } else { format!("{}*{}*{}", c.items[s.item as usize].name, s.count, crate::stack::to_text(crate::stack::for_save(s.data))) })
+            .map(|s| {
+                if s.is_empty() {
+                    "-".into()
+                } else {
+                    format!("{}*{}*{}", c.items[s.item as usize].name, s.count, crate::stack::to_text(crate::stack::for_save(s.data)))
+                }
+            })
             .collect();
         text.push_str(&format!("inventory = {}\n", items.join(" ")));
     }
     for ((id, comp), bytes) in &d.entities.comps {
         if *id == p.entity && c.game.components[*comp as usize].flags & cf::SAVE != 0 {
-            text.push_str(&format!("comp.{} = {}\n", c.game.components[*comp as usize].name, persist::hex(bytes)));
+            text.push_str(&format!("comp.{} = {}\n", c.game.components[*comp as usize].name, crate::kv::hex(bytes)));
         }
     }
     // Whole or not at all: a crash in the middle must not leave half a player.
@@ -137,7 +177,9 @@ pub(super) fn save_player(s: &Storage, p: &Player, d: &Dim) {
 
 pub(super) fn saved_mode(s: &Storage, key: &str) -> GameMode {
     let src = std::fs::read_to_string(s.player_path(key)).unwrap_or_default();
-    crate::kv::get(&src, "mode").and_then(GameMode::parse).unwrap_or_default()
+    crate::kv::get(&src, "mode")
+        .and_then(GameMode::parse)
+        .unwrap_or_default()
 }
 
 /// Dimension (`None`: unknown now), position, health, inventory, components.
@@ -167,7 +209,10 @@ pub(super) fn load_player(c: &Content, s: &Storage, key: &str) -> Option<PlayerD
                 }
             }
             "look" => {
-                let n: Vec<f32> = v.split_whitespace().filter_map(|x| x.parse().ok()).collect();
+                let n: Vec<f32> = v
+                    .split_whitespace()
+                    .filter_map(|x| x.parse().ok())
+                    .collect();
                 if n.len() == 2 {
                     look = [n[0], n[1]];
                 }
@@ -176,7 +221,10 @@ pub(super) fn load_player(c: &Content, s: &Storage, key: &str) -> Option<PlayerD
             "flying" => flying = v == "1",
             "fire" => fire = v.parse().unwrap_or(0),
             "pos" => {
-                let n: Vec<f64> = v.split_whitespace().filter_map(|x| x.parse().ok()).collect();
+                let n: Vec<f64> = v
+                    .split_whitespace()
+                    .filter_map(|x| x.parse().ok())
+                    .collect();
                 if n.len() == 3 {
                     pos = Some(DVec3::new(n[0], n[1], n[2]));
                 }
@@ -205,12 +253,7 @@ pub(super) fn load_player(c: &Content, s: &Storage, key: &str) -> Option<PlayerD
                         log::warn!("player {key}: dropped component {name} (not registered now)");
                     }
                     if let Some(id) = id {
-                        let mut b = persist::unhex(v);
-                        let size = c.game.components[id as usize].size as usize;
-                        if size > 0 {
-                            b.resize(size, 0);
-                        }
-                        comps.push((id, b.into_boxed_slice()));
+                        comps.push((id, c.game.fit_component(id, crate::kv::unhex(v))));
                     }
                 }
             }

@@ -87,34 +87,53 @@ impl Command<'_> {
 
     fn value(&self, name: &str) -> Option<&abi::CommandValue> {
         let all = unsafe { std::slice::from_raw_parts(self.args.values, self.args.count as usize) };
-        all.iter().find(|v| unsafe { v.name.as_str() } == name).filter(|v| v.kind != cv::NONE)
+        all.iter()
+            .find(|v| unsafe { v.name.as_str() } == name)
+            .filter(|v| v.kind != cv::NONE)
     }
 
     pub fn int(&self, name: &str) -> Option<i64> {
-        self.value(name).filter(|v| v.kind == cv::INT).map(|v| v.int)
+        self.value(name)
+            .filter(|v| v.kind == cv::INT)
+            .map(|v| v.int)
     }
 
     pub fn float(&self, name: &str) -> Option<f64> {
-        self.value(name).filter(|v| v.kind == cv::INT || v.kind == cv::FLOAT).map(|v| v.float)
+        self.value(name)
+            .filter(|v| v.kind == cv::INT || v.kind == cv::FLOAT)
+            .map(|v| v.float)
     }
 
     /// Words, text, player names, and the full names of items, blocks, entities, dimensions.
     pub fn text(&self, name: &str) -> Option<&str> {
-        self.value(name).filter(|v| v.kind == cv::TEXT || v.kind == cv::ID).map(|v| unsafe { v.text.as_str() })
+        self.value(name)
+            .filter(|v| v.kind == cv::TEXT || v.kind == cv::ID)
+            .map(|v| unsafe { v.text.as_str() })
     }
 
     /// Registry id of an item, block state, entity kind or dimension parameter.
     pub fn id(&self, name: &str) -> Option<u32> {
-        self.value(name).filter(|v| v.kind == cv::ID).map(|v| v.int as u32)
+        self.value(name)
+            .filter(|v| v.kind == cv::ID)
+            .map(|v| v.int as u32)
     }
 
     /// Entities a `targets` parameter selected (`@e[type=zombie]`, a player name, ...).
     pub fn targets(&self, name: &str) -> Vec<u64> {
-        self.value(name).filter(|v| v.kind == cv::TARGETS).map_or(Vec::new(), |v| unsafe { v.text.as_str() }.split_whitespace().filter_map(|t| t.parse().ok()).collect())
+        self.value(name)
+            .filter(|v| v.kind == cv::TARGETS)
+            .map_or(Vec::new(), |v| {
+                unsafe { v.text.as_str() }
+                    .split_whitespace()
+                    .filter_map(|t| t.parse().ok())
+                    .collect()
+            })
     }
 
     pub fn pos(&self, name: &str) -> Option<[f64; 3]> {
-        self.value(name).filter(|v| v.kind == cv::POS).map(|v| v.pos)
+        self.value(name)
+            .filter(|v| v.kind == cv::POS)
+            .map(|v| v.pos)
     }
 
     /// Whether a literal word of the usage (or an optional parameter) was given.

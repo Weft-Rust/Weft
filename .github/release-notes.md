@@ -1,7 +1,7 @@
 **Install:** unpack the archive for your system anywhere and run the game. Needs a GPU with Vulkan.
 
 - **Windows:** run `weft.exe`.
-- **Linux (x64):** `tar xf Weft-*-linux-x64.tar.gz`, then `Weft/weft`. Needs your GPU's Vulkan driver.
+- **Linux (x64):** `chmod +x Weft-*-linux-x64.AppImage`, then run it. If it asks for FUSE, run it with `--appimage-extract-and-run`. Or the same as a folder: `tar xf Weft-*-linux-x64.tar.gz`, then `Weft/weft`. Needs your GPU's Vulkan driver.
 - **macOS (Apple Silicon, macOS 12 or newer):** `tar xf Weft-*-macos-arm64.tar.gz`, then `xattr -dr com.apple.quarantine Weft`, as the game is not signed by Apple, then `Weft/weft`. Vulkan comes with the game (MoltenVK).
 
 **Textures:** the game comes with its own. If Minecraft is installed through the official launcher or Prism, Weft builds a resource pack from your copy on the first start (Settings > Resource Packs to turn it off). Nothing from Mojang is included or downloaded.

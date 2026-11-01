@@ -85,18 +85,36 @@ impl GameTextures {
         let mut by_name: FxHashMap<String, u32> = FxHashMap::default();
         let mut add = |name: String, source: Source, entries: &mut Vec<Entry>| -> u32 {
             *by_name.entry(name.clone()).or_insert_with(|| {
-                entries.push(Entry { name, source, frames: Vec::new(), glow: Vec::new(), anim: None, images: Vec::new(), stamp: 0, requested: false, size: 16 });
+                entries.push(Entry {
+                    name,
+                    source,
+                    frames: Vec::new(),
+                    glow: Vec::new(),
+                    anim: None,
+                    images: Vec::new(),
+                    stamp: 0,
+                    requested: false,
+                    size: 16,
+                });
                 entries.len() as u32 - 1
             })
         };
-        let mut ids: Vec<u32> = c.textures.iter().chain(&extra.names).map(|n| add(n.clone(), Source::File, &mut entries)).collect();
+        let mut ids: Vec<u32> = c
+            .textures
+            .iter()
+            .chain(&extra.names)
+            .map(|n| add(n.clone(), Source::File, &mut entries))
+            .collect();
         for parts in &extra.composites {
             let parts = parts.map(|p| ids.get(p as usize).copied().unwrap_or(0));
             let name = composite_name(&parts.map(|i| entries[i as usize].name.clone()));
             ids.push(add(name, Source::Composite(parts), &mut entries));
         }
         super::looks::set(looks);
-        let blank = gpu.create_texture(&TextureDesc { width: 1, height: 1, mips: 1, format: Format::Rgba8Srgb, render_target: false }, "blank texture");
+        let blank = gpu.create_texture(
+            &TextureDesc { width: 1, height: 1, mips: 1, format: Format::Rgba8Srgb, render_target: false },
+            "blank texture",
+        );
         gpu.write_texture(blank, 0, &[0, 0, 0, 0]);
         let blank = (blank, gpu.texture_index(blank));
         let glow_buffer = gpu.create_buffer(4096 * 4, usage::STORAGE, "glow map");
@@ -137,12 +155,26 @@ impl GameTextures {
 
     /// First frame of texture `id` (a block's face, an item's icon, a particle's frame).
     pub fn texture(&self, id: u32) -> u32 {
-        self.frame_of(id, 0)
+        let e = self.inner.borrow().ids.get(id as usize).copied();
+        self.frame(e, 0)
     }
 
-    pub fn frame_of(&self, id: u32, n: u32) -> u32 {
+    /// The frame of texture `id` at `ticks`, as its `.anim` plays it.
+    pub fn frame_now(&self, id: u32, ticks: f32) -> u32 {
         let e = self.inner.borrow().ids.get(id as usize).copied();
-        self.frame(e, n)
+        self.frame(e, self.strip_frame(id, ticks))
+    }
+
+    /// Which frame of its strip that is, for what draws the file's own picture. Nothing while it
+    /// isn't loaded.
+    pub fn strip_frame(&self, id: u32, ticks: f32) -> u32 {
+        let i = self.inner.borrow();
+        let en = i
+            .ids
+            .get(id as usize)
+            .and_then(|&e| i.entries.get(e as usize));
+        en.and_then(|en| en.anim.as_ref())
+            .map_or(0, |a| a.frame_at(ticks).0)
     }
 
     /// Texture ids there are: the content's and the connected texture tiles.
@@ -235,7 +267,11 @@ impl GameTextures {
                     let total: u32 = a.frames.iter().map(|f| f.1).sum::<u32>().min(0x7FFF);
                     info.push(frames.len() as u32);
                     info.push(a.frames.len() as u32 | total << 16 | (a.interpolate as u32) << 31);
-                    frames.extend(a.frames.iter().map(|&(f, ticks)| en.frames[f as usize % en.frames.len()] | ticks.min(0xFFFF) << 16));
+                    frames.extend(
+                        a.frames
+                            .iter()
+                            .map(|&(f, ticks)| en.frames[f as usize % en.frames.len()] | ticks.min(0xFFFF) << 16),
+                    );
                 }
                 (_, false) => info.extend([en.frames[0], 0]),
                 (_, true) => info.extend([self.blank.1, 0]),
@@ -255,26 +291,50 @@ impl GameTextures {
         let old = std::mem::replace(self, next);
         let blank = old.blank.0;
         let mut old = old.inner.into_inner();
-        let loaded: FxHashMap<String, u32> = old.entries.iter().enumerate().filter(|(_, e)| !e.frames.is_empty()).map(|(k, e)| (e.name.clone(), k as u32)).collect();
+        let loaded: FxHashMap<String, u32> = old
+            .entries
+            .iter()
+            .enumerate()
+            .filter(|(_, e)| !e.frames.is_empty())
+            .map(|(k, e)| (e.name.clone(), k as u32))
+            .collect();
         let (mut kept, mut redo) = (0, 0);
         {
             let mut n = self.inner.borrow_mut();
             // Only what was loaded is compared; the rest loads fresh when first used anyway.
-            let unchanged = |name: &str| loaded.get(name).is_some_and(|&o| assets::texture_stamp(assets, name) == old.entries[o as usize].stamp);
+            let unchanged = |name: &str| {
+                loaded
+                    .get(name)
+                    .is_some_and(|&o| assets::texture_stamp(assets, name) == old.entries[o as usize].stamp)
+            };
             let entries = &n.entries;
             let same: Vec<bool> = entries
                 .par_iter()
                 .map(|e| match e.source {
                     Source::File => unchanged(&e.name),
-                    Source::Composite(parts) => loaded.get(&e.name).is_some_and(|&o| composite_stamp(assets, entries, parts) == old.entries[o as usize].stamp),
+                    Source::Composite(parts) => loaded
+                        .get(&e.name)
+                        .is_some_and(|&o| composite_stamp(assets, entries, parts) == old.entries[o as usize].stamp),
                 })
                 .collect();
             for k in 0..n.entries.len() {
                 let Some(&o) = loaded.get(&n.entries[k].name) else { continue };
                 if same[k] {
                     let (oe, ne) = (&mut old.entries[o as usize], &mut n.entries[k]);
-                    (ne.frames, ne.glow, ne.images, ne.anim, ne.stamp, ne.size) = (std::mem::take(&mut oe.frames), std::mem::take(&mut oe.glow), std::mem::take(&mut oe.images), oe.anim.take(), oe.stamp, oe.size);
-                    let pairs: Vec<(u32, u32)> = ne.frames.iter().copied().zip(ne.glow.iter().copied()).collect();
+                    (ne.frames, ne.glow, ne.images, ne.anim, ne.stamp, ne.size) = (
+                        std::mem::take(&mut oe.frames),
+                        std::mem::take(&mut oe.glow),
+                        std::mem::take(&mut oe.images),
+                        oe.anim.take(),
+                        oe.stamp,
+                        oe.size,
+                    );
+                    let pairs: Vec<(u32, u32)> = ne
+                        .frames
+                        .iter()
+                        .copied()
+                        .zip(ne.glow.iter().copied())
+                        .collect();
                     for (f, g) in pairs {
                         set_glow(&mut n.glow_map, f, g);
                     }
@@ -302,7 +362,9 @@ impl GameTextures {
 
 /// A composite changes when any of its parts does.
 fn composite_stamp(assets: &Assets, entries: &[Entry], parts: [u32; 4]) -> u64 {
-    parts.iter().fold(weft_noise::FNV, |h, &p| weft_noise::fnv_step(h, assets::texture_stamp(assets, &entries[p as usize].name)))
+    parts
+        .iter()
+        .fold(weft_noise::FNV, |h, &p| weft_noise::fnv_step(h, assets::texture_stamp(assets, &entries[p as usize].name)))
 }
 
 fn set_glow(map: &mut Vec<u32>, color: u32, glow: u32) {
@@ -318,10 +380,16 @@ fn load(entries: &[Entry], assets: &Assets, ids: &[u32]) -> Vec<Loaded> {
         .map(|&e| {
             let en = &entries[e as usize];
             match en.source {
-                Source::File => Loaded { entry: e, tex: assets::load_texture(assets, &en.name), stamp: assets::texture_stamp(assets, &en.name) },
+                Source::File => {
+                    Loaded { entry: e, tex: assets::load_texture(assets, &en.name), stamp: assets::texture_stamp(assets, &en.name) }
+                }
                 Source::Composite(ids) => {
                     let parts = ids.map(|p| assets::load_texture(assets, &entries[p as usize].name));
-                    Loaded { entry: e, tex: assets::composite_texture([&parts[0], &parts[1], &parts[2], &parts[3]]), stamp: composite_stamp(assets, entries, ids) }
+                    Loaded {
+                        entry: e,
+                        tex: assets::composite_texture([&parts[0], &parts[1], &parts[2], &parts[3]]),
+                        stamp: composite_stamp(assets, entries, ids),
+                    }
                 }
             }
         })
@@ -335,14 +403,18 @@ fn upload(gpu: &mut dyn Backend, i: &mut Inner, l: Loaded) {
     let mut frames = Vec::new();
     let mut glows = Vec::new();
     for (mips, glow) in l.tex.frames.iter().zip(&l.tex.glow) {
-        let t = gpu.create_texture(&TextureDesc { width: size, height: size, mips: mips.len() as u32, format: Format::Rgba8Srgb, render_target: false }, label);
+        let t = gpu.create_texture(
+            &TextureDesc { width: size, height: size, mips: mips.len() as u32, format: Format::Rgba8Srgb, render_target: false },
+            label,
+        );
         for (m, data) in mips.iter().enumerate() {
             gpu.write_texture(t, m as u32, data);
         }
         let index = gpu.texture_index(t);
         images.push(t);
         let g = glow.as_ref().map_or(u32::MAX, |mask| {
-            let g = gpu.create_texture(&TextureDesc { width: size, height: size, mips: 1, format: Format::R8Unorm, render_target: false }, label);
+            let g = gpu
+                .create_texture(&TextureDesc { width: size, height: size, mips: 1, format: Format::R8Unorm, render_target: false }, label);
             gpu.write_texture(g, 0, mask);
             images.push(g);
             gpu.texture_index(g)

@@ -51,7 +51,7 @@ value! {
 // The common vocabulary the base game reads; any mod may set these on its own content.
 pub static FOOD: Component<Food> = Component::named("food");
 
-/// Eating for `.on_use`: hunger and saturation from its `FOOD`, one item less. With `.use_ticks(32)`
+/// Eating for `.on_use`: hunger and saturation from its `FOOD`, one item less. With `.use_time(1.6)`
 /// it takes as long as the base game's food.
 pub fn eat(u: &mut ItemUse) -> bool {
     let stack = u.stack();
@@ -63,7 +63,7 @@ pub fn eat(u: &mut ItemUse) -> bool {
     }
     h.food = (h.food + food.hunger as f32).min(20.0);
     h.saturation = (h.saturation + food.saturation).min(h.food);
-    u.set_stack(stack.shrink(1));
+    u.set_stack(use_one(stack));
     true
 }
 /// Burn time in ticks.

@@ -13,6 +13,10 @@ pub fn register(r: &mut Registry) {
     r.recipe_kind(S).inputs(1, 1).outputs(1, 1);
     r.shapeless(C, "#planks/{m}", 4, &["#logs/{m}"], 0);
     r.shaped(C, "stick", 4, &["#", "#"], &[('#', "#planks")]);
+    r.shaped(C, "#stairs/{m}", 4, &["#  ", "## ", "###"], &[('#', "#stairs_of/{m}")]);
+    r.shaped(C, "#slab/{m}", 6, &["###"], &[('#', "#slab_of/{m}")]);
+    r.shapeless(C, "#vertical_slab/{m}", 1, &["#slab/{m}"], 0);
+    r.shapeless(C, "#slab/{m}", 1, &["#vertical_slab/{m}"], 0);
     r.shaped(C, "crafting_table", 1, &["##", "##"], &[('#', "#planks")]);
     r.shaped(C, "furnace", 1, &["###", "# #", "###"], &[('#', "#cobblestone")]);
     r.shaped(C, "chest", 1, &["###", "# #", "###"], &[('#', "#planks")]);
@@ -46,16 +50,17 @@ pub fn register(r: &mut Registry) {
     ] {
         r.shaped(C, &format!("#{tool}/{{m}}"), 1, pattern, &[('X', "#materials/{m}"), ('#', "#stick")]);
     }
-    for (slot, pattern) in crate::items::ARMOR_SLOTS.iter().zip([&["XXX", "X X"][..], &["X X", "XXX", "XXX"], &["XXX", "X X", "X X"], &["X X", "X X"]]) {
+    for (slot, pattern) in
+        crate::items::ARMOR_SLOTS
+            .iter()
+            .zip([&["XXX", "X X"][..], &["X X", "XXX", "XXX"], &["XXX", "X X", "X X"], &["X X", "X X"]])
+    {
         r.shaped(C, &format!("#{slot}/{{m}}"), 1, pattern, &[('X', "#materials/{m}")]);
     }
 
-    for (input, output, ticks) in [
-        ("#sand", "glass", 200),
-        ("#cobblestone", "stone", 200),
-        ("#logs", "coal", 200),
-        ("#clay", "bricks", 200),
-    ] {
+    for (input, output, ticks) in
+        [("#sand", "glass", 200), ("#cobblestone", "stone", 200), ("#logs", "coal", 200), ("#clay", "bricks", 200)]
+    {
         r.shapeless(S, output, 1, &[input], ticks);
     }
 }

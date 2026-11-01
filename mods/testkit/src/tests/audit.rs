@@ -1,4 +1,4 @@
-//! What the audit of 2026-10-31 found, each as it was reproduced there.
+//! Bugs found by going through the game, each as it was reproduced then.
 
 use std::time::Duration;
 
@@ -12,7 +12,8 @@ async fn reopen(t: &T, seed: u64) -> R {
     t.c().leave_world();
     t.screen("core:title").await?;
     t.c().open_world(&name, seed);
-    t.until("joined again", Duration::from_secs(60), |t| t.flag(client::client_flags::JOINED)).await?;
+    t.until("joined again", Duration::from_secs(60), |t| t.flag(client::client_flags::JOINED))
+        .await?;
     t.loaded().await?;
     Ok(())
 }
@@ -28,7 +29,12 @@ pub async fn saved_entities_stay_gone(t: T) -> R {
     let pig = t.op(&format!("spawn base:pig {}", at(p))).await?;
     t.secs(0.2).await?;
     reopen(&t, 1).await?;
-    t.check(t.op(&format!("near {} 16", at(p))).await?.contains("base:pig"), "the pig was saved");
+    t.check(
+        t.op(&format!("near {} 16", at(p)))
+            .await?
+            .contains("base:pig"),
+        "the pig was saved",
+    );
     t.op(&format!("remove {}", pig.trim())).await?;
     t.secs(0.2).await?;
     reopen(&t, 1).await?;
@@ -46,7 +52,8 @@ pub async fn death_is_a_state(t: T) -> R {
     t.screen("core:menu").await?;
     t.frames(3).await?;
     t.click_ui("slot:36", 0);
-    t.until("on the cursor", Duration::from_secs(2), |t| t.c().inventory_slot(0).is_empty()).await?;
+    t.until("on the cursor", Duration::from_secs(2), |t| t.c().inventory_slot(0).is_empty())
+        .await?;
     t.cmd("/kill").await?;
     t.screen("core:death").await?;
     t.secs(5.0).await?;
@@ -61,7 +68,8 @@ pub async fn death_is_a_state(t: T) -> R {
     t.check_eq(t.op("health").await?, "0".to_string(), "dead after coming back");
     t.c().respawn();
     t.no_screen().await?;
-    t.until("alive", Duration::from_secs(5), |t| t.state().health > 0.0).await
+    t.until("alive", Duration::from_secs(5), |t| t.state().health > 0.0)
+        .await
 }
 
 /// A respawn keeps what the game mode gives: creative players stay out of mobs' sight.
@@ -87,7 +95,8 @@ pub async fn kill_and_void(t: T) -> R {
     t.no_screen().await?;
     let s = t.state();
     t.c().teleport([s.pos[0], -300.0, s.pos[2]]);
-    t.until("the void kills", Duration::from_secs(30), |t| t.state().health <= 0.0).await
+    t.until("the void kills", Duration::from_secs(30), |t| t.state().health <= 0.0)
+        .await
 }
 
 /// Leaving with an open menu puts the cursor and the crafting grid back first.
@@ -98,7 +107,8 @@ pub async fn leaving_keeps_cursor(t: T) -> R {
     t.screen("core:menu").await?;
     t.frames(3).await?;
     t.click_ui("slot:36", 0);
-    t.until("on the cursor", Duration::from_secs(2), |t| t.c().inventory_slot(0).is_empty()).await?;
+    t.until("on the cursor", Duration::from_secs(2), |t| t.c().inventory_slot(0).is_empty())
+        .await?;
     reopen(&t, 1).await?;
     let inv = t.op("inv me").await?;
     t.check(inv.contains("base:diamond:5"), format!("the cursor came back: '{inv}'"));
@@ -116,7 +126,8 @@ pub async fn containers(t: T) -> R {
     t.secs(0.3).await?;
     t.op(&format!("menu base:chest {}", at(chest))).await?;
     t.screen("core:menu").await?;
-    t.until("the diamonds survived /kill", Duration::from_secs(2), |t| !t.c().menu_slot(0).is_empty()).await?;
+    t.until("the diamonds survived /kill", Duration::from_secs(2), |t| !t.c().menu_slot(0).is_empty())
+        .await?;
     t.set(chest, "air").await?;
     t.no_screen().await?;
     Ok(())
@@ -146,10 +157,13 @@ pub async fn ladder_no_fall(t: T) -> R {
     let f = t.feet();
     let wall = add(f, [2, 0, 0]);
     t.fill(wall, add(wall, [0, 16, 0]), "stone").await?;
-    t.fill(add(wall, [-1, 0, 0]), add(wall, [-1, 15, 0]), "ladder").await?;
+    t.fill(add(wall, [-1, 0, 0]), add(wall, [-1, 15, 0]), "ladder")
+        .await?;
     let s = t.state();
-    t.c().teleport([f[0] as f64 + 1.5, f[1] as f64 + 15.0, s.pos[2]]);
-    t.until("down", Duration::from_secs(15), |t| t.flag(client::client_flags::ON_GROUND)).await?;
+    t.c()
+        .teleport([f[0] as f64 + 1.5, f[1] as f64 + 15.0, s.pos[2]]);
+    t.until("down", Duration::from_secs(15), |t| t.flag(client::client_flags::ON_GROUND))
+        .await?;
     t.secs(0.5).await?;
     t.check(t.state().health >= 19.0, format!("health after a ladder: {}", t.state().health));
     Ok(())
@@ -198,9 +212,12 @@ pub async fn no_block_into_mob(t: T) -> R {
     t.flat().await?;
     let f = t.feet();
     let spot = add(f, [2, 0, 0]);
-    t.fill(add(spot, [-1, 0, -1]), add(spot, [1, 2, -1]), "stone").await?;
-    t.fill(add(spot, [-1, 0, 1]), add(spot, [1, 2, 1]), "stone").await?;
-    t.fill(add(spot, [1, 0, 0]), add(spot, [1, 2, 0]), "stone").await?;
+    t.fill(add(spot, [-1, 0, -1]), add(spot, [1, 2, -1]), "stone")
+        .await?;
+    t.fill(add(spot, [-1, 0, 1]), add(spot, [1, 2, 1]), "stone")
+        .await?;
+    t.fill(add(spot, [1, 0, 0]), add(spot, [1, 2, 0]), "stone")
+        .await?;
     t.op(&format!("spawn base:pig {}", at(spot))).await?;
     t.op("put me 0 stone 1").await?;
     t.c().select(0);
@@ -228,11 +245,16 @@ pub async fn changes_in_one_tick(t: T) -> R {
     t.flat().await?;
     let f = t.feet();
     let (torch, flower) = (add(f, [3, 0, 3]), add(f, [5, 0, 3]));
-    t.c().chat(&format!("/tk set {} base:mossy_cobblestone", at(torch)));
-    t.c().chat(&format!("/tk set {} base:dandelion", at(flower)));
+    t.c()
+        .chat(&format!("/tk set {} base:mossy_cobblestone", at(torch)));
+    t.c()
+        .chat(&format!("/tk set {} base:dandelion", at(flower)));
     t.secs(1.0).await?;
     t.check_eq(t.block(flower).await?, "base:dandelion".to_string(), "the server has the flower");
-    t.check(t.c().block(torch).is_some_and(|s| s != 0), format!("torch on the client: {:?}, on the server {}", t.c().block(torch), t.block(torch).await?));
+    t.check(
+        t.c().block(torch).is_some_and(|s| s != 0),
+        format!("torch on the client: {:?}, on the server {}", t.c().block(torch), t.block(torch).await?),
+    );
     t.check(t.c().block(flower).is_some_and(|s| s != 0), format!("flower on the client: {:?}", t.c().block(flower)));
     Ok(())
 }
@@ -247,7 +269,12 @@ pub async fn no_ghost_light(t: T) -> R {
     t.set(cube_edge, "air").await?;
     t.secs(1.0).await?;
     let probe = add(cube_edge, [1, 0, 0]);
-    let server: u64 = t.op(&format!("light {}", at(probe))).await?.trim().parse().unwrap_or(0);
+    let server: u64 = t
+        .op(&format!("light {}", at(probe)))
+        .await?
+        .trim()
+        .parse()
+        .unwrap_or(0);
     let client = t.c().light(probe).unwrap_or(0) as u64;
     t.check_eq(client, server, "the client's light past the edge matches the server's");
     Ok(())
@@ -284,7 +311,8 @@ pub async fn break_refused(t: T) -> R {
     let b = add(t.feet(), [2, 0, 0]);
     t.set(b, "dirt").await?;
     t.op(&format!("protect {}", at(b))).await?;
-    t.until("the block on the client", Duration::from_secs(2), |t| t.c().block(b).is_some_and(|s| s != 0)).await?;
+    t.until("the block on the client", Duration::from_secs(2), |t| t.c().block(b).is_some_and(|s| s != 0))
+        .await?;
     t.look_at(b);
     t.frames(3).await?;
     t.hold("core:attack", 1.5);
@@ -292,7 +320,8 @@ pub async fn break_refused(t: T) -> R {
     t.check_eq(t.block(b).await?, "base:dirt".to_string(), "still there on the server");
     t.op("protect off").await?;
     t.hold("core:attack", 1.5);
-    t.until("broken once allowed", Duration::from_secs(3), |t| t.c().block(b).is_some_and(|s| s == 0)).await
+    t.until("broken once allowed", Duration::from_secs(3), |t| t.c().block(b).is_some_and(|s| s == 0))
+        .await
 }
 
 /// A sword in creative is known on both sides: nothing flickers, whatever the button does.
@@ -303,7 +332,8 @@ pub async fn creative_sword_no_flicker(t: T) -> R {
     t.c().select(0);
     let b = add(t.feet(), [2, 0, 0]);
     t.set(b, "stone").await?;
-    t.until("the block on the client", Duration::from_secs(2), |t| t.c().block(b).is_some_and(|s| s != 0)).await?;
+    t.until("the block on the client", Duration::from_secs(2), |t| t.c().block(b).is_some_and(|s| s != 0))
+        .await?;
     t.look_at(b);
     t.frames(3).await?;
     t.press("core:attack");
@@ -318,7 +348,8 @@ pub async fn reach_and_mining_attributes(t: T) -> R {
     t.op("mode creative").await?;
     let far = add(t.feet(), [8, 0, 0]);
     t.set(far, "stone").await?;
-    t.until("the block on the client", Duration::from_secs(2), |t| t.c().block(far).is_some_and(|s| s != 0)).await?;
+    t.until("the block on the client", Duration::from_secs(2), |t| t.c().block(far).is_some_and(|s| s != 0))
+        .await?;
     t.look_at(far);
     t.frames(3).await?;
     t.press("core:attack");
@@ -327,7 +358,8 @@ pub async fn reach_and_mining_attributes(t: T) -> R {
     t.op("attr_mod me core:block_reach reach 0 10 0").await?;
     t.secs(0.2).await?;
     t.press("core:attack");
-    t.until("reached", Duration::from_secs(2), |t| t.c().block(far).is_some_and(|s| s == 0)).await?;
+    t.until("reached", Duration::from_secs(2), |t| t.c().block(far).is_some_and(|s| s == 0))
+        .await?;
     t.secs(0.2).await?;
     t.check_eq(t.block(far).await?, "core:air".to_string(), "and the server agrees");
     t.op("attr_rm me core:block_reach reach").await?;
@@ -335,14 +367,16 @@ pub async fn reach_and_mining_attributes(t: T) -> R {
     t.op("mode survival").await?;
     let near = add(t.feet(), [2, 0, 0]);
     t.set(near, "dirt").await?;
-    t.until("the block on the client", Duration::from_secs(2), |t| t.c().block(near).is_some_and(|s| s != 0)).await?;
+    t.until("the block on the client", Duration::from_secs(2), |t| t.c().block(near).is_some_and(|s| s != 0))
+        .await?;
     t.look_at(near);
     t.frames(3).await?;
     t.op("attr_mod me core:mining_speed haste 0 49 0").await?;
     t.secs(0.2).await?;
     // Dirt takes 0.75 s by hand, and the server must not call this too soon.
     t.hold("core:attack", 0.3);
-    t.until("mined at once", Duration::from_millis(280), |t| t.c().block(near).is_some_and(|s| s == 0)).await?;
+    t.until("mined at once", Duration::from_millis(280), |t| t.c().block(near).is_some_and(|s| s == 0))
+        .await?;
     t.secs(0.2).await?;
     t.check_eq(t.block(near).await?, "core:air".to_string(), "not refused as too soon");
     Ok(())
@@ -353,8 +387,18 @@ pub async fn liquid_surface(t: T) -> R {
     t.flat().await?;
     let p = add(t.feet(), [3, 2, 0]);
     t.set(p, "water").await?;
-    t.check_eq(t.op(&format!("in_liquid {} {} {}", p[0] as f64 + 0.5, p[1] as f64 + 0.5, p[2] as f64 + 0.5)).await?, "1".to_string(), "inside");
-    t.check_eq(t.op(&format!("in_liquid {} {} {}", p[0] as f64 + 0.5, p[1] as f64 + 0.95, p[2] as f64 + 0.5)).await?, "0".to_string(), "above its surface, in its block");
+    t.check_eq(
+        t.op(&format!("in_liquid {} {} {}", p[0] as f64 + 0.5, p[1] as f64 + 0.5, p[2] as f64 + 0.5))
+            .await?,
+        "1".to_string(),
+        "inside",
+    );
+    t.check_eq(
+        t.op(&format!("in_liquid {} {} {}", p[0] as f64 + 0.5, p[1] as f64 + 0.95, p[2] as f64 + 0.5))
+            .await?,
+        "0".to_string(),
+        "above its surface, in its block",
+    );
     Ok(())
 }
 

@@ -5,8 +5,46 @@
 //! ```ignore
 //! r.entity(&ZOMBIE).goals(Goals::new().then(attack).then(ai::follow_player(18.0, 1.0)).then(ai::wander(0.6, 10.0)));
 //! ```
+//!
+//! A kind made `.neutral(..)` leaves players alone while its condition holds, and goes for one who
+//! hit it for a while regardless. `melee` and `follow_player` go by that, as does `target`, for
+//! goals of your own.
 
-use crate::{EntityState, EntityTick, World};
+use std::sync::RwLock;
+
+use crate::{Component, Entity, EntityState, EntityTick, World};
+
+crate::value! {
+    #[derive(Default)]
+    /// Who a neutral mob goes for whatever its condition says, and until which tick.
+    pub struct Anger { pub at: u64, pub until: u64 }
+}
+
+pub(crate) static ANGER: Component<Anger> = Component::named("anger");
+/// How long a neutral mob stays after who hit it: 20 seconds.
+const ANGER_TICKS: u64 = 400;
+
+/// Is it calm towards this player? (world, the mob, the player)
+type Calm = Box<dyn Fn(&World, &EntityState, &EntityState) -> bool + Send + Sync>;
+
+/// The neutral kinds of this mod.
+static NEUTRAL: RwLock<Vec<(&'static Entity, Calm)>> = RwLock::new(Vec::new());
+
+/// Makes `kind` neutral; true if it is the first of this mod.
+pub(crate) fn add_neutral(kind: &'static Entity, calm: Calm) -> bool {
+    let mut all = NEUTRAL.write().unwrap();
+    all.push((kind, calm));
+    all.len() == 1
+}
+
+/// A neutral mob was hurt: by a player, it goes after them.
+pub(crate) fn provoked(w: &World, h: &crate::Hurt) {
+    if w.each_player().any(|p| p == h.source) {
+        if let Some(a) = w.component_mut(h.entity, &ANGER) {
+            *a = Anger { at: h.source, until: w.time() + ANGER_TICKS };
+        }
+    }
+}
 
 /// One behavior: acts this tick and returns true, or returns false to let a lower one act.
 pub trait Goal: Send + Sync + 'static {
@@ -64,10 +102,33 @@ pub fn wander(speed: f32, radius: f64) -> impl Goal {
 /// The nearest living player within `range` times its `visibility` attribute (0 in creative)
 /// and 8 blocks up or down: its id and state.
 pub fn nearest_player(w: &World, st: &EntityState, range: f64) -> Option<(u64, EntityState)> {
+    nearest_player_where(w, st, range, |_, _| true)
+}
+
+/// Who this mob goes for within `range`: `nearest_player`, but for a neutral kind only one who hit
+/// it lately or towards whom its condition doesn't hold.
+pub fn target(w: &World, id: u64, st: &EntityState, range: f64) -> Option<(u64, EntityState)> {
+    let neutral = NEUTRAL.read().unwrap();
+    let Some((_, calm)) = neutral.iter().find(|(kind, _)| kind.id() == st.kind) else {
+        return nearest_player(w, st, range);
+    };
+    let angry = w
+        .component(id, &ANGER)
+        .filter(|a| a.until > w.time())
+        .map(|a| a.at);
+    nearest_player_where(w, st, range, |p, ps| Some(p) == angry || !calm(w, st, ps))
+}
+
+fn nearest_player_where(w: &World, st: &EntityState, range: f64, wanted: impl Fn(u64, &EntityState) -> bool) -> Option<(u64, EntityState)> {
     let d2 = |s: &EntityState| (s.pos[0] - st.pos[0]).powi(2) + (s.pos[2] - st.pos[2]).powi(2);
     w.each_player()
         .filter_map(|p| w.entity(p).map(|s| (p, s)))
-        .filter(|(p, s)| s.health > 0.0 && (s.pos[1] - st.pos[1]).abs() < 8.0 && d2(s) < (range * w.attribute(*p, &crate::attribute::VISIBILITY)).powi(2))
+        .filter(|(p, s)| {
+            s.health > 0.0
+                && (s.pos[1] - st.pos[1]).abs() < 8.0
+                && d2(s) < (range * w.attribute(*p, &crate::attribute::VISIBILITY)).powi(2)
+                && wanted(*p, s)
+        })
         .min_by(|a, b| d2(&a.1).total_cmp(&d2(&b.1)))
 }
 
@@ -80,9 +141,9 @@ pub fn watch_player(range: f64) -> impl Goal {
         if !w.navigating(id) {
             if let Some((_, ps)) = nearest_player(w, st, range) {
                 let (dx, dz) = (ps.pos[0] - st.pos[0], ps.pos[2] - st.pos[2]);
-                let dy = ps.pos[1] + ps.size[2] as f64 - (st.pos[1] + st.size[2] as f64);
+                let dy = ps.eye()[1] - st.eye()[1];
                 let mut now = *st;
-                now.yaw = (-dx).atan2(-dz) as f32;
+                now.yaw = crate::yaw_toward(st.pos, ps.pos);
                 now.pitch = dy.atan2((dx * dx + dz * dz).sqrt()) as f32;
                 w.set_entity(id, &now);
             }
@@ -91,11 +152,11 @@ pub fn watch_player(range: f64) -> impl Goal {
     }
 }
 
-/// Hits the nearest player within `reach` (and less than a body high above or below) with
+/// Hits its `target` within `reach` (and less than a body high above or below) with
 /// `World::attack`, which keeps the pace. Never takes over: chasing goes on.
 pub fn melee(reach: f64) -> impl Goal {
     move |w: &World, id: u64, st: &EntityState| {
-        if let Some((p, ps)) = nearest_player(w, st, reach) {
+        if let Some((p, ps)) = target(w, id, st, reach) {
             if (ps.pos[1] - st.pos[1]).abs() < 1.8 {
                 w.attack(id, p);
             }
@@ -104,9 +165,9 @@ pub fn melee(reach: f64) -> impl Goal {
     }
 }
 
-/// Walks to the nearest player within `range` at `speed`.
+/// Walks to its `target` within `range` at `speed`.
 pub fn follow_player(range: f64, speed: f32) -> impl Goal {
-    move |w: &World, id: u64, st: &EntityState| match nearest_player(w, st, range) {
+    move |w: &World, id: u64, st: &EntityState| match target(w, id, st, range) {
         Some((_, p)) => {
             w.navigate(id, p.pos, speed);
             true

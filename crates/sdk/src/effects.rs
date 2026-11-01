@@ -4,16 +4,18 @@
 //! static SPARK: Particle = Particle::named("spark");
 //! r.particle(&SPARK).textures(&["glint_0", "glint_1"]).life(0.3, 0.6).fullbright();
 //! w.spawn_particles(&SPARK, pos).count(12).speed(2.0);          // server: everyone nearby sees them
-//! r.text_condition(&CHARGED, |v| v.player_component(&CHARGE).is_some_and(|c| *c > 0));
+//! r.text_condition(&CHARGED, |v| v.component(&CHARGE).is_some_and(|c| *c > 0));
 //! c.post_effect("mymod:underwater", 1.0);                  // client: until turned off
 //! ```
 //! Shaders for text (`{fx:..}`), GUI panels (`shader` in a class's `.gui`), particles, entities and screen
-//! effects are assets: `shaders/fx|gui|particle|entity|post/<name>.wgsl` in the mod's folder.
+//! effects are assets: `shaders/fx|gui|particle|entity|block|sky|post/<name>.wgsl` in the mod's folder.
 
 use std::marker::PhantomData;
 
 use crate::abi::{self, Slice, Str, particle_flags as pf};
-use crate::{Client, ClientView, Dimension, Music, Particle, Registry, SkyObject, SoundCategory, TextCondition, World, callback, host, qualify};
+use crate::{
+    Client, ClientView, Dimension, Music, Particle, Registry, SkyObject, SoundCategory, TextCondition, World, callback, host, qualify,
+};
 
 pub struct ParticleBuilder<'a> {
     raw: *mut abi::Registrar,
@@ -229,7 +231,13 @@ impl Drop for SkyBuilder<'_> {
         if std::thread::panicking() {
             return;
         }
-        let desc = abi::SkyDesc { dimension: Str::new(&self.dimension), name: Str::new(&self.name), texture: Str::new(&self.texture), shader: Str::new(&self.shader), ..self.desc };
+        let desc = abi::SkyDesc {
+            dimension: Str::new(&self.dimension),
+            name: Str::new(&self.name),
+            texture: Str::new(&self.texture),
+            shader: Str::new(&self.shader),
+            ..self.desc
+        };
         unsafe { (host().reg_sky)(self.raw, &desc) }
     }
 }
@@ -435,7 +443,13 @@ impl Drop for SoundBuilder<'_> {
             return;
         }
         let files: Vec<Str> = self.files.iter().map(|f| Str::new(f)).collect();
-        let desc = abi::SoundDesc { name: Str::new(&self.name), cell: self.handle.map_or(std::ptr::null(), |h| h.cell()), files: Slice::new(&files), category_name: Str::new(&self.category_name), ..self.desc };
+        let desc = abi::SoundDesc {
+            name: Str::new(&self.name),
+            cell: self.handle.map_or(std::ptr::null(), |h| h.cell()),
+            files: Slice::new(&files),
+            category_name: Str::new(&self.category_name),
+            ..self.desc
+        };
         unsafe { (host().reg_sound)(self.raw, &desc) }
     }
 }
@@ -472,7 +486,13 @@ impl Drop for MusicBuilder<'_> {
             return;
         }
         let tracks: Vec<Str> = self.tracks.iter().map(|f| Str::new(f)).collect();
-        let desc = abi::MusicDesc { name: Str::new(&self.name), tracks: Slice::new(&tracks), dimension: Str::new(&self.dimension), when: self.when, ..abi::MusicDesc::DEFAULT };
+        let desc = abi::MusicDesc {
+            name: Str::new(&self.name),
+            tracks: Slice::new(&tracks),
+            dimension: Str::new(&self.dimension),
+            when: self.when,
+            ..abi::MusicDesc::DEFAULT
+        };
         unsafe { (host().reg_music)(self.raw, &desc) }
     }
 }
@@ -480,7 +500,15 @@ impl Drop for MusicBuilder<'_> {
 impl Registry {
     /// A sound event, see `SoundBuilder`; blocks and entities name groups of them with `.sound_group()`.
     pub fn sound<'a>(&'a mut self, sound: &'static crate::Sound) -> SoundBuilder<'a> {
-        SoundBuilder { raw: self.raw, name: sound.name().to_string(), files: Vec::new(), handle: Some(sound), desc: abi::SoundDesc::DEFAULT, category_name: String::new(), _p: PhantomData }
+        SoundBuilder {
+            raw: self.raw,
+            name: sound.name().to_string(),
+            files: Vec::new(),
+            handle: Some(sound),
+            desc: abi::SoundDesc::DEFAULT,
+            category_name: String::new(),
+            _p: PhantomData,
+        }
     }
 
     /// A sound category with its own volume setting (`<ns>:volume_<name>`, in the mod's
@@ -491,7 +519,14 @@ impl Registry {
 
     /// Background music, see `MusicBuilder`.
     pub fn music<'a>(&'a mut self, music: &Music) -> MusicBuilder<'a> {
-        MusicBuilder { raw: self.raw, name: music.name().to_string(), tracks: Vec::new(), dimension: String::new(), when: 0, _p: PhantomData }
+        MusicBuilder {
+            raw: self.raw,
+            name: music.name().to_string(),
+            tracks: Vec::new(),
+            dimension: String::new(),
+            when: 0,
+            _p: PhantomData,
+        }
     }
 }
 
@@ -505,7 +540,9 @@ impl World {
 impl Client {
     /// Only this client hears it; `None` = not positioned (UI sounds).
     pub fn play_sound(&self, sound: &crate::Sound, pos: Option<[f64; 3]>, volume: f32) {
-        let p = pos.as_ref().map_or(std::ptr::null(), |p| p as *const [f64; 3]);
+        let p = pos
+            .as_ref()
+            .map_or(std::ptr::null(), |p| p as *const [f64; 3]);
         unsafe { (host().client_play_sound)(self.raw(), sound.id(), p, volume, 0.0) }
     }
 }

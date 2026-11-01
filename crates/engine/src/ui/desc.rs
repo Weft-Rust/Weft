@@ -37,7 +37,15 @@ pub(crate) fn build(ui: &mut Ui, cx: &BuildCx, f: impl Fn(&mut D)) {
 /// The usual menu: a dimmed (in game) or plain background with a title over `f`'s parts.
 pub(crate) fn frame(d: &mut D, in_game: bool, title: &str, f: impl FnOnce(&mut D)) {
     let bg = if in_game { "overlay" } else { "background" };
-    let n = abi::UiNode { class: Str::new(bg), grow: 1.0, align: abi::ui_align::CENTER, justify: abi::ui_justify::CENTER, pad: [12.0; 4], gap: 10.0, ..node(k::PANEL) };
+    let n = abi::UiNode {
+        class: Str::new(bg),
+        grow: 1.0,
+        align: abi::ui_align::CENTER,
+        justify: abi::ui_justify::CENTER,
+        pad: [12.0; 4],
+        gap: 10.0,
+        ..node(k::PANEL)
+    };
     d.open(&n, |d| {
         d.title(title);
         f(d);
@@ -98,7 +106,14 @@ impl D {
                 act(r);
             }
         });
-        let n = abi::UiNode { class: Str::new("button"), min: [width, 20.0], pad: [6.0, 4.0, 6.0, 4.0], grow: grow as u32 as f32, on_click, ..node(k::BUTTON) };
+        let n = abi::UiNode {
+            class: Str::new("button"),
+            min: [width, 20.0],
+            pad: [6.0, 4.0, 6.0, 4.0],
+            grow: grow as u32 as f32,
+            on_click,
+            ..node(k::BUTTON)
+        };
         self.open(&n, |d| d.text(abi::UiNode { class: Str::new("button"), flags: fl::NO_WRAP, ..node(k::TEXT) }, key, args));
     }
 
@@ -123,7 +138,14 @@ impl D {
 
     /// What mods add to place `area` of `screen`.
     pub(crate) fn parts(&mut self, screen: &str, area: &str) {
-        self.leaf(&abi::UiNode { class: Str::new(screen), text: Str::new(area), align: abi::ui_align::STRETCH, gap: 4.0, self_align: abi::ui_align::STRETCH, ..node(k::PARTS) });
+        self.leaf(&abi::UiNode {
+            class: Str::new(screen),
+            text: Str::new(area),
+            align: abi::ui_align::STRETCH,
+            gap: 4.0,
+            self_align: abi::ui_align::STRETCH,
+            ..node(k::PARTS)
+        });
     }
 }
 

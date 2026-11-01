@@ -9,9 +9,9 @@ use crate::client::modui::{self, TAG_ENTITY, TAG_SLOT};
 use crate::client::textures::GameTextures;
 use crate::content::content;
 use crate::ui::lang::Lang;
+use crate::ui::look::Look;
 use crate::ui::render::UiRenderer;
 use crate::ui::text::{self, Arg};
-use crate::ui::look::Look;
 use crate::ui::{Align, Justify, Kind, Rect, Style, Ui};
 
 pub const TAG_HOTBAR: u32 = 1;
@@ -123,11 +123,14 @@ pub fn debug_lines() -> rustc_hash::FxHashMap<String, LineState> {
     text.split(',')
         .filter_map(|e| {
             let (id, state) = e.split_once('=')?;
-            Some((id.to_string(), match state {
-                "always" => LineState::Always,
-                "never" => LineState::Never,
-                _ => return None,
-            }))
+            Some((
+                id.to_string(),
+                match state {
+                    "always" => LineState::Always,
+                    "never" => LineState::Never,
+                    _ => return None,
+                },
+            ))
         })
         .collect()
 }
@@ -138,7 +141,10 @@ pub fn set_debug_line(id: &str, state: LineState) {
     if state != LineState::WithF3 {
         lines.insert(id.to_string(), state);
     }
-    let mut parts: Vec<String> = lines.iter().map(|(id, s)| format!("{id}={}", if *s == LineState::Always { "always" } else { "never" })).collect();
+    let mut parts: Vec<String> = lines
+        .iter()
+        .map(|(id, s)| format!("{id}={}", if *s == LineState::Always { "always" } else { "never" }))
+        .collect();
     parts.sort();
     if let Some(cfg) = crate::config::by_name(DEBUG_LINES) {
         crate::config::set_text(cfg, &parts.join(","));
@@ -178,7 +184,7 @@ struct Placed {
 #[derive(Default)]
 pub struct Hud {
     pub ui: Ui,
-    key: Option<(bool, usize, usize, bool, u32, u8, (i32, i32), (u32, u32, u8))>,
+    key: Option<(bool, usize, [u32; 3], usize, bool, u32, u8, (i32, i32), (u32, u32, u8))>,
     /// Player overrides from `config/hud.txt` by element name.
     layout: rustc_hash::FxHashMap<String, Placement>,
     file: std::path::PathBuf,
@@ -203,7 +209,13 @@ impl Hud {
 
     /// Writes the arrangement back.
     pub fn save(&self) {
-        let mut lines: Vec<String> = self.layout.iter().map(|(name, p)| (name, p.value())).filter(|(_, v)| !v.is_empty()).map(|(name, v)| format!("{name} = {v}\n")).collect();
+        let mut lines: Vec<String> = self
+            .layout
+            .iter()
+            .map(|(name, p)| (name, p.value()))
+            .filter(|(_, v)| !v.is_empty())
+            .map(|(name, v)| format!("{name} = {v}\n"))
+            .collect();
         lines.sort();
         let _ = self.file.parent().map(std::fs::create_dir_all);
         if let Err(e) = std::fs::write(&self.file, lines.concat()) {
@@ -227,13 +239,23 @@ impl Hud {
     }
 
     pub fn element_rect(&self, name: &str) -> Option<Rect> {
-        self.ui.find(&format!("hud:{name}")).map(|n| self.ui.nodes[n].rect)
+        self.ui
+            .find(&format!("hud:{name}"))
+            .map(|n| self.ui.nodes[n].rect)
     }
 
     /// The smallest element under a point, so one lying inside another can be reached.
     pub fn element_at(&self, p: glam::Vec2) -> Option<String> {
         let area = |r: &Rect| r.w * r.h;
-        self.names.iter().filter_map(|n| self.element_rect(n).filter(|r| r.contains(p)).map(|r| (n, r))).min_by(|a, b| area(&a.1).total_cmp(&area(&b.1))).map(|f| f.0.clone())
+        self.names
+            .iter()
+            .filter_map(|n| {
+                self.element_rect(n)
+                    .filter(|r| r.contains(p))
+                    .map(|r| (n, r))
+            })
+            .min_by(|a, b| area(&a.1).total_cmp(&area(&b.1)))
+            .map(|f| f.0.clone())
     }
 
     pub fn place(&mut self, name: &str, at: [f32; 4]) {
@@ -265,7 +287,15 @@ impl Hud {
     /// `chat_open`: the chat screen shows the messages itself.
     /// `groups`: bit per `DEBUG_GROUPS` entry shown with the debug overlay.
     pub fn update(&mut self, client: &Client, debug: bool, groups: u32, chat_open: bool, lang: &Lang, input: &crate::input::Input) -> bool {
-        let chat_visible = if chat_open { 0 } else { client.chat.iter().filter(|(_, t)| t.elapsed().as_secs() < 10).count() };
+        let chat_visible = if chat_open {
+            0
+        } else {
+            client
+                .chat
+                .iter()
+                .filter(|(_, t)| t.elapsed().as_secs() < 10)
+                .count()
+        };
         // The held item's name shows for two seconds after a change, fading for the last half.
         let (held, since) = client.held_name;
         let fade = if held.is_empty() { 0 } else { ((2.0 - since.elapsed().as_secs_f32()) / 0.5 * 16.0).clamp(0.0, 16.0) as u8 };
@@ -273,7 +303,18 @@ impl Hud {
         let size = (self.ui.size.x as i32, self.ui.size.y as i32);
         // Tab, and only over the game: in the chat it completes.
         let list_shown = input.captured && input.held("core:player_list");
-        let key = (debug, chat_visible, client.chat.len() | (list_shown as usize) << 32, client.dead, groups, client.mode as u8, size, (held.item, held.data, fade));
+        let chat = crate::settings::chat_look();
+        let key = (
+            debug,
+            chat_visible,
+            [chat.width as u32, chat.closed_height as u32, chat.dim as u32],
+            client.chat.len() | (list_shown as usize) << 32,
+            client.dead,
+            groups,
+            client.mode as u8,
+            size,
+            (held.item, held.data, fade),
+        );
         if self.key == Some(key) {
             return false;
         }
@@ -292,7 +333,10 @@ impl Hud {
             LineState::WithF3 => debug_on || (debug && group.is_none_or(|g| groups & (1 << g) != 0)),
         };
         let shown = |part: Part| match part {
-            Part::DebugGroup(i) => DEBUG_GROUPS[i].2.iter().any(|p| p.1.iter().any(|l| line_shown(line_id(l.0), Some(i)))),
+            Part::DebugGroup(i) => DEBUG_GROUPS[i]
+                .2
+                .iter()
+                .any(|p| p.1.iter().any(|l| line_shown(line_id(l.0), Some(i)))),
             Part::DebugMod(i) => line_shown(mods_debug[i].3, Some(DEBUG_GROUPS.len() + i)),
             Part::DebugHelp => line_shown("help", None),
             _ => true,
@@ -308,12 +352,28 @@ impl Hud {
         ];
         for (i, g) in DEBUG_GROUPS.iter().enumerate() {
             let side = if g.1 { a::DEBUG_RIGHT } else { a::DEBUG_LEFT };
-            all.push((format!("core:debug.{}", g.0.rsplit('.').next().unwrap_or("")), side.into(), i32::MIN + i as i32, Part::DebugGroup(i)));
+            all.push((
+                format!("core:debug.{}", g.0.rsplit('.').next().unwrap_or("")),
+                side.into(),
+                i32::MIN + i as i32,
+                Part::DebugGroup(i),
+            ));
         }
         for (i, m) in mods_debug.iter().enumerate() {
-            all.push((m.3.to_string(), if m.1 { a::DEBUG_RIGHT } else { a::DEBUG_LEFT }.into(), i32::MIN / 2 + i as i32, Part::DebugMod(i)));
+            all.push((
+                m.3.to_string(),
+                if m.1 { a::DEBUG_RIGHT } else { a::DEBUG_LEFT }.into(),
+                i32::MIN / 2 + i as i32,
+                Part::DebugMod(i),
+            ));
         }
-        all.extend(c.game.huds.iter().filter(|h| h.anchor != a::DEBUG_LEFT && h.anchor != a::DEBUG_RIGHT).map(|h| (h.name.clone(), h.anchor.clone(), h.order, Part::Mod(h.owner, h.cb))));
+        all.extend(
+            c.game
+                .huds
+                .iter()
+                .filter(|h| h.anchor != a::DEBUG_LEFT && h.anchor != a::DEBUG_RIGHT)
+                .map(|h| (h.name.clone(), h.anchor.clone(), h.order, Part::Mod(h.owner, h.cb))),
+        );
         let mut placed: Vec<Placed> = all
             .into_iter()
             .filter(|e| shown(e.3))
@@ -327,7 +387,10 @@ impl Hud {
         placed.sort_by_key(|p| p.order);
         self.names = placed.iter().map(|p| p.name.clone()).collect();
         let at = |anchor: &str, upwards: bool| -> Vec<&Placed> {
-            let mut v: Vec<_> = placed.iter().filter(|p| p.at.is_none() && p.anchor == anchor).collect();
+            let mut v: Vec<_> = placed
+                .iter()
+                .filter(|p| p.at.is_none() && p.anchor == anchor)
+                .collect();
             if upwards {
                 v.reverse();
             }
@@ -367,7 +430,9 @@ impl Hud {
             Part::Chat if editing => drop(ui.text(text::rich(lang.get("hud.edit.sample_chat"), lang, None), "chat")),
             Part::Chat => {}
             Part::DebugGroup(i) => debug_group(ui, i, align, &|id| line_shown(id, Some(i))),
-            Part::DebugMod(i) => debug_mod_panel(ui, mods_debug[i].0, mods_debug[i].2, align, &|ui, (o, cb)| modui::build(ui, lang, Some(input), o, cb, Some(client))),
+            Part::DebugMod(i) => debug_mod_panel(ui, mods_debug[i].0, mods_debug[i].2, align, &|ui, (o, cb)| {
+                modui::build(ui, lang, Some(input), o, cb, Some(client))
+            }),
             Part::DebugHelp => debug_help(ui, groups, align, &mods_debug),
         };
         let selected = edit.as_ref().and_then(|e| e.selected.clone());
@@ -376,7 +441,14 @@ impl Hud {
         // and in the editor have a size to take hold of.
         let emit = |ui: &mut Ui, e: &Placed, style: Style, align: Align| {
             let class = editing.then(|| {
-                if selected.as_deref() == Some(e.name.as_str()) { "hud_frame_selected" } else if e.hidden { "hud_frame_hidden" } else { "hud_frame" }.to_string()
+                if selected.as_deref() == Some(e.name.as_str()) {
+                    "hud_frame_selected"
+                } else if e.hidden {
+                    "hud_frame_hidden"
+                } else {
+                    "hud_frame"
+                }
+                .to_string()
             });
             let id = ui.open(Kind::Container { class }, style.align(align));
             draw(ui, e.part, align);
@@ -406,12 +478,18 @@ impl Hud {
             // Half the screen each, so wide text on one side never pushes the other off screen
             // (the two may overlap on narrow screens, like vanilla's).
             ui.container(Style::default().w(0.0).grow().gap(1.0).align(Align::Start), |ui| {
-                for e in at(a::DEBUG_LEFT, false).into_iter().chain(at(a::TOP_LEFT, false)) {
+                for e in at(a::DEBUG_LEFT, false)
+                    .into_iter()
+                    .chain(at(a::TOP_LEFT, false))
+                {
                     emit(ui, e, Style::default(), Align::Start);
                 }
             });
             ui.container(Style::default().w(0.0).grow().gap(1.0).align(Align::End), |ui| {
-                for e in at(a::DEBUG_RIGHT, false).into_iter().chain(at(a::TOP_RIGHT, false)) {
+                for e in at(a::DEBUG_RIGHT, false)
+                    .into_iter()
+                    .chain(at(a::TOP_RIGHT, false))
+                {
                     emit(ui, e, Style::default(), Align::End);
                 }
             });
@@ -420,52 +498,68 @@ impl Hud {
             emit(ui, e, Style::default().self_align(Align::Center), Align::Start);
         }
         // No height of its own, so what is under the crosshair doesn't move it off the center.
-        ui.container(Style::default().h(0.0).gap(1.0).self_align(Align::Center).align(Align::Center), |ui| {
-            ui.container(Style::default().h(3.0), |_| {});
-            for e in at(a::UNDER_CROSSHAIR, false) {
-                emit(ui, e, Style::default(), Align::Center);
-            }
-        });
-        ui.container(Style::default().h(0.0).grow().justify(Justify::End).align(Align::Stretch).pad(2.0).gap(1.0), |ui| {
-            for e in at(CHAT, false) {
-                emit(ui, e, Style::default().self_align(Align::Start), Align::Start);
-            }
-            ui.container(Style::row().align(Align::End), |ui| {
-                ui.container(Style::default().w(0.0).gap(1.0).align(Align::Start), |ui| {
-                    for e in at(a::BOTTOM_LEFT, true) {
-                        emit(ui, e, Style::default(), Align::Start);
-                    }
-                });
-                ui.container(Style::default().grow(), |_| {});
-                ui.container(Style::default().gap(1.0).align(Align::Center), |ui| {
-                    for e in at(a::ABOVE_HOTBAR, true) {
-                        emit(ui, e, Style::default(), Align::Center);
-                    }
-                    ui.container(Style::row().w(182.0).gap(2.0).align(Align::End), |ui| {
-                        ui.container(Style::default().gap(1.0).align(Align::Start), |ui| {
-                            for e in at(a::HOTBAR_LEFT, true) {
-                                emit(ui, e, Style::default(), Align::Start);
-                            }
-                        });
-                        ui.container(Style::default().grow(), |_| {});
-                        ui.container(Style::default().gap(1.0).align(Align::End), |ui| {
-                            for e in at(a::HOTBAR_RIGHT, true) {
-                                emit(ui, e, Style::default(), Align::End);
-                            }
-                        });
+        ui.container(
+            Style::default()
+                .h(0.0)
+                .gap(1.0)
+                .self_align(Align::Center)
+                .align(Align::Center),
+            |ui| {
+                ui.container(Style::default().h(3.0), |_| {});
+                for e in at(a::UNDER_CROSSHAIR, false) {
+                    emit(ui, e, Style::default(), Align::Center);
+                }
+            },
+        );
+        ui.container(
+            Style::default()
+                .h(0.0)
+                .grow()
+                .justify(Justify::End)
+                .align(Align::Stretch)
+                .pad(2.0)
+                .gap(1.0),
+            |ui| {
+                for e in at(CHAT, false) {
+                    emit(ui, e, Style::default().self_align(Align::Start), Align::Start);
+                }
+                ui.container(Style::row().align(Align::End), |ui| {
+                    ui.container(Style::default().w(0.0).gap(1.0).align(Align::Start), |ui| {
+                        for e in at(a::BOTTOM_LEFT, true) {
+                            emit(ui, e, Style::default(), Align::Start);
+                        }
                     });
-                    for e in at(a::HOTBAR, true) {
-                        emit(ui, e, Style::default(), Align::Center);
-                    }
+                    ui.container(Style::default().grow(), |_| {});
+                    ui.container(Style::default().gap(1.0).align(Align::Center), |ui| {
+                        for e in at(a::ABOVE_HOTBAR, true) {
+                            emit(ui, e, Style::default(), Align::Center);
+                        }
+                        ui.container(Style::row().w(182.0).gap(2.0).align(Align::End), |ui| {
+                            ui.container(Style::default().gap(1.0).align(Align::Start), |ui| {
+                                for e in at(a::HOTBAR_LEFT, true) {
+                                    emit(ui, e, Style::default(), Align::Start);
+                                }
+                            });
+                            ui.container(Style::default().grow(), |_| {});
+                            ui.container(Style::default().gap(1.0).align(Align::End), |ui| {
+                                for e in at(a::HOTBAR_RIGHT, true) {
+                                    emit(ui, e, Style::default(), Align::End);
+                                }
+                            });
+                        });
+                        for e in at(a::HOTBAR, true) {
+                            emit(ui, e, Style::default(), Align::Center);
+                        }
+                    });
+                    ui.container(Style::default().grow(), |_| {});
+                    ui.container(Style::default().w(0.0).gap(1.0).align(Align::End), |ui| {
+                        for e in at(a::BOTTOM_RIGHT, true) {
+                            emit(ui, e, Style::default(), Align::End);
+                        }
+                    });
                 });
-                ui.container(Style::default().grow(), |_| {});
-                ui.container(Style::default().w(0.0).gap(1.0).align(Align::End), |ui| {
-                    for e in at(a::BOTTOM_RIGHT, true) {
-                        emit(ui, e, Style::default(), Align::End);
-                    }
-                });
-            });
-        });
+            },
+        );
         for e in placed.iter().filter(|p| p.at.is_some()) {
             let [ax, ay, x, y] = e.at.unwrap_or_default();
             emit(ui, e, Style::default().at(ax * window.x + x, ay * window.y + y, [ax, ay]), Align::Start);
@@ -493,7 +587,11 @@ pub const DEBUG_GROUPS: &[(&str, bool, Panels)] = &[
 ];
 
 fn cpu(c: &Ctx) -> Vec<Arg> {
-    c.stats.cpu.iter().map(|v| Arg::Float(*v as f64, 2)).collect()
+    c.stats
+        .cpu
+        .iter()
+        .map(|v| Arg::Float(*v as f64, 2))
+        .collect()
 }
 
 fn gpu(c: &Ctx) -> Vec<Arg> {
@@ -518,19 +616,31 @@ const GPU: &[DebugLine] = &[("hud.debug.gpu", gpu), ("hud.debug.gpu_world", gpu)
 
 const POSITION: &[DebugLine] = &[
     ("hud.debug.pos", |c| {
-        let p = c.client.as_ref().map_or(glam::DVec3::ZERO, |cl| cl.player.pos);
+        let p = c
+            .client
+            .as_ref()
+            .map_or(glam::DVec3::ZERO, |cl| cl.player.pos);
         vec![Arg::Float(p.x, 3), Arg::Float(p.y, 3), Arg::Float(p.z, 3)]
     }),
     ("hud.debug.block", |c| {
-        let p = c.client.as_ref().map_or(glam::IVec3::ZERO, |cl| cl.player.pos.floor().as_ivec3());
+        let p = c
+            .client
+            .as_ref()
+            .map_or(glam::IVec3::ZERO, |cl| cl.player.pos.floor().as_ivec3());
         vec![Arg::Int(p.x as i64), Arg::Int(p.y as i64), Arg::Int(p.z as i64)]
     }),
     ("hud.debug.cube", |c| {
-        let p = c.client.as_ref().map_or(glam::IVec3::ZERO, |cl| cl.player.pos.floor().as_ivec3() >> 4i32);
+        let p = c
+            .client
+            .as_ref()
+            .map_or(glam::IVec3::ZERO, |cl| cl.player.pos.floor().as_ivec3() >> 4i32);
         vec![Arg::Int(p.x as i64), Arg::Int(p.y as i64), Arg::Int(p.z as i64)]
     }),
     ("hud.debug.facing", |c| {
-        let (yaw, pitch) = c.client.as_ref().map_or((0.0, 0.0), |cl| (cl.player.yaw, cl.player.pitch));
+        let (yaw, pitch) = c
+            .client
+            .as_ref()
+            .map_or((0.0, 0.0), |cl| (cl.player.yaw, cl.player.pitch));
         // Yaw 0 looks along -Z (north); turning right goes to east (+X).
         let deg = (-yaw.to_degrees()).rem_euclid(360.0);
         let dir = ["north", "east", "south", "west"][(((deg + 45.0) / 90.0) as usize) % 4];
@@ -539,20 +649,36 @@ const POSITION: &[DebugLine] = &[
     ("hud.debug.biome", |c| {
         let Some(cl) = c.client.as_ref() else { return vec![Arg::Text("-".into())] };
         let p = cl.player.pos.floor().as_ivec3();
-        let id = cl.world.cube(p >> 4i32).map_or(0, |cube| cube.biome((p.x & 15) as usize, (p.z & 15) as usize));
-        vec![Arg::Text(content().biomes.get(id as usize).map_or("-".into(), |b| b.name.clone()))]
+        let id = cl
+            .world
+            .cube(p >> 4i32)
+            .map_or(0, |cube| cube.biome((p.x & 15) as usize, (p.z & 15) as usize));
+        vec![Arg::Text(
+            content()
+                .biomes
+                .get(id as usize)
+                .map_or("-".into(), |b| b.name.clone()),
+        )]
     }),
     ("hud.debug.dimension", |c| {
         let d = c.client.as_ref().map_or(0, |cl| cl.world.dim);
         vec![Arg::Text(content().dims[d as usize].name.clone())]
     }),
     ("hud.debug.light", |c| {
-        let l = c.client.as_ref().map_or(0, |cl| cl.world.light((cl.player.pos + glam::DVec3::Y * 0.5).floor().as_ivec3()));
+        let l = c.client.as_ref().map_or(0, |cl| {
+            cl.world
+                .light((cl.player.pos + glam::DVec3::Y * 0.5).floor().as_ivec3())
+        });
         let ch = |s: u32| Arg::Int(((l >> s) & 255) as i64);
         vec![ch(0), ch(8), ch(16), ch(24)]
     }),
     ("hud.debug.looking", |c| {
-        let name = c.client.as_ref().and_then(|cl| cl.target).map(|h| content().state_name(h.state)).unwrap_or_else(|| "-".into());
+        let name = c
+            .client
+            .as_ref()
+            .and_then(|cl| cl.target)
+            .map(|h| content().state_name(h.state))
+            .unwrap_or_else(|| "-".into());
         vec![Arg::Text(name)]
     }),
 ];
@@ -571,7 +697,12 @@ const WORLD: &[DebugLine] = &[
         let (shown, made, quads, pending) = cl.lod_stats();
         vec![Arg::Int(shown as i64), Arg::Int(made as i64), Arg::Int((quads / 1000) as i64), Arg::Int(pending as i64)]
     }),
-    ("hud.debug.entities", |c| vec![Arg::Int(c.client.as_ref().map_or(0, |cl| cl.entities.len()) as i64), Arg::Int(c.client.as_ref().map_or(0, |cl| cl.particles.len()) as i64)]),
+    ("hud.debug.entities", |c| {
+        vec![
+            Arg::Int(c.client.as_ref().map_or(0, |cl| cl.entities.len()) as i64),
+            Arg::Int(c.client.as_ref().map_or(0, |cl| cl.particles.len()) as i64),
+        ]
+    }),
     ("hud.debug.load", |c| vec![Arg::Int(c.stats.load.0 as i64), Arg::Int(c.stats.load.1 as i64)]),
 ];
 
@@ -581,7 +712,9 @@ const SYSTEM: &[DebugLine] = &[
     ("hud.debug.gpu_name", |c| vec![Arg::Text(c.stats.gpu_name.clone())]),
     ("hud.debug.cpu_name", |c| vec![Arg::Text(c.stats.cpu_name.clone()), Arg::Int(c.stats.threads as i64)]),
     ("hud.debug.memory", |c| vec![Arg::Text(crate::diag::size(crate::diag::memory())), Arg::Text(crate::diag::size(c.stats.memory_total))]),
-    ("hud.debug.window", |c| vec![Arg::Int(c.stats.window.0 as i64), Arg::Int(c.stats.window.1 as i64), Arg::Float(c.stats.gui_scale as f64, 1)]),
+    ("hud.debug.window", |c| {
+        vec![Arg::Int(c.stats.window.0 as i64), Arg::Int(c.stats.window.1 as i64), Arg::Float(c.stats.gui_scale as f64, 1)]
+    }),
 ];
 
 /// Milliseconds per server tick and calls per tick for each mod, averaged over the last second.
@@ -589,15 +722,21 @@ fn mod_profile() -> String {
     use std::sync::Mutex;
     static LAST: Mutex<Option<(std::time::Instant, String, crate::diag::ModWindow)>> = Mutex::new(None);
     let mut last = LAST.lock().unwrap();
-    let (at, text, window) = last.get_or_insert_with(|| (std::time::Instant::now() - std::time::Duration::from_secs(2), String::new(), Default::default()));
+    let (at, text, window) =
+        last.get_or_insert_with(|| (std::time::Instant::now() - std::time::Duration::from_secs(2), String::new(), Default::default()));
     if at.elapsed().as_secs_f32() < 1.0 {
         return text.clone();
     }
     let (mods, secs) = window.take();
     let ticks = (secs * crate::world::TPS as f64).max(1.0);
-    let lines: Vec<String> = mods.iter().map(|(id, ns, calls)| format!("{id}: {:.2} ms, {:.0} calls", *ns as f64 / 1e6 / ticks, *calls as f64 / ticks)).collect();
-    *text = lines.join("
-");
+    let lines: Vec<String> = mods
+        .iter()
+        .map(|(id, ns, calls)| format!("{id}: {:.2} ms, {:.0} calls", *ns as f64 / 1e6 / ticks, *calls as f64 / ticks))
+        .collect();
+    *text = lines.join(
+        "
+",
+    );
     *at = std::time::Instant::now();
     text.clone()
 }
@@ -623,7 +762,11 @@ pub fn draw_custom(
             let Some(client) = client else { return };
             let selected = client.selected as u64 == data;
             slot_background(ren, look, "hotbar", r, selected, scale);
-            let stack = client.inventory.get(data as usize).copied().unwrap_or_default();
+            let stack = client
+                .inventory
+                .get(data as usize)
+                .copied()
+                .unwrap_or_default();
             stack_icon(ren, textures, r, stack, scale, text_unit);
         }
         TAG_ENTITY => {
@@ -635,21 +778,41 @@ pub fn draw_custom(
             slot_background(ren, look, "slot", r, false, scale);
             stack_icon(ren, textures, r, ItemStack::new(data as u32, 1), scale, text_unit);
             if hovered {
-                loaded(ren, look, "slot_highlight", Rect { x: r.x + scale, y: r.y + scale, w: r.w - 2.0 * scale, h: r.h - 2.0 * scale }, scale);
+                loaded(
+                    ren,
+                    look,
+                    "slot_highlight",
+                    Rect { x: r.x + scale, y: r.y + scale, w: r.w - 2.0 * scale, h: r.h - 2.0 * scale },
+                    scale,
+                );
             }
         }
         TAG_SLOT => {
             let Some(client) = client else { return };
             slot_background(ren, look, "slot", r, false, scale);
-            let stack = client.menu.as_ref().and_then(|m| m.slots.get(data as usize)).copied().unwrap_or_default();
+            let stack = client
+                .menu
+                .as_ref()
+                .and_then(|m| m.slots.get(data as usize))
+                .copied()
+                .unwrap_or_default();
             if let (Some(t), true) = (icon, stack.is_empty()) {
                 let s = 16.0 * scale;
                 ren.image(Rect { x: r.x + (r.w - s) / 2.0, y: r.y + (r.h - s) / 2.0, w: s, h: s }, t, [0.0, 0.0, 1.0, 1.0], 0xFFFFFFFF);
             }
             stack_icon(ren, textures, r, stack, scale, text_unit);
-            let dragged = client.drag.as_ref().is_some_and(|d| d.1.contains(&(data as u32)));
+            let dragged = client
+                .drag
+                .as_ref()
+                .is_some_and(|d| d.1.contains(&(data as u32)));
             if hovered || dragged {
-                loaded(ren, look, "slot_highlight", Rect { x: r.x + scale, y: r.y + scale, w: r.w - 2.0 * scale, h: r.h - 2.0 * scale }, scale);
+                loaded(
+                    ren,
+                    look,
+                    "slot_highlight",
+                    Rect { x: r.x + scale, y: r.y + scale, w: r.w - 2.0 * scale, h: r.h - 2.0 * scale },
+                    scale,
+                );
             }
         }
         _ => {}
@@ -672,11 +835,13 @@ pub fn slot_background(ren: &mut UiRenderer, look: &Look, class: &str, r: Rect, 
 
 /// A class's texture already loaded for engine-drawn nodes, else the missing-texture checkerboard.
 fn loaded(ren: &mut UiRenderer, look: &Look, class: &str, r: Rect, scale: f32) {
-    if !look.texture(class, "").is_some_and(|t| ren.draw_loaded(&t, r, scale, 0xFFFFFFFF)) {
+    if !look
+        .texture(class, "")
+        .is_some_and(|t| ren.draw_loaded(&t, r, scale, 0xFFFFFFFF))
+    {
         ren.checker(r, scale);
     }
 }
-
 
 /// What a stack is called: its own name, else its item's.
 pub fn stack_name(lang: &Lang, input: Option<&crate::input::Input>, stack: weft_abi::ItemStack) -> Vec<text::Span> {
@@ -704,7 +869,10 @@ pub fn item_tooltip(lang: &Lang, input: &crate::input::Input, stack: weft_abi::I
         }
         // A line hidden as a whole leaves no empty line behind.
         let first = out.get(start).map_or(Vec::new(), |s| s.when.clone());
-        let common: Vec<text::Cond> = first.into_iter().filter(|c| out[start..].iter().all(|s| s.when.contains(c))).collect();
+        let common: Vec<text::Cond> = first
+            .into_iter()
+            .filter(|c| out[start..].iter().all(|s| s.when.contains(c)))
+            .collect();
         out[break_at].when = common;
     };
     // With additions by mods, one group per mod in load order: `<key>.<mod id>`.
@@ -743,9 +911,17 @@ type ModPart = (weft_abi::ModId, weft_abi::Callback);
 /// Mods' F3 panels in group order (after the engine's): title key, right side, part, element name.
 pub fn mod_debug_groups() -> Vec<(&'static str, bool, ModPart, &'static str)> {
     use weft_abi::hud_anchor as a;
-    let mut v: Vec<_> = content().game.huds.iter().filter(|h| h.anchor == a::DEBUG_LEFT || h.anchor == a::DEBUG_RIGHT).collect();
+    let mut v: Vec<_> = content()
+        .game
+        .huds
+        .iter()
+        .filter(|h| h.anchor == a::DEBUG_LEFT || h.anchor == a::DEBUG_RIGHT)
+        .collect();
     v.sort_by_key(|h| h.order);
-    v.into_iter().take(9 - DEBUG_GROUPS.len()).map(|h| (h.title.as_str(), h.anchor == a::DEBUG_RIGHT, (h.owner, h.cb), h.name.as_str())).collect()
+    v.into_iter()
+        .take(9 - DEBUG_GROUPS.len())
+        .map(|h| (h.title.as_str(), h.anchor == a::DEBUG_RIGHT, (h.owner, h.cb), h.name.as_str()))
+        .collect()
 }
 
 fn panel_title(ui: &mut Ui, key: String) {
@@ -803,13 +979,18 @@ fn debug_help(ui: &mut Ui, groups: u32, align: Align, mods: &[(&'static str, boo
     ui.container(Style::default().pad(2.0).gap(0.0).align(align), |ui| {
         ui.nodes.last_mut().unwrap().kind = Kind::Container { class: Some("debug_panel".into()) };
         panel_title(ui, "hud.debug.group.help".into());
-        let titles = DEBUG_GROUPS.iter().map(|g| g.0).chain(mods.iter().map(|m| m.0));
+        let titles = DEBUG_GROUPS
+            .iter()
+            .map(|g| g.0)
+            .chain(mods.iter().map(|m| m.0));
         for (i, title) in titles.enumerate() {
             let on = groups & (1 << i) != 0;
             let state = if on { "hud.debug.shown" } else { "hud.debug.hidden" };
             let n = ui.text_bound(
                 "debug",
-                Box::new(move |_: &Ctx| ("hud.debug.toggle".into(), vec![Arg::Int(i as i64 + 1), Arg::Key(title.to_string()), Arg::Key(state.into())])),
+                Box::new(move |_: &Ctx| {
+                    ("hud.debug.toggle".into(), vec![Arg::Int(i as i64 + 1), Arg::Key(title.to_string()), Arg::Key(state.into())])
+                }),
             );
             if let Some(t) = ui.text_mut(n) {
                 t.wrap = false;

@@ -20,14 +20,16 @@ pub async fn mod_liquid_bucket(t: T) -> R {
     t.frames(3).await?;
     t.press("core:use");
     let oil_bucket = Item::lookup("testmod:oil_bucket").unwrap_or(u32::MAX);
-    t.until("oil scooped", Duration::from_secs(5), |t| t.c().inventory_slot(0).item == oil_bucket).await?;
+    t.until("oil scooped", Duration::from_secs(5), |t| t.c().inventory_slot(0).item == oil_bucket)
+        .await?;
     t.check_eq(t.block(pit).await?, "core:air".into(), "oil taken from the pit");
     // Right clicks repeat at most every quarter second.
     t.secs(0.3).await?;
     t.look_at(add(pit, [0, -1, 0]));
     t.frames(3).await?;
     t.press("core:use");
-    t.until("oil poured", Duration::from_secs(5), |t| t.c().inventory_slot(0).item == Item::lookup("base:bucket").unwrap_or(u32::MAX)).await?;
+    t.until("oil poured", Duration::from_secs(5), |t| t.c().inventory_slot(0).item == Item::lookup("base:bucket").unwrap_or(u32::MAX))
+        .await?;
     t.check_eq(t.block(pit).await?, "testmod:oil[level=0]".into(), "oil back in the pit");
     Ok(())
 }
@@ -43,7 +45,8 @@ pub async fn mod_sand_soil(t: T) -> R {
     t.look_at(sand);
     t.frames(3).await?;
     t.press("core:use");
-    t.until("cactus placed", Duration::from_secs(5), |t| t.c().inventory_slot(0).count == 3).await?;
+    t.until("cactus placed", Duration::from_secs(5), |t| t.c().inventory_slot(0).count == 3)
+        .await?;
     t.check_eq(t.block(add(sand, [0, 1, 0])).await?, "base:cactus".into(), "cactus on red sand");
     let dirt = add(f, [-2, -1, 0]);
     t.set(dirt, "dirt").await?;

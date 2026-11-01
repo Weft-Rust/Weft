@@ -5,8 +5,8 @@
 use weft_render::*;
 
 use crate::assets::Assets;
-use crate::shaders::{Hook, Slots};
 use crate::gpu_layout::Pass;
+use crate::shaders::{Hook, Slots};
 
 pub const HOOK: Hook = Hook {
     kind: "post",
@@ -40,12 +40,24 @@ impl Post {
 
     pub fn reload(&mut self, gpu: &mut dyn Backend, assets: &Assets) {
         let snippets = crate::shaders::snippets(assets, &HOOK);
-        let made = crate::packs::compose(assets, "post.wgsl", &[(&HOOK, &snippets)]).map_err(|e| e.0).and_then(|(s, mut slots)| {
-            let p = gpu
-                .create_pipeline(&PipelineDesc { label: "post", shader: &s, vertex: "vs", fragment: Some("fs"), color: Some(Format::Surface), depth: None, blend: Blend::None, cull_back: false, topology: Topology::Triangles })
-                .map_err(|e| e.0)?;
-            Ok((p, slots.pop().unwrap_or_default()))
-        });
+        let made = crate::packs::compose(assets, "post.wgsl", &[(&HOOK, &snippets)])
+            .map_err(|e| e.0)
+            .and_then(|(s, mut slots)| {
+                let p = gpu
+                    .create_pipeline(&PipelineDesc {
+                        label: "post",
+                        shader: &s,
+                        vertex: "vs",
+                        fragment: Some("fs"),
+                        color: Some(Format::Surface),
+                        depth: None,
+                        blend: Blend::None,
+                        cull_back: false,
+                        topology: Topology::Triangles,
+                    })
+                    .map_err(|e| e.0)?;
+                Ok((p, slots.pop().unwrap_or_default()))
+            });
         match made {
             Ok((p, slots)) => {
                 if let Some(old) = self.pipeline.replace(p) {
@@ -90,14 +102,22 @@ impl Post {
     pub fn apply(&mut self, gpu: &mut dyn Backend, list: &mut CommandList, frame: &FrameInfo) {
         let (Some(pipe), Some((tex, idx, _))) = (self.pipeline, self.targets) else { return };
         while self.params.len() < gpu.frames_in_flight() {
-            self.params.push(gpu.create_buffer((size_of::<Pass>() * MAX_PASSES) as u64, usage::STORAGE | usage::HOST, "post passes"));
+            self.params
+                .push(gpu.create_buffer((size_of::<Pass>() * MAX_PASSES) as u64, usage::STORAGE | usage::HOST, "post passes"));
         }
         let time = crate::shaders::time();
         let n = self.active.len().min(MAX_PASSES);
         let passes: Vec<Pass> = self.active[..n]
             .iter()
             .enumerate()
-            .map(|(i, (name, strength))| Pass { scene: idx[i % 2], slot: self.slots.slot(name), strength: *strength, time, size: [frame.width as f32, frame.height as f32], pad: [0.0; 2] })
+            .map(|(i, (name, strength))| Pass {
+                scene: idx[i % 2],
+                slot: self.slots.slot(name),
+                strength: *strength,
+                time,
+                size: [frame.width as f32, frame.height as f32],
+                pad: [0.0; 2],
+            })
             .collect();
         let buf = self.params[frame.slot];
         gpu.mapped(buf)[..passes.len() * size_of::<Pass>()].copy_from_slice(bytemuck::cast_slice(&passes));

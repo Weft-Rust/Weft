@@ -56,7 +56,8 @@ static LYING: Channel<u32> = Channel::named("bed_lying");
 /// Client to server: the player got up (left the sleep screen).
 static GET_UP: Channel<()> = Channel::named("bed_get_up");
 
-const MESSAGES: [&str; 6] = ["bed.base.spawn_set", "bed.base.not_night", "bed.base.monsters", "bed.base.occupied", "bed.base.missing", "bed.base.obstructed"];
+const MESSAGES: [&str; 6] =
+    ["bed.base.spawn_set", "bed.base.not_night", "bed.base.monsters", "bed.base.occupied", "bed.base.missing", "bed.base.obstructed"];
 const SPAWN_SET: u32 = 0;
 const NOT_NIGHT: u32 = 1;
 const MONSTERS_NEAR: u32 = 2;
@@ -67,9 +68,11 @@ const OBSTRUCTED: u32 = 5;
 /// The other half of the bed half `state` at `pos`: the head lies away from where the bed faces
 /// (the player who placed it), the foot toward it.
 fn other_half(pos: [i32; 3], state: u32) -> [i32; 3] {
-    let d = state_prop(state, "facing").and_then(Dir::from_name).unwrap_or(Dir::North).offset();
-    let s = if state_prop(state, "part") == Some("head") { 1 } else { -1 };
-    [pos[0] + d[0] * s, pos[1], pos[2] + d[2] * s]
+    other_part(pos, state, "part", "head", head_way)
+}
+
+fn head_way(state: u32) -> Dir {
+    state_facing(state).opposite()
 }
 
 fn foot_of(pos: [i32; 3], state: u32) -> [i32; 3] {
@@ -116,12 +119,26 @@ const FOOT_BOXES: &[BedBox] = &[
     (
         [0.0, 0.0, 13.0],
         [3.0, 3.0, 16.0],
-        [("bed_foot_west", [13.0, 13.0, 16.0, 16.0]), ("bed_foot_south", [3.0, 13.0, 6.0, 16.0]), ("bed_foot_west", [7.0, 13.0, 10.0, 16.0]), NONE, ("bed_foot_west", [10.0, 13.0, 13.0, 16.0]), ("bed_foot_south", [0.0, 13.0, 3.0, 16.0])],
+        [
+            ("bed_foot_west", [13.0, 13.0, 16.0, 16.0]),
+            ("bed_foot_south", [3.0, 13.0, 6.0, 16.0]),
+            ("bed_foot_west", [7.0, 13.0, 10.0, 16.0]),
+            NONE,
+            ("bed_foot_west", [10.0, 13.0, 13.0, 16.0]),
+            ("bed_foot_south", [0.0, 13.0, 3.0, 16.0]),
+        ],
     ),
     (
         [13.0, 0.0, 13.0],
         [16.0, 3.0, 16.0],
-        [("bed_foot_south", [10.0, 13.0, 13.0, 16.0]), ("bed_foot_east", [0.0, 13.0, 3.0, 16.0]), ("bed_foot_east", [6.0, 13.0, 9.0, 16.0]), NONE, ("bed_foot_east", [3.0, 13.0, 6.0, 16.0]), ("bed_foot_south", [13.0, 13.0, 16.0, 16.0])],
+        [
+            ("bed_foot_south", [10.0, 13.0, 13.0, 16.0]),
+            ("bed_foot_east", [0.0, 13.0, 3.0, 16.0]),
+            ("bed_foot_east", [6.0, 13.0, 9.0, 16.0]),
+            NONE,
+            ("bed_foot_east", [3.0, 13.0, 6.0, 16.0]),
+            ("bed_foot_south", [13.0, 13.0, 16.0, 16.0]),
+        ],
     ),
 ];
 const HEAD_BOXES: &[BedBox] = &[
@@ -133,94 +150,61 @@ const HEAD_BOXES: &[BedBox] = &[
     (
         [0.0, 0.0, 0.0],
         [3.0, 3.0, 3.0],
-        [("bed_head_west", [0.0, 13.0, 3.0, 16.0]), ("bed_head_north", [10.0, 13.0, 13.0, 16.0]), ("bed_head_west", [6.0, 13.0, 9.0, 16.0]), NONE, ("bed_head_north", [13.0, 13.0, 16.0, 16.0]), ("bed_head_west", [3.0, 13.0, 6.0, 16.0])],
+        [
+            ("bed_head_west", [0.0, 13.0, 3.0, 16.0]),
+            ("bed_head_north", [10.0, 13.0, 13.0, 16.0]),
+            ("bed_head_west", [6.0, 13.0, 9.0, 16.0]),
+            NONE,
+            ("bed_head_north", [13.0, 13.0, 16.0, 16.0]),
+            ("bed_head_west", [3.0, 13.0, 6.0, 16.0]),
+        ],
     ),
     (
         [13.0, 0.0, 0.0],
         [16.0, 3.0, 3.0],
-        [("bed_head_north", [3.0, 13.0, 6.0, 16.0]), ("bed_head_east", [13.0, 13.0, 16.0, 16.0]), ("bed_head_east", [7.0, 13.0, 10.0, 16.0]), NONE, ("bed_head_north", [0.0, 13.0, 3.0, 16.0]), ("bed_head_east", [10.0, 13.0, 13.0, 16.0])],
+        [
+            ("bed_head_north", [3.0, 13.0, 6.0, 16.0]),
+            ("bed_head_east", [13.0, 13.0, 16.0, 16.0]),
+            ("bed_head_east", [7.0, 13.0, 10.0, 16.0]),
+            NONE,
+            ("bed_head_north", [0.0, 13.0, 3.0, 16.0]),
+            ("bed_head_east", [10.0, 13.0, 13.0, 16.0]),
+        ],
     ),
 ];
-/// The picture of the top of the foot and the head, per quarter turn.
-const TOP: [[&str; 4]; 2] = [["bed_top_foot", "bed_top_foot_90", "bed_top_foot_180", "bed_top_foot_270"], ["bed_top_head_0", "bed_top_head_90", "bed_top_head_180", "bed_top_head_270"]];
-
-/// A box turned clockwise from above: its corners, and each side's face moved to the next side
-/// (north to east ...). A turn doesn't change how a side reads from outside; tops are other pictures.
-fn turned(b: &BedBox, quarters: usize, top: &'static str) -> ([f32; 3], [f32; 3], [(&'static str, [f32; 4]); 6]) {
-    let (mut min, mut max, mut f) = (b.0, b.1, b.2);
-    f[3].0 = top;
-    for _ in 0..quarters {
-        let (a, c) = ([16.0 - max[2], min[1], min[0]], [16.0 - min[2], max[1], max[0]]);
-        (min, max) = (a, c);
-        // West takes south's, east north's, north west's, south east's.
-        f = [f[5], f[4], f[2], f[3], f[0], f[1]];
-    }
-    (min, max, f)
-}
+/// The picture of the top of the foot and the head.
+const TOP: [&str; 2] = ["bed_top_foot", "bed_top_head_0"];
 
 pub fn register(r: &mut Registry) {
     r.block(&BED)
         .sound_group("wood")
         .facing(Facings::HORIZONTAL, Toward::Player)
-        .prop("part", ["foot", "head"])
+        .two_part("part", ["foot", "head"], head_way)
         .states(|p, s| {
             let head = p.is("part", "head");
-            // What the model file of a bed says for one facing north, turned to this one.
-            let quarters = match p.facing() {
-                Dir::South => 0,
-                Dir::West => 1,
-                Dir::North => 2,
-                _ => 3,
-            };
-            let mut s = s.cutout().selection([0.0, 0.0, 0.0], [16.0, 9.0, 16.0]);
+            // What the model file of a bed says for one facing south, turned to this one.
+            let mut s = s
+                .cutout()
+                .frame(signal::Frame::new(Dir::Down, p.facing().opposite()))
+                .hitbox([0.0; 3], [16.0, 9.0, 16.0]);
             for b in if head { HEAD_BOXES } else { FOOT_BOXES } {
-                let top = TOP[head as usize][quarters];
-                let (min, max, faces) = turned(b, quarters, top);
-                s = s.model_box_faces(min, max, faces);
+                let mut faces = b.2;
+                faces[3].0 = TOP[head as usize];
+                s = s.model_box_faces(b.0, b.1, faces);
             }
             s
         })
         .hardness(0.2)
         .mineable("axe")
-        .drops_nothing()
+        .drops(BED_ITEM.name(), 1)
         .set(&crate::items::FUEL, 300)
         .on_use(use_bed)
-        // An explosion takes one half without breaking it: the other follows.
-        .on_neighbor(|e| e.world().schedule(e.pos(), 1))
-        .on_scheduled(|e| {
-            let w = e.world();
-            if BED.is(e.state()) && !BED.is(w.get(other_half(e.pos(), e.state()))) {
-                w.set(e.pos(), 0);
-            }
-        })
-        .on_placed(|w, c| {
-            let head = other_half(c.pos, c.state);
-            if let Some(s) = state_with(c.state, "part", "head") {
-                w.set(head, s);
-            }
-        })
-        .on_broken(|w, c| {
-            let other = other_half(c.pos, c.state);
-            if BED.is(w.get(other)) {
-                w.set(other, 0);
-            }
-            if c.player != 0 && !w.creative(c.player) {
-                let p = foot_of(c.pos, c.state);
-                w.spawn_item([p[0] as f64 + 0.5, p[1] as f64 + 0.5, p[2] as f64 + 0.5], ItemStack::new(BED_ITEM.id(), 1));
-            }
-        })
         .tab(&crate::tabs::FUNCTIONAL);
-    // Room for the head, or no bed.
-    r.intercept(&question::PLACE_BLOCK, |q| {
-        if !BED.is(q.state()) {
-            return Verdict::Abstain;
-        }
-        let head = other_half(q.pos(), q.state());
-        let there = q.world().get(head);
-        if there == 0 || state_flags(there) & abi::block_flags::REPLACEABLE != 0 { Verdict::Abstain } else { Verdict::Deny }
-    });
-
-    r.entity_component(&BED_SPAWN, BedSpawn { bed: [0; 3], dim: 0, set: 0 }, component_flags::SAVE | component_flags::KEEP | component_flags::SYNC_OWNER);
+    r.entity_component(
+        &BED_SPAWN,
+        BedSpawn { bed: [0; 3], dim: 0, set: 0 },
+        component_flags::SAVE | component_flags::KEEP | component_flags::SYNC_OWNER,
+    );
     r.attach(&PLAYER, &BED_SPAWN);
     r.entity_component(&SLEEP, Sleep { bed: [0; 3], since: 0, night: 0, asleep: 0 }, 0);
     r.attach(&PLAYER, &SLEEP);
@@ -259,12 +243,19 @@ fn use_bed(u: &mut Use) -> bool {
     let player = u.player();
     let foot = foot_of(u.pos(), u.state());
     // Vanilla's order: nothing is set on a bed that can't be used at all.
-    if w.players().into_iter().any(|o| o != player && w.component(o, &SLEEP).is_some_and(|s| s.asleep != 0 && s.bed == foot)) {
+    if w.players().into_iter().any(|o| {
+        o != player
+            && w.component(o, &SLEEP)
+                .is_some_and(|s| s.asleep != 0 && s.bed == foot)
+    }) {
         w.send(player, &MESSAGE, &OCCUPIED);
         return true;
     }
     // A player stays standing in bed, so as much room as that takes.
-    if [1, 2].iter().any(|dy| w.flags([foot[0], foot[1] + dy, foot[2]]) & abi::block_flags::SOLID != 0) {
+    if [1, 2]
+        .iter()
+        .any(|dy| w.flags([foot[0], foot[1] + dy, foot[2]]) & abi::block_flags::SOLID != 0)
+    {
         w.send(player, &MESSAGE, &OBSTRUCTED);
         return true;
     }
@@ -292,14 +283,22 @@ fn use_bed(u: &mut Use) -> bool {
 fn monsters_near(w: &World, foot: [i32; 3]) -> bool {
     let c = [foot[0] as f64 + 0.5, foot[1] as f64 + 0.5, foot[2] as f64 + 0.5];
     let reach = (2.0 * MONSTERS[0] * MONSTERS[0] + MONSTERS[1] * MONSTERS[1]).sqrt();
-    w.near_bodies(c, reach).into_iter().filter_map(|id| w.entity(id)).any(|e| {
-        (e.pos[0] - c[0]).abs() <= MONSTERS[0] && (e.pos[2] - c[2]).abs() <= MONSTERS[0] && (e.pos[1] - c[1]).abs() <= MONSTERS[1] && HOSTILE.on_entity(e.kind)
-    })
+    w.near_targets(c, reach, None)
+        .into_iter()
+        .filter_map(|id| w.entity(id))
+        .any(|e| {
+            (e.pos[0] - c[0]).abs() <= MONSTERS[0]
+                && (e.pos[2] - c[2]).abs() <= MONSTERS[0]
+                && (e.pos[1] - c[1]).abs() <= MONSTERS[1]
+                && HOSTILE.on_entity(e.kind)
+        })
 }
 
 /// A player sent to their bed, once where it should be is loaded: without a bed, back they go.
 fn arrive(w: &World, id: u64) {
-    let (Some(a), Some(spawn)) = (w.component_mut(id, &ARRIVING).filter(|a| a.on_way != 0), w.component_mut(id, &BED_SPAWN)) else { return };
+    let (Some(a), Some(spawn)) = (w.component_mut(id, &ARRIVING).filter(|a| a.on_way != 0), w.component_mut(id, &BED_SPAWN)) else {
+        return;
+    };
     if w.dimension() != spawn.dim {
         return;
     }
@@ -345,7 +344,9 @@ fn watch_sleepers(w: &World) {
                 here_asleep |= ready;
             }
         }
-        if w.entity(id).is_some_and(|e| w.near_bodies(e.pos, 0.1).contains(&id)) {
+        if w.entity(id)
+            .is_some_and(|e| w.near_targets(e.pos, 0.1, None).contains(&id))
+        {
             seen.push((id, ready));
         }
     }
@@ -378,7 +379,7 @@ fn client(r: &mut Registry) {
     r.client_packet(&LYING, |c, lying| {
         if lying != 0 {
             *LYING_SINCE.lock().unwrap() = Some(Instant::now());
-            c.lie_down(Some((lying - 1) as f32 * std::f32::consts::FRAC_PI_2));
+            c.lie_down(Some((lying - 1) as f32 * 90.0));
             c.open_screen(&SLEEP_SCREEN);
         } else if LYING_SINCE.lock().unwrap().take().is_some() {
             c.lie_down(None);
@@ -413,7 +414,15 @@ fn client(r: &mut Registry) {
     });
     r.screen(&SLEEP_SCREEN, |ui| {
         ui.column(S::col().gap(12.0).center(), |ui| {
-            ui.text_styled(S::col().class("title").scale(2.0).no_wrap().self_align(abi::ui_align::CENTER), "bed.base.sleeping", &[]);
+            ui.text_styled(
+                S::col()
+                    .class("title")
+                    .scale(2.0)
+                    .no_wrap()
+                    .self_align(abi::ui_align::CENTER),
+                "bed.base.sleeping",
+                &[],
+            );
             ui.button("bed.base.leave", S::col().min_w(200.0).self_align(abi::ui_align::CENTER), |c| {
                 c.client().close_screen();
             });

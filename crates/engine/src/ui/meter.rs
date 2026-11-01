@@ -17,7 +17,12 @@ pub fn crop(f: f32, dir: u32) -> [f32; 4] {
 
 /// The state nearest to share `f`; on a tie the fuller one.
 fn nearest(states: &[(f32, String)], f: f32) -> Option<&(f32, String)> {
-    states.iter().min_by(|a, b| (a.0 - f).abs().total_cmp(&(b.0 - f).abs()).then(b.0.total_cmp(&a.0)))
+    states.iter().min_by(|a, b| {
+        (a.0 - f)
+            .abs()
+            .total_cmp(&(b.0 - f).abs())
+            .then(b.0.total_cmp(&a.0))
+    })
 }
 
 /// What to draw for share `f` of the picture `name`: a picture and the part of it, or nothing.
@@ -33,7 +38,9 @@ pub fn part(name: &str, f: f32, dir: u32) -> Option<(String, [f32; 4])> {
     if crate::assets::texture_size(name).is_some() {
         states.push((1.0, name.to_string()));
     }
-    nearest(&states, f.clamp(0.0, 1.0)).filter(|s| !s.1.is_empty()).map(|s| (s.1.clone(), [0.0, 0.0, 1.0, 1.0]))
+    nearest(&states, f.clamp(0.0, 1.0))
+        .filter(|s| !s.1.is_empty())
+        .map(|s| (s.1.clone(), [0.0, 0.0, 1.0, 1.0]))
 }
 
 /// A picture's states from the names of all pictures: `<name>_<share>`, `<name>_<frame>` when any
@@ -44,9 +51,17 @@ pub fn states_from<'a>(names: impl Iterator<Item = &'a str>) -> impl Iterator<It
     for name in names {
         let Some((stem, end)) = name.rsplit_once('_') else { continue };
         if end == "half" {
-            map.entry(format!("{stem}_full")).or_default().push((0.5, name.to_string()));
-        } else if let Some(n) = end.parse::<f32>().ok().filter(|n| n.is_finite() && *n >= 0.0) {
-            map.entry(stem.to_string()).or_default().push((n, name.to_string()));
+            map.entry(format!("{stem}_full"))
+                .or_default()
+                .push((0.5, name.to_string()));
+        } else if let Some(n) = end
+            .parse::<f32>()
+            .ok()
+            .filter(|n| n.is_finite() && *n >= 0.0)
+        {
+            map.entry(stem.to_string())
+                .or_default()
+                .push((n, name.to_string()));
         }
     }
     for states in map.values_mut() {
@@ -65,7 +80,9 @@ mod tests {
     use super::*;
 
     fn states(names: &[&str], of: &str) -> Vec<(f32, String)> {
-        states_from(names.iter().copied()).find(|s| s.0 == of).map_or(Vec::new(), |s| s.1)
+        states_from(names.iter().copied())
+            .find(|s| s.0 == of)
+            .map_or(Vec::new(), |s| s.1)
     }
 
     #[test]

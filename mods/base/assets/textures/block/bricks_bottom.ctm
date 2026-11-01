@@ -1,3 +1,4 @@
 method = compact
 tiles = bricks_bottom/0-4
 inner_seams = true
+blocks = base:bricks

@@ -9,10 +9,10 @@ pub mod desc;
 pub mod edit;
 pub mod font;
 pub mod lang;
-pub mod render;
-pub mod text;
 pub mod look;
 pub mod meter;
+pub mod render;
+pub mod text;
 
 use std::rc::Rc;
 
@@ -59,12 +59,15 @@ pub struct Style {
     pub h: Len,
     pub min: [f32; 2],
     pub max_w: f32,
+    pub max_h: f32,
     pub grow: f32,
     pub align: Align,
     pub justify: Justify,
     pub self_align: Option<Align>,
     /// Children scroll inside this node (mouse wheel) and are clipped to it.
     pub scroll: bool,
+    /// A plain color behind the node, RGBA.
+    pub fill: Option<u32>,
     /// Placed at a point instead of in the flow: (x, y) in GUI pixels from the parent's inner
     /// corner, and which point of the node goes there (0..1 of its width and height).
     pub at: Option<[f32; 4]>,
@@ -80,11 +83,13 @@ impl Default for Style {
             h: Len::Auto,
             min: [0.0; 2],
             max_w: f32::INFINITY,
+            max_h: f32::INFINITY,
             grow: 0.0,
             align: Align::Start,
             justify: Justify::Start,
             self_align: None,
             scroll: false,
+            fill: None,
             at: None,
         }
     }
@@ -199,21 +204,58 @@ pub struct TextNode {
 }
 
 pub enum Kind {
-    Container { class: Option<String> },
+    Container {
+        class: Option<String>,
+    },
     Text(TextNode),
-    Button { class: String, action: Option<Action>, enabled: bool, selected: bool },
-    Image { texture: String, color: u32 },
-    Item { bind: ItemBind, last: (u32, u32) },
+    Button {
+        class: String,
+        action: Option<Action>,
+        enabled: bool,
+        selected: bool,
+    },
+    Image {
+        texture: String,
+        color: u32,
+    },
+    Item {
+        bind: ItemBind,
+        last: (u32, u32),
+    },
     /// `dir`: `abi::ui_dir` the bar fills towards.
-    Progress { class: String, bind: FloatBind, value: f32, dir: u32 },
+    Progress {
+        class: String,
+        bind: FloatBind,
+        value: f32,
+        dir: u32,
+    },
     /// `count` icons showing `value` in half steps (hearts): textures `gui/<class>_full`, `_half`, `_empty`.
     /// `shake`: at 4 or less they jump about, like hearts near the end.
-    Icons { class: String, count: u32, bind: FloatBind, value: f32, dir: u32, shake: bool },
+    Icons {
+        class: String,
+        count: u32,
+        bind: FloatBind,
+        value: f32,
+        dir: u32,
+        shake: bool,
+    },
     /// Single-line text field; `caret` is a char index.
-    Input { value: String, caret: usize, max: usize, on_change: Option<Rc<dyn Fn(&mut Ctx, &str)>> },
-    Slider { value: f32, bind: FloatBind, on_change: Rc<dyn Fn(&mut Ctx, f32)> },
+    Input {
+        value: String,
+        caret: usize,
+        max: usize,
+        on_change: Option<Rc<dyn Fn(&mut Ctx, &str)>>,
+    },
+    Slider {
+        value: f32,
+        bind: FloatBind,
+        on_change: Rc<dyn Fn(&mut Ctx, f32)>,
+    },
     /// Engine-drawn content (slots, 3D previews) identified by a tag.
-    Custom { tag: u32, data: u64 },
+    Custom {
+        tag: u32,
+        data: u64,
+    },
 }
 
 pub struct Node {
@@ -341,17 +383,25 @@ impl Ui {
     }
 
     fn scroll_key(&self, id: NodeId) -> String {
-        self.nodes[id].id.clone().unwrap_or_else(|| format!("#{id}"))
+        self.nodes[id]
+            .id
+            .clone()
+            .unwrap_or_else(|| format!("#{id}"))
     }
 
     /// Scrolls the innermost scrolling node under `p` by `lines` wheel steps; true if one moved.
     pub fn scroll_at(&mut self, p: Vec2, lines: f32) -> bool {
-        let Some(id) = (0..self.nodes.len()).rev().find(|&i| self.nodes[i].style.scroll && self.nodes[i].rect.contains(p) && self.nodes[i].clip.is_none_or(|c| c.contains(p))) else {
+        let Some(id) = (0..self.nodes.len())
+            .rev()
+            .find(|&i| self.nodes[i].style.scroll && self.nodes[i].rect.contains(p) && self.nodes[i].clip.is_none_or(|c| c.contains(p)))
+        else {
             return false;
         };
+        // Held to its end, a node counts from there: up is further from it.
+        let by = if self.nodes[id].style.justify == Justify::End { lines } else { -lines };
         let key = self.scroll_key(id);
         let v = self.scroll.entry(key).or_default();
-        *v = (*v - lines * 20.0).max(0.0);
+        *v = (*v + by * 20.0).max(0.0);
         self.dirty = true;
         true
     }
@@ -359,7 +409,9 @@ impl Ui {
     /// Mouse pressed at `p`: on a scroll bar it starts dragging (a click on the track jumps
     /// there). True if a bar took the click.
     pub fn bar_press(&mut self, p: Vec2) -> bool {
-        let hit = (0..self.nodes.len()).rev().find(|&i| self.nodes[i].scrollbar.is_some_and(|b| b.track.contains(p)) && self.nodes[i].clip.is_none_or(|c| c.contains(p)));
+        let hit = (0..self.nodes.len())
+            .rev()
+            .find(|&i| self.nodes[i].scrollbar.is_some_and(|b| b.track.contains(p)) && self.nodes[i].clip.is_none_or(|c| c.contains(p)));
         let Some(id) = hit else { return false };
         self.dragging = Some(id);
         self.bar_drag(p);
@@ -374,7 +426,9 @@ impl Ui {
             return false;
         };
         let key = self.scroll_key(id);
-        self.scroll.insert(key, bar.offset_at(p.y));
+        let at = bar.offset_at(p.y);
+        let at = if self.nodes[id].style.justify == Justify::End { bar.max - at } else { at };
+        self.scroll.insert(key, at);
         self.dirty = true;
         true
     }
@@ -393,7 +447,19 @@ impl Ui {
 
     pub fn add(&mut self, kind: Kind, style: Style) -> NodeId {
         let id = self.nodes.len();
-        self.nodes.push(Node { kind, style, children: Vec::new(), rect: Rect::default(), id: None, tooltip: None, icon: None, measured: [0.0; 2], clip: None, scrollbar: None, recipes: false });
+        self.nodes.push(Node {
+            kind,
+            style,
+            children: Vec::new(),
+            rect: Rect::default(),
+            id: None,
+            tooltip: None,
+            icon: None,
+            measured: [0.0; 2],
+            clip: None,
+            scrollbar: None,
+            recipes: false,
+        });
         let parent = *self.stack.last().unwrap();
         self.nodes[parent].children.push(id);
         self.dirty = true;
@@ -552,7 +618,9 @@ impl Ui {
         } else {
             match &self.nodes[id].kind {
                 Kind::Item { .. } => [16.0, 16.0],
-                Kind::Icons { count, dir, .. } if matches!(*dir, weft_abi::ui_dir::UP | weft_abi::ui_dir::DOWN) => [9.0, *count as f32 * 8.0 + 1.0],
+                Kind::Icons { count, dir, .. } if matches!(*dir, weft_abi::ui_dir::UP | weft_abi::ui_dir::DOWN) => {
+                    [9.0, *count as f32 * 8.0 + 1.0]
+                }
                 Kind::Icons { count, .. } => [*count as f32 * 8.0 + 1.0, 9.0],
                 Kind::Slider { .. } => [100.0, 12.0],
                 Kind::Input { .. } => [120.0, 18.0],
@@ -560,11 +628,18 @@ impl Ui {
                     let children = self.nodes[id].children.clone();
                     let (mut main, mut cross) = (0.0f32, 0.0f32);
                     // Nodes placed at a point take no room in the flow.
-                    let placed: Vec<NodeId> = children.iter().copied().filter(|&c| self.nodes[c].style.at.is_some()).collect();
+                    let placed: Vec<NodeId> = children
+                        .iter()
+                        .copied()
+                        .filter(|&c| self.nodes[c].style.at.is_some())
+                        .collect();
                     for c in placed {
                         self.measure(c, avail, font);
                     }
-                    let children: Vec<NodeId> = children.into_iter().filter(|&c| self.nodes[c].style.at.is_none()).collect();
+                    let children: Vec<NodeId> = children
+                        .into_iter()
+                        .filter(|&c| self.nodes[c].style.at.is_none())
+                        .collect();
                     for (i, c) in children.iter().enumerate() {
                         let m = self.measure(*c, inner_avail, font);
                         let (cm, cc) = if style.row { (m[0], m[1]) } else { (m[1], m[0]) };
@@ -575,8 +650,14 @@ impl Ui {
                 }
             }
         };
-        let w = fixed_w.unwrap_or(content[0] + pad_w).max(style.min[0]).min(style.max_w);
-        let h = fixed_h.unwrap_or(content[1] + pad_h).max(style.min[1]);
+        let w = fixed_w
+            .unwrap_or(content[0] + pad_w)
+            .max(style.min[0])
+            .min(style.max_w);
+        let h = fixed_h
+            .unwrap_or(content[1] + pad_h)
+            .max(style.min[1])
+            .min(style.max_h);
         self.nodes[id].measured = [w, h];
         [w, h]
     }
@@ -595,7 +676,8 @@ impl Ui {
             // Final fit: wrap to the box we actually got, or shrink if wrapping is off.
             if t.layout.width * t.scale * unit > inner.w + 0.5 {
                 if t.wrap {
-                    t.layout = text::layout_with(&t.spans, font, Some(inner.w / (t.scale * unit)), t.line.unwrap_or(font.line_height), t.mono);
+                    t.layout =
+                        text::layout_with(&t.spans, font, Some(inner.w / (t.scale * unit)), t.line.unwrap_or(font.line_height), t.mono);
                 } else if t.layout.width > 0.0 {
                     t.scale = (inner.w / (t.layout.width * unit)).max(0.25);
                 }
@@ -603,12 +685,19 @@ impl Ui {
             return;
         }
         let children = self.nodes[id].children.clone();
-        let placed: Vec<NodeId> = children.iter().copied().filter(|&c| self.nodes[c].style.at.is_some()).collect();
+        let placed: Vec<NodeId> = children
+            .iter()
+            .copied()
+            .filter(|&c| self.nodes[c].style.at.is_some())
+            .collect();
         for c in placed {
             let ([x, y, px, py], [w, h]) = (self.nodes[c].style.at.unwrap(), self.nodes[c].measured);
             self.arrange(c, Rect { x: inner.x + x - px * w, y: inner.y + y - py * h, w, h }, font);
         }
-        let children: Vec<NodeId> = children.into_iter().filter(|&c| self.nodes[c].style.at.is_none()).collect();
+        let children: Vec<NodeId> = children
+            .into_iter()
+            .filter(|&c| self.nodes[c].style.at.is_none())
+            .collect();
         if children.is_empty() {
             return;
         }
@@ -628,9 +717,21 @@ impl Ui {
                 }
             }
             free = 0.0;
+        } else if free < 0.0 && !style.row {
+            // Too tall: what scrolls gives way, the rest keeps its place.
+            let scrolling: Vec<usize> = (0..children.len())
+                .filter(|&i| self.nodes[children[i]].style.scroll && self.nodes[children[i]].style.h == Len::Auto)
+                .collect();
+            for i in scrolling {
+                let take = (-free).min(sizes[i][1]);
+                sizes[i][1] -= take;
+                free += take;
+            }
         } else if free < 0.0 && style.row {
             // Too wide: squeeze wrapping text children, they re-measure with less width.
-            let texts: Vec<usize> = (0..children.len()).filter(|&i| matches!(self.nodes[children[i]].kind, Kind::Text(_))).collect();
+            let texts: Vec<usize> = (0..children.len())
+                .filter(|&i| matches!(self.nodes[children[i]].kind, Kind::Text(_)))
+                .collect();
             if !texts.is_empty() {
                 let take = -free / texts.len() as f32;
                 for i in texts {
@@ -643,6 +744,7 @@ impl Ui {
             }
         }
         let mut scrolled = 0.0;
+        let mut past_end = 0.0;
         self.nodes[id].scrollbar = None;
         if style.scroll {
             // Content longer than the node scrolls; the offset stays within the content.
@@ -651,18 +753,21 @@ impl Ui {
             let v = self.scroll.entry(key).or_default();
             *v = v.min(max);
             scrolled = *v;
+            past_end = max - scrolled;
             free = free.max(0.0);
             if max > 0.0 && !style.row && cross_size > Scrollbar::ROOM * 2.0 {
                 cross_size -= Scrollbar::ROOM;
                 let track = Rect { x: inner.x + inner.w - Scrollbar::HANDLE[0], y: inner.y, w: Scrollbar::HANDLE[0], h: inner.h };
-                self.nodes[id].scrollbar = Some(Scrollbar { track, offset: scrolled, max });
+                let offset = if style.justify == Justify::End { max - scrolled } else { scrolled };
+                self.nodes[id].scrollbar = Some(Scrollbar { track, offset, max });
             }
         }
         let (mut pos, spacing) = match style.justify {
             Justify::Start => (-scrolled, style.gap),
             Justify::Center => (free.max(0.0) / 2.0, style.gap),
-            // Overflowing content sticks out at the start, the end edge stays put.
-            Justify::End => (free, style.gap),
+            // Overflowing content sticks out at the start, the end edge stays put. Scrolling goes
+            // from there.
+            Justify::End => (free - past_end, style.gap),
             Justify::Between if children.len() > 1 => (0.0, style.gap + free.max(0.0) / (children.len() - 1) as f32),
             Justify::Between => (free.max(0.0) / 2.0, style.gap),
         };

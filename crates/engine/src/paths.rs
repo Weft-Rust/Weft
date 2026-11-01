@@ -22,6 +22,18 @@ impl Dirs {
     }
 }
 
+/// What to start to run the game again. In an AppImage the executable is in a mount that goes
+/// away with this process, so it is the image.
+pub fn own_program() -> std::io::Result<PathBuf> {
+    match std::env::var_os("APPIMAGE")
+        .map(PathBuf::from)
+        .filter(|p| p.has_root())
+    {
+        Some(image) => Ok(image),
+        None => std::env::current_exe(),
+    }
+}
+
 /// The folders of a game installed in `root`.
 pub fn of_install(root: &Path) -> Dirs {
     let run = root.join("run");
@@ -48,8 +60,16 @@ fn per_user(os: &str, env: &dyn Fn(&str) -> Option<PathBuf>) -> Option<Dirs> {
             Some(Dirs { config: data.join("config"), data, cache: library.join("Caches").join("Weft") })
         }
         _ => {
-            let xdg = |k: &str, fallback: &[&str]| var(k).or_else(|| Some(fallback.iter().fold(home.clone()?, |p, s| p.join(s)))).map(|p| p.join("weft"));
-            Some(Dirs { data: xdg("XDG_DATA_HOME", &[".local", "share"])?, config: xdg("XDG_CONFIG_HOME", &[".config"])?, cache: xdg("XDG_CACHE_HOME", &[".cache"])? })
+            let xdg = |k: &str, fallback: &[&str]| {
+                var(k)
+                    .or_else(|| Some(fallback.iter().fold(home.clone()?, |p, s| p.join(s))))
+                    .map(|p| p.join("weft"))
+            };
+            Some(Dirs {
+                data: xdg("XDG_DATA_HOME", &[".local", "share"])?,
+                config: xdg("XDG_CONFIG_HOME", &[".config"])?,
+                cache: xdg("XDG_CACHE_HOME", &[".cache"])?,
+            })
         }
     }
 }
@@ -63,7 +83,10 @@ pub fn set_config(dir: PathBuf) {
 
 /// The player's settings, keys and lists; `<run_dir>/config` unless told otherwise.
 pub fn config(run_dir: &Path) -> PathBuf {
-    CONFIG.get().cloned().unwrap_or_else(|| run_dir.join("config"))
+    CONFIG
+        .get()
+        .cloned()
+        .unwrap_or_else(|| run_dir.join("config"))
 }
 
 #[cfg(test)]
@@ -81,14 +104,22 @@ mod tests {
         assert_eq!(d.data, home.join(".local").join("share").join("weft"));
         assert_eq!(d.config, home.join(".config").join("weft"));
         assert_eq!(d.cache, home.join(".cache").join("weft"));
-        let d = per_user("linux", &env(&[("HOME", "/home/a"), ("XDG_DATA_HOME", "/d"), ("XDG_CONFIG_HOME", "/c"), ("XDG_CACHE_HOME", "/k")])).unwrap();
+        let d =
+            per_user("linux", &env(&[("HOME", "/home/a"), ("XDG_DATA_HOME", "/d"), ("XDG_CONFIG_HOME", "/c"), ("XDG_CACHE_HOME", "/k")]))
+                .unwrap();
         assert_eq!((d.data, d.config, d.cache), (PathBuf::from("/d/weft"), PathBuf::from("/c/weft"), PathBuf::from("/k/weft")));
     }
 
     #[test]
     fn linux_ignores_relative_xdg_values() {
         let d = per_user("linux", &env(&[("HOME", "/home/a"), ("XDG_DATA_HOME", "here")])).unwrap();
-        assert_eq!(d.data, PathBuf::from("/home/a").join(".local").join("share").join("weft"));
+        assert_eq!(
+            d.data,
+            PathBuf::from("/home/a")
+                .join(".local")
+                .join("share")
+                .join("weft")
+        );
     }
 
     #[test]
@@ -107,8 +138,20 @@ mod tests {
     #[test]
     fn macos_uses_the_library() {
         let d = per_user("macos", &env(&[("HOME", "/Users/a")])).unwrap();
-        assert_eq!(d.data, PathBuf::from("/Users/a").join("Library").join("Application Support").join("Weft"));
-        assert_eq!(d.cache, PathBuf::from("/Users/a").join("Library").join("Caches").join("Weft"));
+        assert_eq!(
+            d.data,
+            PathBuf::from("/Users/a")
+                .join("Library")
+                .join("Application Support")
+                .join("Weft")
+        );
+        assert_eq!(
+            d.cache,
+            PathBuf::from("/Users/a")
+                .join("Library")
+                .join("Caches")
+                .join("Weft")
+        );
     }
 
     #[test]

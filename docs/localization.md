@@ -59,7 +59,8 @@ fn effect(g: Glyph) -> Glyph {
 The engine's are `creative`, `survival`, `spectator`, `debug` and `dev`. Your own are registered in the mod
 and read the client, so they see the local player only:
 ```rust
-r.text_condition("charged", |v| v.player_component(&CHARGE).is_some_and(|c| *c > 0));
+static CHARGED: TextCondition = TextCondition::named("charged");
+r.text_condition(&CHARGED, |v| v.component(&CHARGE).is_some_and(|c| *c > 0));
 ```
 then `{if:mymod:charged}Charged!{/if}` in any translation.
 
@@ -78,7 +79,7 @@ What the part of a picture looks like is up to the files next to it:
 - **`<picture>_<frame>`:** when a number is over 1 they are frames of one turn, the share picks the nearest. `clock_0.png` to `clock_23.png` is a clock: 0.5 is `clock_12`.
 - **`<stem>_half`** is vanilla's name for the half of `<stem>_full`, so `food_full` and `food_half` work as they are.
 
-The same goes for the HUD's bars (`ui.icons`, `ui.icons_rtl`, `ui.icons_dir(class, count, ui_dir::UP, ..)`) and for the fill of a progress bar. They have a direction of their own instead of a mirrored picture.
+The same goes for the HUD's bars (`ui.icons(..)`, with `.rtl()` or `.dir(abi::ui_dir::UP)`) and for the fill of a progress bar. They have a direction of their own instead of a mirrored picture.
 
 ## Item tooltips
 Hovering an item or block shows its name, and `<name key>.tooltip` under it if the language has one.\

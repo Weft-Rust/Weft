@@ -5,7 +5,7 @@
 use std::path::{Path, PathBuf};
 
 use crate::config;
-use crate::input::{Chord, Input, Key};
+use crate::input::{Chord, Input};
 
 #[derive(Clone)]
 pub struct Settings {
@@ -27,8 +27,33 @@ fn number(name: &str) -> f64 {
     config::get(id(name))
 }
 
+/// How the chat is shown, as its settings have it.
+#[derive(Clone, Copy, PartialEq)]
+pub struct ChatLook {
+    pub width: f32,
+    /// The most it takes up open, and shown over the game.
+    pub open_height: f32,
+    pub closed_height: f32,
+    /// Of the dark behind it, 0..255.
+    pub dim: u8,
+}
+
+pub fn chat_look() -> ChatLook {
+    ChatLook {
+        width: number("core:chat_width") as f32,
+        open_height: number("core:chat_height") as f32,
+        closed_height: number("core:chat_height_closed") as f32,
+        dim: (number("core:chat_opacity") * 2.55) as u8,
+    }
+}
+
 fn list(name: &str) -> Vec<String> {
-    config::text(id(name)).split(',').map(str::trim).filter(|p| !p.is_empty()).map(String::from).collect()
+    config::text(id(name))
+        .split(',')
+        .map(str::trim)
+        .filter(|p| !p.is_empty())
+        .map(String::from)
+        .collect()
 }
 
 impl Settings {
@@ -111,7 +136,7 @@ impl Settings {
     pub fn apply_binds(&self, input: &mut Input) {
         let actions: Vec<String> = input.binds.iter().map(|b| b.action.clone()).collect();
         for action in actions {
-            match parse_chord(&config::text(id(&format!("core:key.{action}")))) {
+            match Chord::parse(&config::text(id(&format!("core:key.{action}")))) {
                 Some(k) => input.rebind(&action, k),
                 None => log::warn!("key binding {action}: unknown key {}", config::text(id(&format!("core:key.{action}")))),
             }
@@ -119,7 +144,7 @@ impl Settings {
     }
 
     pub fn set_bind(&self, action: &str, key: Chord) {
-        config::set_text(id(&format!("core:key.{action}")), &chord_id(key));
+        config::set_text(id(&format!("core:key.{action}")), &Chord::id(key));
     }
 }
 
@@ -134,13 +159,19 @@ pub fn migrate(run_dir: &Path) {
         match k {
             "resource_pack" => packs.push(v),
             "relay" => relays.push(v),
-            _ => out.push_str(&format!("{k} = {v}
-")),
+            _ => out.push_str(&format!(
+                "{k} = {v}
+"
+            )),
         }
     }
-    out.push_str(&format!("resource_packs = {}
+    out.push_str(&format!(
+        "resource_packs = {}
 relays = {}
-", packs.join(","), relays.join(",")));
+",
+        packs.join(","),
+        relays.join(",")
+    ));
     if std::fs::write(&new, out).is_ok() {
         let _ = std::fs::remove_file(&old);
     }
@@ -163,96 +194,4 @@ fn sys_locale_ru() -> bool {
 #[cfg(not(windows))]
 fn sys_locale_ru() -> bool {
     false
-}
-
-pub fn key_id(k: Key) -> String {
-    match k {
-        Key::Mouse(b) => format!("mouse{b}"),
-        Key::Code(c) => format!("{c:?}"),
-    }
-}
-
-const MODIFIERS: [(u8, &str); 3] = [(crate::input::CTRL, "ctrl"), (crate::input::SHIFT, "shift"), (crate::input::ALT, "alt")];
-
-/// `ctrl+shift+KeyT`: the modifiers, then the key.
-pub fn chord_id(c: Chord) -> String {
-    let mut out = String::new();
-    for (bit, name) in MODIFIERS {
-        if c.mods & bit != 0 {
-            out += name;
-            out.push('+');
-        }
-    }
-    out + &key_id(c.key)
-}
-
-/// A key with modifiers in front (`ctrl+T`, `shift+alt+F6`), or a key alone.
-pub fn parse_chord(s: &str) -> Option<Chord> {
-    let mut parts: Vec<&str> = s.split('+').map(str::trim).collect();
-    let key = parse_key(parts.pop()?)?;
-    let mut mods = 0;
-    for p in parts {
-        mods |= MODIFIERS.iter().find(|m| m.1.eq_ignore_ascii_case(p) || (m.1 == "ctrl" && p.eq_ignore_ascii_case("control")))?.0;
-    }
-    Some(Chord { key, mods })
-}
-
-pub fn parse_key(s: &str) -> Option<Key> {
-    if let Some(b) = s.strip_prefix("mouse") {
-        return b.parse().ok().map(Key::Mouse);
-    }
-    use winit::keyboard::KeyCode::*;
-    const ALL: &[winit::keyboard::KeyCode] = &[
-        KeyA, KeyB, KeyC, KeyD, KeyE, KeyF, KeyG, KeyH, KeyI, KeyJ, KeyK, KeyL, KeyM, KeyN, KeyO, KeyP, KeyQ, KeyR, KeyS,
-        KeyT, KeyU, KeyV, KeyW, KeyX, KeyY, KeyZ, Digit0, Digit1, Digit2, Digit3, Digit4, Digit5, Digit6, Digit7,
-        Digit8, Digit9, F1, F2, F3, F4, F5, F6, F7, F8, F9, F10, F11, F12, Space, Enter, Tab, Backspace, Escape,
-        ShiftLeft, ShiftRight, ControlLeft, ControlRight, AltLeft, AltRight, ArrowUp, ArrowDown, ArrowLeft,
-        ArrowRight, Minus, Equal, BracketLeft, BracketRight, Backslash, Semicolon, Quote, Comma, Period, Slash,
-        Backquote, CapsLock, Insert, Delete, Home, End, PageUp, PageDown, Numpad0, Numpad1, Numpad2, Numpad3,
-        Numpad4, Numpad5, Numpad6, Numpad7, Numpad8, Numpad9, NumpadAdd, NumpadSubtract, NumpadMultiply, NumpadDivide,
-        NumpadDecimal, NumpadEnter, NumpadEqual, NumLock, ScrollLock, PrintScreen, Pause, ContextMenu, IntlBackslash,
-        F13, F14, F15, F16, F17, F18, F19, F20, F21, F22, F23, F24, SuperLeft, SuperRight,
-    ];
-    // Short names ("R", "5", "space", "lshift") as well as winit's ("KeyR", "Digit5", "ShiftLeft").
-    let short = match s.to_ascii_lowercase().as_str() {
-        l if l.len() == 1 && l.as_bytes()[0].is_ascii_alphabetic() => format!("Key{}", l.to_ascii_uppercase()),
-        l if l.len() == 1 && l.as_bytes()[0].is_ascii_digit() => format!("Digit{l}"),
-        "lshift" | "shift" => "ShiftLeft".into(),
-        "rshift" => "ShiftRight".into(),
-        "lctrl" | "ctrl" | "control" => "ControlLeft".into(),
-        "rctrl" => "ControlRight".into(),
-        "lalt" | "alt" => "AltLeft".into(),
-        "ralt" => "AltRight".into(),
-        "esc" => "Escape".into(),
-        "up" => "ArrowUp".into(),
-        "down" => "ArrowDown".into(),
-        "left" => "ArrowLeft".into(),
-        "right" => "ArrowRight".into(),
-        _ => s.into(),
-    };
-    ALL.iter().find(|c| format!("{c:?}").eq_ignore_ascii_case(&short)).map(|c| Key::Code(*c))
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use winit::keyboard::KeyCode;
-
-    #[test]
-    fn key_names() {
-        assert_eq!(parse_key("R"), Some(Key::Code(KeyCode::KeyR)));
-        assert_eq!(parse_key("KeyR"), Some(Key::Code(KeyCode::KeyR)));
-        assert_eq!(parse_key("5"), Some(Key::Code(KeyCode::Digit5)));
-        assert_eq!(parse_key("space"), Some(Key::Code(KeyCode::Space)));
-        assert_eq!(parse_key("LShift"), Some(Key::Code(KeyCode::ShiftLeft)));
-        assert_eq!(parse_key("F6"), Some(Key::Code(KeyCode::F6)));
-        assert_eq!(parse_key("mouse3"), Some(Key::Mouse(3)));
-        assert_eq!(parse_key("Rr"), None);
-        assert_eq!(parse_chord("ctrl+T"), Some(Chord { key: Key::Code(KeyCode::KeyT), mods: crate::input::CTRL }));
-        assert_eq!(parse_chord("Shift + Alt + F6"), Some(Chord { key: Key::Code(KeyCode::F6), mods: crate::input::SHIFT | crate::input::ALT }));
-        assert_eq!(parse_chord("LShift"), Some(Chord { key: Key::Code(KeyCode::ShiftLeft), mods: 0 }));
-        assert_eq!(parse_chord("meta+T"), None);
-        let c = parse_chord("ctrl+shift+R").unwrap();
-        assert_eq!(parse_chord(&chord_id(c)), Some(c));
-    }
 }

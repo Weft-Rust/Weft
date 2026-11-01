@@ -50,7 +50,8 @@ impl Gizmos {
         let mut groups: Vec<&str> = shapes.iter().map(|s| s.group.as_str()).collect();
         groups.sort_unstable();
         groups.dedup();
-        self.shapes.retain(|(s, _)| groups.binary_search(&s.group.as_str()).is_err());
+        self.shapes
+            .retain(|(s, _)| groups.binary_search(&s.group.as_str()).is_err());
         for s in shapes {
             if self.on(&s.group) {
                 let until = now + std::time::Duration::from_secs_f64(s.ticks as f64 * crate::world::TICK);
@@ -88,7 +89,11 @@ impl Gizmos {
             }
         }
         if self.on("hitboxes") {
-            for e in client.entities.values().filter(|e| (e.pos - me).length_squared() < 64.0 * 64.0) {
+            for e in client
+                .entities
+                .values()
+                .filter(|e| (e.pos - me).length_squared() < 64.0 * 64.0)
+            {
                 let (hw, h, eye) = e.dims();
                 cuboid(&mut lines, e.pos - DVec3::new(hw, 0.0, hw), e.pos + DVec3::new(hw, h, hw), 0xFFFFFFFF);
                 let eye = e.pos + DVec3::Y * eye;
@@ -118,15 +123,25 @@ impl Gizmos {
             // (light = sky light times daylight, or block light, whichever is more): red where
             // monsters may spawn now, yellow where they may at night, green where never.
             let dim = client.world.dim;
-            let hostile = |s: &&crate::registry::SpawnRule| c.game.categories[s.category as usize].name == "core:hostile" && s.dimension.is_none_or(|d| d == dim);
-            let rules: Vec<[u32; 2]> = c.game.spawns.iter().filter(hostile).map(|s| s.light).collect();
+            let hostile = |s: &&crate::registry::SpawnRule| {
+                c.game.categories[s.category as usize].name == "core:hostile" && s.dimension.is_none_or(|d| d == dim)
+            };
+            let rules: Vec<[u32; 2]> = c
+                .game
+                .spawns
+                .iter()
+                .filter(hostile)
+                .map(|s| s.light)
+                .collect();
             let day = client.daylight();
             let spawns = |light: u32| rules.iter().any(|r| (r[0]..=r[1]).contains(&light));
             for dy in -4..=4 {
                 for dz in -6..=6 {
                     for dx in -6..=6 {
                         let p = feet + IVec3::new(dx, dy, dz);
-                        let (Some(below), Some(here)) = (client.world.block_or_air(p - IVec3::Y), client.world.block_or_air(p)) else { continue };
+                        let (Some(below), Some(here)) = (client.world.block_or_air(p - IVec3::Y), client.world.block_or_air(p)) else {
+                            continue;
+                        };
                         let solid = |s: u32| c.states[s as usize].flags & weft_abi::block_flags::SOLID != 0;
                         if !solid(below) || solid(here) {
                             continue;
@@ -141,7 +156,12 @@ impl Gizmos {
                         } else {
                             0x60FF60FF
                         };
-                        labels.push((p.as_dvec3() + DVec3::new(0.5, 0.05, 0.5), crate::ui::text::Msg::new("gizmo.value", vec![crate::ui::text::Arg::Int(block as i64)]), color, 1.0));
+                        labels.push((
+                            p.as_dvec3() + DVec3::new(0.5, 0.05, 0.5),
+                            crate::ui::text::Msg::new("gizmo.value", vec![crate::ui::text::Arg::Int(block as i64)]),
+                            color,
+                            1.0,
+                        ));
                     }
                 }
             }

@@ -69,6 +69,7 @@ pub const COMMANDS: &[(&str, &str, Handler, u32)] = &[
     ("heal", "[who:targets]", heal, p::GAME_MASTER),
     ("tick", "query | rate <tps:int> | freeze | unfreeze | step [ticks:int] | sprint <ticks:int>", tick, p::ADMIN),
     ("regions", "", regions, p::GAME_MASTER),
+    ("seed", "", seed, p::GAME_MASTER),
     ("weather", "clear [ticks:int] | rain [ticks:int] | thunder [ticks:int]", weather, p::GAME_MASTER),
     ("op", "<who:targets> [level:int]", op, p::ADMIN),
     ("deop", "<who:targets>", deop, p::ADMIN),
@@ -78,9 +79,39 @@ pub const COMMANDS: &[(&str, &str, Handler, u32)] = &[
 fn help(s: &mut Server, x: &Ctx) -> Vec<Msg> {
     let (c, a) = (x.c, x.a);
     match a.text("command") {
-        Some(n) => c.commands.iter().find(|d| d.name == n).map_or_else(|| say("unknown", vec![text(n)]), |d| say("usage_line", vec![text(&d.name), text(&d.usage)])),
-        None => c.commands.iter().filter(|d| d.level <= s.permission_of(x.pi)).flat_map(|d| say("usage_line", vec![text(&d.name), text(&d.usage)])).collect(),
+        Some(n) => c
+            .commands
+            .iter()
+            .find(|d| d.name == n)
+            .map_or_else(|| say("unknown", vec![text(n)]), |d| say("usage_line", vec![text(&d.name), text(&d.usage)])),
+        None => c
+            .commands
+            .iter()
+            .filter(|d| d.level <= s.permission_of(x.pi))
+            .flat_map(|d| say("usage_line", vec![text(&d.name), text(&short_usage(&d.usage))]))
+            .collect(),
     }
+}
+
+/// A command's usage for the list of them: a line. `/help <command>` has it all.
+fn short_usage(usage: &str) -> String {
+    const ROOM: usize = 80;
+    let mut out = String::new();
+    for alt in usage.split(" | ") {
+        if !out.is_empty() && out.len() + alt.len() + 3 > ROOM {
+            out.push_str(" | ...");
+            break;
+        }
+        if !out.is_empty() {
+            out.push_str(" | ");
+        }
+        out.push_str(alt);
+    }
+    out
+}
+
+fn seed(s: &mut Server, x: &Ctx) -> Vec<Msg> {
+    say("seed.done", vec![text(&crate::saves::shown_seed(s.dims[x.me.0 as usize].seed()))])
 }
 
 fn tp(s: &mut Server, x: &Ctx) -> Vec<Msg> {
@@ -88,9 +119,10 @@ fn tp(s: &mut Server, x: &Ctx) -> Vec<Msg> {
     let who = x.targets(s, "who");
     let dest = match (a.pos("pos"), a.get("to")) {
         (Some(p), _) => Some((me.0, p)),
-        (None, Some(crate::commands::Value::Targets(sel))) => {
-            s.select(pi, sel, here).first().and_then(|&(d, id)| s.position_of(d, id).map(|p| (d, p)))
-        }
+        (None, Some(crate::commands::Value::Targets(sel))) => s
+            .select(pi, sel, here)
+            .first()
+            .and_then(|&(d, id)| s.position_of(d, id).map(|p| (d, p))),
         _ => None,
     };
     let Some((to_dim, pos)) = dest else { return say("tp.nowhere", Vec::new()) };
@@ -118,7 +150,10 @@ fn give(s: &mut Server, x: &Ctx) -> Vec<Msg> {
     let mut given = 0;
     for (d, id) in x.targets(s, "who") {
         if let Some(r) = s.dims[d as usize].entity_region(id) {
-            given += count - r.entities.insert_item(c, id, ItemStack::new(item, count)).count;
+            given += count
+                - r.entities
+                    .insert_item(c, id, ItemStack::new(item, count))
+                    .count;
         }
     }
     say("give.done", vec![int(given), Arg::Name(Name::Item(item))])
@@ -193,7 +228,9 @@ fn insert(s: &mut Server, x: &Ctx) -> Vec<Msg> {
     match s.dims[dim as usize].region_at(p) {
         Some(r) => match r.anchored(p) {
             Some(owner) => {
-                let left = r.entities.insert_item(c, owner, ItemStack::new(item, count));
+                let left = r
+                    .entities
+                    .insert_item(c, owner, ItemStack::new(item, count));
                 say("insert.done", vec![int(count - left.count), Arg::Name(Name::Item(item))])
             }
             None => say("insert.no_entity", Vec::new()),
@@ -215,8 +252,15 @@ fn block(s: &mut Server, x: &Ctx) -> Vec<Msg> {
 
 fn game_mode(s: &mut Server, x: &Ctx) -> Vec<Msg> {
     let a = x.a;
-    let mode = GameMode::ALL.into_iter().find(|m| a.get(m.name()).is_some()).unwrap_or_default();
-    let who: Vec<usize> = x.targets(s, "who").iter().filter_map(|t| s.player_index(t.1)).collect();
+    let mode = GameMode::ALL
+        .into_iter()
+        .find(|m| a.get(m.name()).is_some())
+        .unwrap_or_default();
+    let who: Vec<usize> = x
+        .targets(s, "who")
+        .iter()
+        .filter_map(|t| s.player_index(t.1))
+        .collect();
     for &p in &who {
         s.set_mode(p, mode);
     }
@@ -251,7 +295,9 @@ fn set_level(s: &mut Server, x: &Ctx, level: u32) -> Vec<Msg> {
 }
 
 fn op(s: &mut Server, x: &Ctx) -> Vec<Msg> {
-    let level = x.a.int("level").map_or(weft_abi::permission::OWNER, |l| l.clamp(0, weft_abi::permission::OWNER as i64) as u32);
+    let level =
+        x.a.int("level")
+            .map_or(weft_abi::permission::OWNER, |l| l.clamp(0, weft_abi::permission::OWNER as i64) as u32);
     set_level(s, x, level)
 }
 
@@ -313,7 +359,11 @@ fn regions(s: &mut Server, x: &Ctx) -> Vec<Msg> {
         .iter()
         .filter(|d| !d.regions.is_empty())
         .map(|d| {
-            let sizes: Vec<String> = d.regions.iter().map(|r| format!("{}/{}", r.space.cubes.len(), r.entities.list.len())).collect();
+            let sizes: Vec<String> = d
+                .regions
+                .iter()
+                .map(|r| format!("{}/{}", r.space.cubes.len(), r.entities.list.len()))
+                .collect();
             format!("{}: {} ({})", c.dims[d.id as usize].name, d.regions.len(), sizes.join(" "))
         })
         .collect();
@@ -323,12 +373,24 @@ fn regions(s: &mut Server, x: &Ctx) -> Vec<Msg> {
 /// The world's settings (`config_scope::WORLD`), like vanilla's game rules.
 fn rule(_s: &mut Server, x: &Ctx) -> Vec<Msg> {
     let (c, a) = (x.c, x.a);
-    let rules: Vec<(u32, &crate::config::ConfigDef)> = c.game.configs.iter().enumerate().filter(|(_, d)| d.scope == weft_abi::config_scope::WORLD).map(|(i, d)| (i as u32, d)).collect();
+    let rules: Vec<(u32, &crate::config::ConfigDef)> = c
+        .game
+        .configs
+        .iter()
+        .enumerate()
+        .filter(|(_, d)| d.scope == weft_abi::config_scope::WORLD)
+        .map(|(i, d)| (i as u32, d))
+        .collect();
     let value = |id: u32, d: &crate::config::ConfigDef| say("rule.value", vec![text(&d.name), text(&d.show(crate::config::get(id)))]);
     let Some(name) = a.text("name") else {
         return rules.iter().flat_map(|&(id, d)| value(id, d)).collect();
     };
-    let Some(&(id, d)) = rules.iter().find(|r| r.1.name == name || r.1.name.rsplit(':').next() == Some(name)) else { return say("rule.unknown", vec![text(name)]) };
+    let Some(&(id, d)) = rules
+        .iter()
+        .find(|r| r.1.name == name || r.1.name.rsplit(':').next() == Some(name))
+    else {
+        return say("rule.unknown", vec![text(name)]);
+    };
     if let Some(v) = a.int("value") {
         crate::config::set(id, v as f64);
     }

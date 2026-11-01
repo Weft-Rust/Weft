@@ -30,7 +30,13 @@ pub type Column = abi::TerrainColumn;
 /// Where a feature applies, 0..1.
 #[derive(Clone)]
 pub enum Mask {
-    Noise { salt: u64, scale: f64, octaves: u32, from: f64, to: f64 },
+    Noise {
+        salt: u64,
+        scale: f64,
+        octaves: u32,
+        from: f64,
+        to: f64,
+    },
     Continent(f64, f64),
     Temperature(f64, f64),
     Humidity(f64, f64),
@@ -70,7 +76,9 @@ impl Mask {
         use abi::terrain_mask as k;
         let step = abi::MaskStep::DEFAULT;
         match self {
-            &Mask::Noise { salt, scale, octaves, from, to } => out.push(abi::MaskStep { kind: k::NOISE, salt, scale, octaves, from, to, ..step }),
+            &Mask::Noise { salt, scale, octaves, from, to } => {
+                out.push(abi::MaskStep { kind: k::NOISE, salt, scale, octaves, from, to, ..step })
+            }
             &Mask::Continent(from, to) => out.push(abi::MaskStep { kind: k::CONTINENT, from, to, ..step }),
             &Mask::Temperature(from, to) => out.push(abi::MaskStep { kind: k::TEMPERATURE, from, to, ..step }),
             &Mask::Humidity(from, to) => out.push(abi::MaskStep { kind: k::HUMIDITY, from, to, ..step }),
@@ -280,7 +288,17 @@ impl BiomeRule {
     /// Its names, qualified with `ns`, in the order `desc` reads them.
     pub(crate) fn names(&self, ns: &str) -> [String; 8] {
         let q = |s: &str| if s.is_empty() { String::new() } else { qualify(ns, s) };
-        [if self.name.is_empty() { &self.biome } else { &self.name }, &self.biome, &self.feature.0, &self.top, &self.filler, &self.under.0, &self.deep_top.0, &self.ice].map(|s| q(s))
+        [
+            if self.name.is_empty() { &self.biome } else { &self.name },
+            &self.biome,
+            &self.feature.0,
+            &self.top,
+            &self.filler,
+            &self.under.0,
+            &self.deep_top.0,
+            &self.ice,
+        ]
+        .map(|s| q(s))
     }
 
     pub(crate) fn desc(&self, names: &[String; 8]) -> abi::BiomeRuleDesc {
@@ -389,7 +407,8 @@ impl TerrainBuilder<'_> {
             if let Some(m) = &f.mask {
                 m.steps(&mut steps);
             }
-            feature = abi::FeatureDesc { name: Str::new(&fname), preset: f.preset, params: f.params, height: f.height, mask: Slice::new(&steps) };
+            feature =
+                abi::FeatureDesc { name: Str::new(&fname), preset: f.preset, params: f.params, height: f.height, mask: Slice::new(&steps) };
         }
         let r = o.rule.unwrap_or_else(BiomeRule::blank);
         let names = r.names(self.ns);
@@ -498,14 +517,26 @@ impl Registry {
     /// });
     /// ```
     pub fn scatter<'a>(&'a mut self, scatter: &Scatter) -> ScatterBuilder<'a> {
-        ScatterBuilder { raw: self.raw, name: scatter.name().to_string(), dimensions: String::new(), density: String::new(), desc: abi::ScatterDesc::DEFAULT, _p: PhantomData }
+        ScatterBuilder {
+            raw: self.raw,
+            name: scatter.name().to_string(),
+            dimensions: String::new(),
+            density: String::new(),
+            desc: abi::ScatterDesc::DEFAULT,
+            _p: PhantomData,
+        }
     }
 
     /// Runs `f` on every generated cube after the generator and scatters (grass, flowers,
     /// boulders), in every dimension but bare ones unless `.dimension(..)` limits it.
     /// `g.columns()` has the surface of every column. Pure, like a generator.
     pub fn decorate<'a>(&'a mut self, f: impl Fn(&mut Gen) + Send + Sync + 'static) -> DecorationBuilder<'a> {
-        DecorationBuilder { raw: self.raw, dimensions: String::new(), cb: callback(move |a: &mut abi::GenArgs| f(Gen::wrap(a))), _p: PhantomData }
+        DecorationBuilder {
+            raw: self.raw,
+            dimensions: String::new(),
+            cb: callback(move |a: &mut abi::GenArgs| f(Gen::wrap(a))),
+            _p: PhantomData,
+        }
     }
 }
 
@@ -552,7 +583,12 @@ impl Drop for ScatterBuilder<'_> {
         if std::thread::panicking() {
             return;
         }
-        let desc = abi::ScatterDesc { name: Str::new(&self.name), dimensions: Str::new(&self.dimensions), density: Str::new(&self.density), ..self.desc };
+        let desc = abi::ScatterDesc {
+            name: Str::new(&self.name),
+            dimensions: Str::new(&self.dimensions),
+            density: Str::new(&self.density),
+            ..self.desc
+        };
         unsafe { (host().reg_scatter)(self.raw, &desc) }
     }
 }

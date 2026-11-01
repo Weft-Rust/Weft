@@ -82,7 +82,17 @@ pub fn local_index(p: IVec3) -> usize {
     cube::index((p.x & 15) as usize, (p.y & 15) as usize, (p.z & 15) as usize)
 }
 
-pub const DIRS: [IVec3; 6] = [IVec3::NEG_X, IVec3::X, IVec3::NEG_Y, IVec3::Y, IVec3::NEG_Z, IVec3::Z];
+pub const DIRS: [IVec3; 6] = {
+    let d = weft_abi::FACE_DIRS;
+    [
+        IVec3::new(d[0][0], d[0][1], d[0][2]),
+        IVec3::new(d[1][0], d[1][1], d[1][2]),
+        IVec3::new(d[2][0], d[2][1], d[2][2]),
+        IVec3::new(d[3][0], d[3][1], d[3][2]),
+        IVec3::new(d[4][0], d[4][1], d[4][2]),
+        IVec3::new(d[5][0], d[5][1], d[5][2]),
+    ]
+};
 
 pub use weft_noise::{Rng, mix};
 
@@ -102,6 +112,3 @@ pub fn block_bounds<'a>(cubes: impl Iterator<Item = (&'a IVec3, &'a cube::Cube)>
     }
     out
 }
-
-
-

@@ -12,10 +12,10 @@ use weft_render::*;
 use crate::assets::Assets;
 use crate::components::ENTITY;
 use crate::content::content;
-use crate::model::{self, Bound, Motion};
-use crate::registry::Part;
 pub use crate::gpu_layout::Instance;
 use crate::gpu_layout::{GpuCorner, GpuCuboid};
+use crate::model::{self, Bound, Motion};
+use crate::registry::Part;
 
 /// A kind's model and animations.
 pub struct KindModel {
@@ -93,8 +93,17 @@ pub struct Models {
 fn load_kind(assets: &Assets, k: u32) -> (Vec<Part>, Option<[u32; 2]>, Vec<model::Animation>) {
     let c = content();
     let kind = &c.game.entities[k as usize];
-    let named = |key: &str| c.components.id(key).and_then(|id| c.components.text(ENTITY, k, id)).map(str::to_string);
-    let file = |name: &str, kind: &str, ext: &str| assets.read(name, kind, ext).map(|b| String::from_utf8_lossy(&b).into_owned());
+    let named = |key: &str| {
+        c.components
+            .id(key)
+            .and_then(|id| c.components.text(ENTITY, k, id))
+            .map(str::to_string)
+    };
+    let file = |name: &str, kind: &str, ext: &str| {
+        assets
+            .read(name, kind, ext)
+            .map(|b| String::from_utf8_lossy(&b).into_owned())
+    };
     let (mut parts, mut texture) = (kind.parts.clone(), None);
     let model_name = named(comp::MODEL).unwrap_or_else(|| kind.name.clone());
     if let Some(src) = file(&model_name, "models", "geo.json") {
@@ -143,14 +152,36 @@ impl Models {
             for (b, p) in parts.iter().enumerate() {
                 for cu in &p.cuboids {
                     let origin = [p.pivot[0] + cu.origin[0], p.pivot[1] + cu.origin[1], p.pivot[2] + cu.origin[2]];
-                    cuboids.push(GpuCuboid { origin, bone: b as u32, size: cu.size, inflate: cu.inflate, faces: cu.face_rects(), role: p.role, pad0: 0, pad1: 0, pad2: 0 });
+                    cuboids.push(GpuCuboid {
+                        origin,
+                        bone: b as u32,
+                        size: cu.size,
+                        inflate: cu.inflate,
+                        faces: cu.face_rects(),
+                        role: p.role,
+                        pad0: 0,
+                        pad1: 0,
+                        pad2: 0,
+                    });
                 }
-                corners.extend(p.mesh.iter().map(|v| GpuCorner { pos: v.pos, bone: b as u32, uv: v.uv, role: p.role, pad: 0 }));
+                corners.extend(
+                    p.mesh
+                        .iter()
+                        .map(|v| GpuCorner { pos: v.pos, bone: b as u32, uv: v.uv, role: p.role, pad: 0 }),
+                );
             }
             let anims: Vec<Bound> = anims.into_iter().map(|a| Bound::new(a, &parts)).collect();
             let find = |n: &str| anims.iter().position(|a| a.anim.name == n);
             let (idle, walk) = (find("idle"), find("walk"));
-            self.kinds.push(KindModel { cuboids: (c0, cuboids.len() as u32 - c0), corners: (v0, corners.len() as u32 - v0), parts, anims, idle, walk, texture });
+            self.kinds.push(KindModel {
+                cuboids: (c0, cuboids.len() as u32 - c0),
+                corners: (v0, corners.len() as u32 - v0),
+                parts,
+                anims,
+                idle,
+                walk,
+                texture,
+            });
         }
         // Buffers may not be empty.
         cuboids.push(GpuCuboid::default());
@@ -164,7 +195,13 @@ impl Models {
     }
 
     pub fn destroy(&mut self, gpu: &mut dyn Backend) {
-        for b in [self.cuboids, self.corners].into_iter().chain(self.instances.iter_mut().chain(&mut self.bones).flat_map(|v| v.drain(..)).map(|b| b.0)) {
+        for b in [self.cuboids, self.corners].into_iter().chain(
+            self.instances
+                .iter_mut()
+                .chain(&mut self.bones)
+                .flat_map(|v| v.drain(..))
+                .map(|b| b.0),
+        ) {
             gpu.destroy_buffer(b);
         }
     }
@@ -179,7 +216,11 @@ impl Models {
         let Some(m) = self.kinds.get(kind as usize) else { return };
         model::pose(&m.parts, root, motion, &mut self.scratch);
         let first = self.rows.len() as u32;
-        self.rows.extend(self.scratch.iter().map(|b| [b.row(0).to_array(), b.row(1).to_array(), b.row(2).to_array()]));
+        self.rows.extend(
+            self.scratch
+                .iter()
+                .map(|b| [b.row(0).to_array(), b.row(1).to_array(), b.row(2).to_array()]),
+        );
         for mut inst in layers {
             (inst.bones, inst.cuboids, inst.cuboid_count, inst.vertices) = (first, m.cuboids.0, m.cuboids.1, m.corners.0);
             self.queued.push((kind, inst));
@@ -205,8 +246,13 @@ impl Models {
         let base = self.rows.len();
         let mut counts = std::mem::take(&mut self.counts);
         counts.clear();
-        counts.extend(entities.iter().map(|e| kinds.get(e.kind as usize).map_or(0, |m| m.parts.len())));
-        self.rows.resize(base + counts.iter().sum::<usize>(), [[0.0; 4]; 3]);
+        counts.extend(
+            entities
+                .iter()
+                .map(|e| kinds.get(e.kind as usize).map_or(0, |m| m.parts.len())),
+        );
+        self.rows
+            .resize(base + counts.iter().sum::<usize>(), [[0.0; 4]; 3]);
         let mut slices: Vec<&mut [[[f32; 4]; 3]]> = Vec::with_capacity(entities.len());
         let mut rest = &mut self.rows[base..];
         for &n in &counts {
@@ -214,26 +260,48 @@ impl Models {
             slices.push(a);
             rest = b;
         }
-        entities.par_iter().zip(slices).with_min_len(64).for_each_init(Vec::new, |scratch, (e, out)| {
-            let Some(m) = kinds.get(e.kind as usize) else { return };
-            let a = |i: usize| e.anims[..e.anim_count].get(i).and_then(|&(a, t, w)| m.anims.get(a).map(|b| (b, t, w)));
-            let (single, both);
-            let anims: &[(&Bound, f32, f32)] = match (a(0), a(1)) {
-                (Some(x), Some(y)) => {
-                    both = [x, y];
-                    &both
+        entities
+            .par_iter()
+            .zip(slices)
+            .with_min_len(64)
+            .for_each_init(Vec::new, |scratch, (e, out)| {
+                let Some(m) = kinds.get(e.kind as usize) else { return };
+                let a = |i: usize| {
+                    e.anims[..e.anim_count]
+                        .get(i)
+                        .and_then(|&(a, t, w)| m.anims.get(a).map(|b| (b, t, w)))
+                };
+                let (single, both);
+                let anims: &[(&Bound, f32, f32)] = match (a(0), a(1)) {
+                    (Some(x), Some(y)) => {
+                        both = [x, y];
+                        &both
+                    }
+                    (Some(x), None) | (None, Some(x)) => {
+                        single = [x];
+                        &single
+                    }
+                    (None, None) => &[],
+                };
+                model::pose(
+                    &m.parts,
+                    e.root,
+                    &Motion {
+                        pitch: e.pitch,
+                        head_yaw: e.head_yaw,
+                        swing: e.swing,
+                        swim: e.swim,
+                        attack: e.attack,
+                        holding: e.holding,
+                        anims,
+                        crouch: e.crouch,
+                    },
+                    scratch,
+                );
+                for (o, b) in out.iter_mut().zip(scratch.iter()) {
+                    *o = [b.row(0).to_array(), b.row(1).to_array(), b.row(2).to_array()];
                 }
-                (Some(x), None) | (None, Some(x)) => {
-                    single = [x];
-                    &single
-                }
-                (None, None) => &[],
-            };
-            model::pose(&m.parts, e.root, &Motion { pitch: e.pitch, head_yaw: e.head_yaw, swing: e.swing, swim: e.swim, attack: e.attack, holding: e.holding, anims, crouch: e.crouch }, scratch);
-            for (o, b) in out.iter_mut().zip(scratch.iter()) {
-                *o = [b.row(0).to_array(), b.row(1).to_array(), b.row(2).to_array()];
-            }
-        });
+            });
         let mut first = base as u32;
         for (e, &n) in entities.iter().zip(&counts) {
             if let Some(m) = self.kinds.get(e.kind as usize) {
@@ -249,13 +317,29 @@ impl Models {
 
     /// Draws what was queued since `begin`, one instanced draw per kind, with `pipe` and the
     /// view in `view`.
-    pub fn draw(&mut self, gpu: &mut dyn Backend, list: &mut CommandList, frame: &FrameInfo, batch: Batch, pipe: PipelineId, view: BufferId) {
+    pub fn draw(
+        &mut self,
+        gpu: &mut dyn Backend,
+        list: &mut CommandList,
+        frame: &FrameInfo,
+        batch: Batch,
+        pipe: PipelineId,
+        view: BufferId,
+    ) {
         if self.queued.is_empty() {
             return;
         }
         self.queued.sort_by_key(|q| q.0);
         let grow = crate::gpu_layout::frame_buffer;
-        let ib = grow(gpu, &mut self.instances[batch as usize], frame.slot, self.queued.len() as u32, size_of::<Instance>() as u64, usage::STORAGE, "model instances");
+        let ib = grow(
+            gpu,
+            &mut self.instances[batch as usize],
+            frame.slot,
+            self.queued.len() as u32,
+            size_of::<Instance>() as u64,
+            usage::STORAGE,
+            "model instances",
+        );
         let bb = grow(gpu, &mut self.bones[batch as usize], frame.slot, self.rows.len().max(1) as u32, 48, usage::STORAGE, "model bones");
         let insts: Vec<Instance> = self.queued.iter().map(|q| q.1).collect();
         gpu.mapped(ib)[..insts.len() * size_of::<Instance>()].copy_from_slice(bytemuck::cast_slice(&insts));

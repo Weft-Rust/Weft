@@ -64,7 +64,11 @@ impl Lang {
     /// `0xRRGGBBAA`, `None` when missing or not a color.
     pub fn color(&self, key: &str) -> Option<u32> {
         let v = self.entries.get(key).or_else(|| self.fallback.get(key))?;
-        let h = v.trim().trim_start_matches('{').trim_end_matches('}').strip_prefix('#')?;
+        let h = v
+            .trim()
+            .trim_start_matches('{')
+            .trim_end_matches('}')
+            .strip_prefix('#')?;
         let c = u32::from_str_radix(h, 16).ok()?;
         match h.len() {
             6 => Some(c << 8 | 0xFF),
@@ -104,7 +108,10 @@ impl Lang {
                 continue;
             }
             let first = std::fs::read_to_string(&path).ok().and_then(|s| {
-                s.lines().find(|l| l.trim_start().starts_with("language.name")).and_then(|l| l.split_once('=')).map(|(_, v)| v.trim().to_string())
+                s.lines()
+                    .find(|l| l.trim_start().starts_with("language.name"))
+                    .and_then(|l| l.split_once('='))
+                    .map(|(_, v)| v.trim().to_string())
             });
             out.insert(code.clone(), first.unwrap_or(code));
         }

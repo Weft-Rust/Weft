@@ -22,7 +22,10 @@ pub fn current_ticket() -> Option<String> {
 }
 
 pub fn host(server: &crate::server::ServerHandle, settings: &crate::settings::Settings) {
-    server.shared.hosting.store(true, std::sync::atomic::Ordering::Relaxed);
+    server
+        .shared
+        .hosting
+        .store(true, std::sync::atomic::Ordering::Relaxed);
     p2p::host(server.connect.clone(), settings);
 }
 
@@ -131,7 +134,6 @@ macro_rules! messages {
     };
 }
 
-
 wire_struct! {
     #[derive(Clone, Debug)]
     pub struct EntityView {
@@ -159,9 +161,15 @@ wire_struct! {
     }
 }
 
+/// Someone's mining as others see it: who, the cell, which of what is in it, how far along (0..1).
+pub type Crack = (u64, IVec3, u32, f32);
+
 /// An entity's move: id, position, yaw, pitch, crouching, and its frame: the solid body it
 /// stands on (0: the world), which clients draw it relative to.
 pub type Move = (u64, DVec3, f32, f32, crate::world::Pose, u64);
+
+/// The longest message a connection takes.
+pub const MAX_MESSAGE: usize = 64 << 20;
 
 messages! {
     #[derive(Clone)]
@@ -179,7 +187,11 @@ messages! {
         /// otherwise they come after it. Clients make them on what they generate.
         Edits { dim: u32, specs: Vec<String>, all: bool },
         /// Of the world, or of body `frame`.
-        Blocks { dim: u32, frame: u64, changes: Vec<(IVec3, u32)> },
+        /// `extras`: what else is in cells, after `changes` (which take it away).
+        Blocks { dim: u32, frame: u64, changes: Vec<(IVec3, u32)>, extras: Vec<(IVec3, Vec<u32>)> },
+        /// What moving bodies' lights give cells of the world besides what is there, for a client
+        /// to work out light as the server would: (cell, its light), none taking it away.
+        BodyGlow { dim: u32, cells: Vec<(IVec3, [u8; 3])> },
         /// The world's light on body `frame`, by its cubes.
         BodyLight { frame: u64, lights: Vec<(IVec3, u32)> },
         /// Power of pieces of wire: (cell, face, level), of the world or of body `frame`.
@@ -205,10 +217,12 @@ messages! {
         Inventory(Vec<(u32, ItemStack)>),
         /// Own synced components: (component id, bytes).
         Components(Vec<(u32, Vec<u8>)>),
-        /// Hit by something at this horizontal direction from the player.
-        /// Velocity change in blocks per tick, after halving the velocity when the flag says so
-        /// (knockback, a mod's push).
-        Push(([f32; 3], bool)),
+        /// A hit knocks the player back, `away` being flat and of length 1 (`physics::knock`).
+        Knock { away: [f32; 3] },
+        /// Velocity change in blocks per tick (a mod's push, a sprinting hit).
+        Velocity { add: [f32; 3] },
+        /// Ticks a second the server runs at.
+        TickRate(u32),
         /// The player's walking speed and jump multipliers.
         /// The player's attributes that changed, by id.
         Attributes(Vec<(u32, f32)>),
@@ -221,8 +235,8 @@ messages! {
         Flash(u64),
         /// Someone else's arm swings: a hit, a use, mining.
         EntitySwing(u64),
-        /// Who is mining what, and how far along (0..1), besides this player.
-        Cracks(Vec<(u64, IVec3, f32)>),
+        /// Who is mining what, besides this player.
+        Cracks(Vec<Crack>),
         /// The player's `permission` level, for what its client offers.
         Permission(u32),
         /// A sprinting hit landed, which ends the sprint.
@@ -262,22 +276,27 @@ messages! {
         Join { name: String, key: String },
         /// `frame`: the body it rides and its position relative to that body as the client shows it
         /// (the client shows bodies behind the server; only the relative position agrees).
-        Move { pos: DVec3, yaw: f32, pitch: f32, on_ground: bool, pose: crate::world::Pose, sprint: bool, flying: bool, frame: Option<(u64, DVec3)> },
-        /// Started mining this block (`frame` like `Break`'s).
-        StartBreak { pos: IVec3, frame: u64 },
+        /// `jumped`: it jumped since the last one.
+        Move { pos: DVec3, yaw: f32, pitch: f32, on_ground: bool, pose: crate::world::Pose, sprint: bool, flying: bool, jumped: bool, frame: Option<(u64, DVec3)> },
+        /// Started mining this block (`frame` and `part` like `Break`'s).
+        StartBreak { pos: IVec3, part: u32, frame: u64 },
         /// Stopped mining without finishing.
         StopBreak,
         /// Let go of the use button before the item took effect.
         StopUsing,
         /// `frame`: the structure (entity) the block is part of, its position in the structure's
         /// coordinates; 0 for the world. `face`: of its selection that was hit.
-        Break { pos: IVec3, face: u8, frame: u64 },
+        /// `part`: which of what is in the cell.
+        Break { pos: IVec3, part: u32, face: u8, frame: u64 },
         /// Right click on a block: the block reacts first (chests), otherwise the held item is used or
         /// placed against the clicked face. `frame` like `Break`'s; `look` in world space.
-        Use { pos: IVec3, face: u8, look: [f32; 3], sneak: bool, frame: u64 },
+        /// `hit`: where on the block, from its corner.
+        Use { pos: IVec3, part: u32, face: u8, look: [f32; 3], hit: [f32; 3], sneak: bool, frame: u64 },
         UseItem { target: Option<(IVec3, u8)> },
         Select(u32),
         Attack(u64),
+        /// A swing that spends its charge, whatever it hit, sent after any `Attack` of that swing.
+        Swing,
         Interact(u64),
         OpenInventory,
         Click { slot: u32, button: u8, shift: bool },

@@ -73,7 +73,7 @@ fn shade(p: EntityPixel) -> vec4<f32> {
 }
 ```
 ```rust
-r.entity(&WISP).texture("wisp", 32, 16).model(..).shader("ghost");
+r.entity(&WISP).texture("wisp").model(model.uv(32, 16)).shader("ghost");
 ```
 `EntityPixel` has `uv`, `albedo` (the skin's texel, linear, `a` is its alpha), `light` (a vec3 with shading, the hurt flash and glow already included) and `time`. A returned alpha under 0.5 cuts the pixel out, which is how the wisp gets its holes. The `_e` glow masks of the [textures guide](textures.md#emission) are a separate and simpler way to make parts of a skin shine.
 

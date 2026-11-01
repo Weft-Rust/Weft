@@ -79,6 +79,12 @@ shared! {
         FILLED = 5,
         QUAD = 6,
     }
+    /// `Quad::layer` of a texture animated as a strip: the frame, the next and how many there are.
+    ui_strip {
+        BITS = 11,
+        MASK = 2047,
+        COUNT_SHIFT = 22,
+    }
     /// UI quad modes (`ui.wgsl`).
     ui_mode {
         SOLID = 0,
@@ -198,11 +204,16 @@ pub mod terrain {
     /// and the push constants.
     pub fn prelude() -> String {
         let mut s = wgsl();
-        s.push_str(&format!("const ONE: i32 = {};
-", weft_noise::fixed::ONE));
+        s.push_str(&format!(
+            "const ONE: i32 = {};
+",
+            weft_noise::fixed::ONE
+        ));
         for (i, (name, _)) in SEEDS.iter().enumerate() {
-            s.push_str(&format!("const S_{name}: u32 = {i}u;
-"));
+            s.push_str(&format!(
+                "const S_{name}: u32 = {i}u;
+"
+            ));
         }
         s.push_str(concat!(
             "// The description (`terrain_gpu::describe`).
@@ -245,7 +256,12 @@ pub const CORNERS: [[[i32; 3]; 4]; 6] = weft_abi::FACE_CORNERS;
 /// corner (`corner_light`).
 #[inline]
 pub fn face_record(pos: [i32; 3], dir: u32, ao: u32, tint: u32, tex: u32, biome: u32, light: [u32; 4]) -> [u32; 4] {
-    let w0 = pos[0] as u32 | (pos[1] as u32) << face::Y_SHIFT | (pos[2] as u32) << face::Z_SHIFT | dir << face::DIR_SHIFT | ao << face::AO_SHIFT | tint << face::TINT_SHIFT;
+    let w0 = pos[0] as u32
+        | (pos[1] as u32) << face::Y_SHIFT
+        | (pos[2] as u32) << face::Z_SHIFT
+        | dir << face::DIR_SHIFT
+        | ao << face::AO_SHIFT
+        | tint << face::TINT_SHIFT;
     [w0, tex | biome << face::BIOME_SHIFT, light[0] | light[1] << face::CORNER_SHIFT, light[2] | light[3] << face::CORNER_SHIFT]
 }
 
@@ -258,7 +274,10 @@ pub fn face_dir(f: &[u32; 4]) -> usize {
 /// Corner light of a face or quad from a cell's light (8 bits per channel), 0..15 each.
 #[inline]
 pub fn corner_light(channels: [u32; 4]) -> u32 {
-    channels.iter().enumerate().fold(0, |w, (i, &c)| w | c.min(face::LIGHT_MASK) << (i * 4))
+    channels
+        .iter()
+        .enumerate()
+        .fold(0, |w, (i, &c)| w | c.min(face::LIGHT_MASK) << (i * 4))
 }
 
 /// A quad corner (`quad`), in blocks from the cube's corner.
@@ -268,14 +287,30 @@ pub fn quad_pos(p: [f32; 3]) -> u32 {
     e(p[0]) | e(p[1]) << quad::POS_BITS | e(p[2]) << (2 * quad::POS_BITS)
 }
 
+/// Where the middle of a quad is, in 1/32 block from the cube's corner, whatever else is on its
+/// corners' words.
+pub fn quad_middle(q: &[u32; 8]) -> [i32; 3] {
+    let at = |w: u32, axis: u32| ((w >> (axis * quad::POS_BITS)) & quad::POS_MASK) as i32 - quad::POS_OFFSET as i32;
+    std::array::from_fn(|a| at(q[0], a as u32) + at(q[2], a as u32))
+}
+
 /// A quad's uv word, and what goes on top of each of its corners' words: `uv` (u0, v0, u1, v1, 16
 /// across a texture), tint kind and flags.
 #[inline]
+pub fn ui_strip_record(frame: u32, next: u32, count: u32) -> u32 {
+    frame.min(ui_strip::MASK) | next.min(ui_strip::MASK) << ui_strip::BITS | count << ui_strip::COUNT_SHIFT
+}
+
 pub fn quad_uv(uv: [f32; 4], tint: u32) -> (u32, [u32; 4]) {
     let e = uv.map(|v| ((v * 8.0).round() as i32).clamp(0, (quad::UV_MASK as i32 + 1) * 8 - 1) as u32);
     let [whole, fine] = [e.map(|v| v >> quad::UV_FINE_BITS), e.map(|v| v & ((1 << quad::UV_FINE_BITS) - 1))];
     let fine = fine[0] | fine[1] << quad::UV_FINE_BITS | fine[2] << (2 * quad::UV_FINE_BITS) | fine[3] << (3 * quad::UV_FINE_BITS);
-    let word = whole[0] | whole[1] << quad::UV_BITS | whole[2] << (2 * quad::UV_BITS) | whole[3] << (3 * quad::UV_BITS) | (fine >> 8) << quad::UV_FINE_HIGH_SHIFT | tint << quad::TINT_SHIFT;
+    let word = whole[0]
+        | whole[1] << quad::UV_BITS
+        | whole[2] << (2 * quad::UV_BITS)
+        | whole[3] << (3 * quad::UV_BITS)
+        | (fine >> 8) << quad::UV_FINE_HIGH_SHIFT
+        | tint << quad::TINT_SHIFT;
     (word, std::array::from_fn(|i| ((fine >> (2 * i)) & 3) << quad::UV_FINE_LOW_SHIFT))
 }
 
@@ -294,8 +329,17 @@ pub fn lod_record(dir: u32, pos: [i32; 3], size: [i32; 3], tex: u32, tint: u32, 
 
 /// The WGSL side of the records above: `CORNERS` and their decoders.
 fn records() -> String {
-    let corners: Vec<String> = CORNERS.iter().flatten().map(|c| format!("vec3({:.1}, {:.1}, {:.1})", c[0] as f32, c[1] as f32, c[2] as f32)).collect();
+    let corners: Vec<String> = CORNERS
+        .iter()
+        .flatten()
+        .map(|c| format!("vec3({:.1}, {:.1}, {:.1})", c[0] as f32, c[1] as f32, c[2] as f32))
+        .collect();
     let mut s = format!("var<private> CORNERS: array<vec3<f32>, 24> = array<vec3<f32>, 24>({});\n", corners.join(", "));
+    let dirs: Vec<String> = weft_abi::FACE_DIRS
+        .iter()
+        .map(|d| format!("vec3({:.1}, {:.1}, {:.1})", d[0] as f32, d[1] as f32, d[2] as f32))
+        .collect();
+    s.push_str(&format!("var<private> FACE_DIRS: array<vec3<f32>, 6> = array<vec3<f32>, 6>({});\n", dirs.join(", ")));
     s.push_str(concat!(
         "fn face_pos(w0: u32) -> vec3<f32> {\n",
         "    return vec3<f32>(f32(w0 & FACE_POS_MASK), f32((w0 >> FACE_Y_SHIFT) & FACE_POS_MASK), f32((w0 >> FACE_Z_SHIFT) & FACE_POS_MASK));\n",
@@ -342,7 +386,15 @@ fn records() -> String {
 
 /// A host-visible buffer per frame in flight (`slots`), holding at least `needed` elements of
 /// `stride` bytes; a slot too small is replaced by one grown to the next power of two.
-pub fn frame_buffer(gpu: &mut dyn weft_render::Backend, slots: &mut Vec<(weft_render::BufferId, u32)>, slot: usize, needed: u32, stride: u64, usage: u32, label: &str) -> weft_render::BufferId {
+pub fn frame_buffer(
+    gpu: &mut dyn weft_render::Backend,
+    slots: &mut Vec<(weft_render::BufferId, u32)>,
+    slot: usize,
+    needed: u32,
+    stride: u64,
+    usage: u32,
+    label: &str,
+) -> weft_render::BufferId {
     use weft_render::usage::HOST;
     while slots.len() < gpu.frames_in_flight() {
         slots.push((gpu.create_buffer(stride * 1024, usage | HOST, label), 1024));
@@ -616,13 +668,12 @@ gpu_struct! {
         pub v: [f32; 2],
         /// Text effect slot (top bit set on shadows) or GUI fill slot.
         pub fx: u32,
-        /// Glyph number in its text.
+        /// Glyph number in its text, or how far an animated texture has blended into its next frame.
         pub index: f32,
         pub uv: [f32; 4],
         pub color: u32,
         pub tex: u32,
-        /// A texture animated as a strip of square frames: frame count | ticks per frame << 16
-        /// (0: still).
+        /// A texture animated as a strip of frames: `ui_strip_record` (0: still).
         pub layer: u32,
         pub mode: u32,
         /// Visible rectangle in physical pixels; empty (all zero) means unclipped.
@@ -772,7 +823,25 @@ fn solid_at(p: vec3<i32>) -> bool {
 
 /// Every GPU struct as WGSL.
 fn structs() -> String {
-    [Scene::wgsl(), Globals::wgsl(), GpuBox::wgsl(), Instance::wgsl(), GpuCuboid::wgsl(), GpuCorner::wgsl(), GpuBone::wgsl(), GpuParticle::wgsl(), GpuSimParticle::wgsl(), GpuParticleKind::wgsl(), GpuWireQuad::wgsl(), GpuWeather::wgsl(), GpuSky::wgsl(), Quad::wgsl(), Screen::wgsl(), Pass::wgsl()].concat()
+    [
+        Scene::wgsl(),
+        Globals::wgsl(),
+        GpuBox::wgsl(),
+        Instance::wgsl(),
+        GpuCuboid::wgsl(),
+        GpuCorner::wgsl(),
+        GpuBone::wgsl(),
+        GpuParticle::wgsl(),
+        GpuSimParticle::wgsl(),
+        GpuParticleKind::wgsl(),
+        GpuWireQuad::wgsl(),
+        GpuWeather::wgsl(),
+        GpuSky::wgsl(),
+        Quad::wgsl(),
+        Screen::wgsl(),
+        Pass::wgsl(),
+    ]
+    .concat()
 }
 
 /// What goes in front of an engine shader (or a pack's replacement of it): the constants, every
@@ -823,6 +892,13 @@ mod quad_uv_tests {
         let fine = on[0] >> 30 | (on[1] >> 30) << 2 | (on[2] >> 30) << 4 | (on[3] >> 30) << 6 | ((w >> 20) & 15) << 8;
         assert_eq!([fine & 7, (fine >> 3) & 7, (fine >> 6) & 7, (fine >> 9) & 7], [2, 0, 2, 7]);
     }
+
+    #[test]
+    fn quad_middle_ignores_the_uv_on_the_corners() {
+        let word = |p: [f32; 3]| quad_pos(p) | 3 << quad::UV_FINE_LOW_SHIFT;
+        let (a, c) = (word([1.0, 2.0, -1.0]), word([2.0, 2.0, 0.0]));
+        assert_eq!(quad_middle(&[a, 0, c, 0, 0, 0, 0, 0]), [48, 64, -16]);
+    }
 }
 
 #[cfg(test)]
@@ -861,7 +937,9 @@ mod tests {
             l[3]
         );
         let module = naga::front::wgsl::parse_str(&src).expect("records parse");
-        naga::valid::Validator::new(naga::valid::ValidationFlags::all(), naga::valid::Capabilities::all()).validate(&module).expect("records validate");
+        naga::valid::Validator::new(naga::valid::ValidationFlags::all(), naga::valid::Capabilities::all())
+            .validate(&module)
+            .expect("records validate");
     }
 
     /// The terrain prelude parses, and the header has room for every seed.
@@ -896,7 +974,11 @@ mod tests {
             ("Pass", size_of::<Pass>()),
         ];
         for (name, rust) in sizes {
-            let (h, _) = module.types.iter().find(|(_, t)| t.name.as_deref() == Some(name)).expect(name);
+            let (h, _) = module
+                .types
+                .iter()
+                .find(|(_, t)| t.name.as_deref() == Some(name))
+                .expect(name);
             assert_eq!(layouter[h].size as usize, rust, "{name}");
         }
     }

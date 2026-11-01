@@ -92,7 +92,9 @@ pub struct LodMesh {
 pub fn made(job: LodJob, words: Vec<u32>) {
     crate::background().spawn(move || {
         let (quads, y) = mesh(content(), job.key, &words);
-        let _ = job.done.send(LodMesh { dim: job.dim, seed: job.seed, key: job.key, quads, y });
+        let _ = job
+            .done
+            .send(LodMesh { dim: job.dim, seed: job.seed, key: job.key, quads, y });
     });
 }
 
@@ -103,6 +105,23 @@ fn quad(dir: u32, x: i32, y: i32, z: i32, size: (i32, i32, i32), tex: u32, tint:
     crate::gpu_layout::lod_record(dir, [x, y, z], [size.0, size.1, size.2], tex, tint, biome)
 }
 
+fn corner_y(words: &[u32], gi: i32, gj: i32) -> i32 {
+    let gi = gi.clamp(0, CELLS);
+    let gj = gj.clamp(0, CELLS);
+    let k = ((gj + 1) * SIDE + gi + 1) as usize * 2;
+    (words[k] & 0xFFFF) as u16 as i16 as i32
+}
+
+fn sample_y(words: &[u32], gx: f32, gz: f32) -> i32 {
+    let i0 = gx.floor().clamp(0.0, (CELLS - 1) as f32) as i32;
+    let j0 = gz.floor().clamp(0.0, (CELLS - 1) as f32) as i32;
+    let fx = gx - i0 as f32;
+    let fz = gz - j0 as f32;
+    let h = |x: i32, z: i32| corner_y(words, x, z) as f32;
+    let x = |z: i32| h(i0, z) * (1.0 - fx) + h(i0 + 1, z) * fx;
+    (x(j0) * (1.0 - fz) + x(j0 + 1) * fz).round() as i32
+}
+
 /// The tile's top faces (runs along x merged) and the walls down to lower neighbors: the top
 /// block's top color for its own height (a grass side averages to the dirt under its rim, and
 /// every slope came out striped brown), then the block under it for the rest.
@@ -111,12 +130,20 @@ pub fn mesh(c: &Content, key: TileKey, words: &[u32]) -> (Vec<[u32; 4]>, (i32, i
     let at = |i: i32, j: i32| {
         let k = ((j + 1) * SIDE + i + 1) as usize * 2;
         let (a, b) = (words[k], words[k + 1]);
-        ((a & 0xFFFF) as u16 as i16 as i32, a >> 16, b & 0xFFFF, b >> 16)
+        (a >> 16, b & 0xFFFF, b >> 16)
     };
+    let mut h = [[0i32; CELLS as usize]; CELLS as usize];
+    for j in 0..CELLS {
+        for i in 0..CELLS {
+            h[i as usize][j as usize] = sample_y(words, i as f32 + 0.5, j as f32 + 0.5);
+        }
+    }
+    let y_at = |i: i32, j: i32| h[i as usize][j as usize];
     let looks = super::looks::current();
     let face_of = |state: u32, dir: usize| {
         let info = &c.states[state as usize];
-        let tint = if info.tint_faces & (1 << dir) != 0 { info.tint as u32 } else { 0 };
+        // No overlays out there.
+        let tint = if crate::content::face_paint(info, dir, false).base_tinted { info.tint as u32 } else { 0 };
         (looks.drawn(state, info).textures[dir] & face::TEX_MASK, tint)
     };
     let mut out = Vec::new();
@@ -124,9 +151,10 @@ pub fn mesh(c: &Content, key: TileKey, words: &[u32]) -> (Vec<[u32; 4]>, (i32, i
     for j in 0..CELLS {
         let mut i = 0;
         while i < CELLS {
-            let (y, top, biome, _) = at(i, j);
+            let y = y_at(i, j);
+            let (top, biome, _) = at(i, j);
             let mut end = i + 1;
-            while end < CELLS && at(end, j).0 == y && at(end, j).1 == top && at(end, j).2 == biome {
+            while end < CELLS && y_at(end, j) == y && at(end, j).0 == top && at(end, j).1 == biome {
                 end += 1;
             }
             let (tex, tint) = face_of(top, 3);
@@ -137,15 +165,18 @@ pub fn mesh(c: &Content, key: TileKey, words: &[u32]) -> (Vec<[u32; 4]>, (i32, i
     }
     for j in 0..CELLS {
         for i in 0..CELLS {
-            let (y, top, biome, under) = at(i, j);
+            let (top, biome, under) = at(i, j);
+            let y = y_at(i, j);
             for (dir, (di, dj)) in [(0usize, (-1, 0)), (1, (1, 0)), (4, (0, -1)), (5, (0, 1))] {
-                let mut ny = at(i + di, j + dj).0;
                 // At the tile's edge the tile beside may be of another level, its ground not
                 // where this one's sample says: the wall goes on down below it (a skirt), or
                 // the sky shows through the crack.
-                if !(0..CELLS).contains(&(i + di)) || !(0..CELLS).contains(&(j + dj)) {
-                    ny = ny.min(y - 1) - 2 * s;
-                }
+                let (ni, nj) = (i + di, j + dj);
+                let ny = if (-1..=CELLS).contains(&ni) && (-1..=CELLS).contains(&nj) {
+                    sample_y(words, ni as f32 + 0.5, nj as f32 + 0.5)
+                } else {
+                    y.min(y - 1) - 2 * s
+                };
                 if ny >= y {
                     continue;
                 }
@@ -218,12 +249,25 @@ impl Lod {
     /// Distance in blocks it reaches (`core:lod_distance` cubes), 0 when off.
     pub fn distance() -> i32 {
         let c = content();
-        c.game.config_names.get("core:lod_distance").map_or(0, |&id| crate::config::get(id) as i32) * 16
+        c.game
+            .config_names
+            .get("core:lod_distance")
+            .map_or(0, |&id| crate::config::get(id) as i32)
+            * 16
     }
 
     /// Picks, asks for and hands the renderer this frame's tiles. `view`: the view radius in
     /// cubes (inside it the real cubes are drawn).
-    pub fn update(&mut self, gpu: &mut dyn weft_render::Backend, render: &mut super::world_render::WorldRenderer, world: &mut super::world::ClientWorld, textures: &super::textures::GameTextures, seed: u64, cam: DVec3, view: i32) {
+    pub fn update(
+        &mut self,
+        gpu: &mut dyn weft_render::Backend,
+        render: &mut super::world_render::WorldRenderer,
+        world: &mut super::world::ClientWorld,
+        textures: &super::textures::GameTextures,
+        seed: u64,
+        cam: DVec3,
+        view: i32,
+    ) {
         let c = content();
         let dim = world.dim;
         self.update_mask(gpu, render, world, seed, cam, view);
@@ -245,7 +289,10 @@ impl Lod {
         let mut hide = (view / 2 * 16).max(0);
         // High up, the view's cubes don't reach the ground: tiles have to fill that in too (where
         // cubes do show, the mask leaves them out).
-        if self.land_height(c, cam).is_some_and(|land| cam.y > (land + view * 8) as f64) {
+        if self
+            .land_height(c, cam)
+            .is_some_and(|land| cam.y > (land + view * 8) as f64)
+        {
             hide = 0;
         }
         while let Ok(m) = self.done.1.try_recv() {
@@ -260,7 +307,10 @@ impl Lod {
             return;
         }
         let p = glam::DVec2::new(cam.x, cam.z);
-        if self.wanted_at.is_none_or(|(at, h, r)| (at - p).length() > 16.0 || h != hide || r != reach) {
+        if self
+            .wanted_at
+            .is_none_or(|(at, h, r)| (at - p).length() > 16.0 || h != hide || r != reach)
+        {
             self.wanted_at = Some((p, hide, reach));
             self.pick(p, hide as f64, reach as f64);
         }
@@ -295,7 +345,12 @@ impl Lod {
         if !self.deep_underground(c, cam) {
             render.lod_draw.extend(shown);
         }
-        let gone: Vec<TileKey> = self.ready.iter().copied().filter(|k| !keep.contains(k)).collect();
+        let gone: Vec<TileKey> = self
+            .ready
+            .iter()
+            .copied()
+            .filter(|k| !keep.contains(k))
+            .collect();
         for key in gone {
             self.ready.remove(&key);
             render.remove_lod(key);
@@ -306,14 +361,17 @@ impl Lod {
     /// Well under the land at the camera's column, so its sky can't be seen. Near the surface a cave
     /// mouth or a ravine still looks out over the distance.
     fn deep_underground(&mut self, c: &Content, cam: DVec3) -> bool {
-        self.land_height(c, cam).is_some_and(|land| cam.y < (land - UNDERGROUND) as f64)
+        self.land_height(c, cam)
+            .is_some_and(|land| cam.y < (land - UNDERGROUND) as f64)
     }
 
     /// How high the land is at the camera's column.
     fn land_height(&mut self, c: &Content, cam: DVec3) -> Option<i32> {
         let at = IVec2::new(cam.x.floor() as i32, cam.z.floor() as i32);
         if self.ground.is_none_or(|g| g.0 != (self.dim, at)) {
-            let height = c.dims[self.dim as usize].column(self.seed, at.x, at.y).map_or(i32::MIN, |col| col.height);
+            let height = c.dims[self.dim as usize]
+                .column(self.seed, at.x, at.y)
+                .map_or(i32::MIN, |col| col.height);
             self.ground = Some(((self.dim, at), height));
         }
         self.ground.map(|g| g.1).filter(|&h| h != i32::MIN)
@@ -321,7 +379,15 @@ impl Lod {
 
     /// Keeps the mask of columns shown by cubes current: columns that changed, and the ones
     /// coming into the window when the camera moved to another column.
-    fn update_mask(&mut self, gpu: &mut dyn weft_render::Backend, render: &mut super::world_render::WorldRenderer, world: &mut super::world::ClientWorld, seed: u64, cam: DVec3, view: i32) {
+    fn update_mask(
+        &mut self,
+        gpu: &mut dyn weft_render::Backend,
+        render: &mut super::world_render::WorldRenderer,
+        world: &mut super::world::ClientWorld,
+        seed: u64,
+        cam: DVec3,
+        view: i32,
+    ) {
         let half = view + MASK_MARGIN;
         let w = 2 * half + 1;
         let center = IVec2::new((cam.x / 16.0).floor() as i32, (cam.z / 16.0).floor() as i32);

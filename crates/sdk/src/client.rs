@@ -16,8 +16,18 @@ pub use abi::{ClientState, client_flags};
 
 /// The local client during a client callback. Only valid for the duration of that callback.
 #[derive(Clone, Copy)]
+#[repr(transparent)]
 pub struct Client {
     raw: *mut abi::ClientCtx,
+}
+
+/// All a binding can read, a client can.
+impl std::ops::Deref for Client {
+    type Target = ClientView;
+    fn deref(&self) -> &ClientView {
+        // Both are the one pointer.
+        unsafe { &*(self as *const Client as *const ClientView) }
+    }
 }
 
 fn s(x: &str) -> Str {
@@ -102,7 +112,12 @@ impl Client {
 
     /// Turns the local player, in degrees like the F3 screen.
     pub fn look(&self, yaw_deg: f32, pitch_deg: f32) {
-        self.control(&abi::PlayerControl { mask: abi::control_mask::LOOK, yaw: yaw_deg.to_radians(), pitch: pitch_deg.to_radians(), ..abi::PlayerControl::DEFAULT });
+        self.control(&abi::PlayerControl {
+            mask: abi::control_mask::LOOK,
+            yaw: yaw_deg.to_radians(),
+            pitch: pitch_deg.to_radians(),
+            ..abi::PlayerControl::DEFAULT
+        });
     }
 
     /// Puts the local player's feet at `pos` (the server takes it as a move).
@@ -118,10 +133,14 @@ impl Client {
         self.control(&abi::PlayerControl { mask: abi::control_mask::FLYING, flying: on as u32, ..abi::PlayerControl::DEFAULT });
     }
 
-    /// Lies down with its feet toward `yaw` (radians) and stays there, or gets up with `None`. Other
+    /// Lies down with its feet toward `yaw` (degrees) and stays there, or gets up with `None`. Other
     /// players see it. Where it lies is the server's to say (`World::teleport`).
     pub fn lie_down(&self, yaw: Option<f32>) {
-        self.control(&abi::PlayerControl { mask: abi::control_mask::LYING, lying: yaw.unwrap_or(f32::NAN), ..abi::PlayerControl::DEFAULT });
+        self.control(&abi::PlayerControl {
+            mask: abi::control_mask::LYING,
+            lying: yaw.map_or(f32::NAN, f32::to_radians),
+            ..abi::PlayerControl::DEFAULT
+        });
     }
 
     pub fn fly_speed(&self, mul: f32) {
@@ -197,7 +216,11 @@ impl Client {
     }
 
     fn text(&self, which: u32, index: u32) -> String {
-        unsafe { (host().client_text)(self.raw, which, index).as_str().to_string() }
+        unsafe {
+            (host().client_text)(self.raw, which, index)
+                .as_str()
+                .to_string()
+        }
     }
 
     pub fn ticket(&self) -> String {
@@ -224,13 +247,13 @@ impl Client {
 
     /// The block the client has at `pos`, `None` while that cube is not loaded.
     pub fn block(&self, pos: [i32; 3]) -> Option<u32> {
-        let b = unsafe { (host().client_block)(self.raw, &pos) };
+        let b = unsafe { (host().client_block_in)(self.raw, 0, &pos) };
         (b != u32::MAX).then_some(b)
     }
 
     /// The block the client has at `pos` of moving structure `entity`.
     pub fn structure_block(&self, entity: u64, pos: [i32; 3]) -> Option<u32> {
-        let b = unsafe { (host().client_structure_block)(self.raw, entity, &pos) };
+        let b = unsafe { (host().client_block_in)(self.raw, entity, &pos) };
         (b != u32::MAX).then_some(b)
     }
 
@@ -244,12 +267,6 @@ impl Client {
     pub fn light(&self, pos: [i32; 3]) -> Option<u32> {
         let l = unsafe { (host().client_light)(self.raw, &pos) };
         (l != u32::MAX).then_some(l)
-    }
-
-    /// Own inventory slot by index (the engine lays the inventory out from its groups; with the
-    /// base game the hotbar comes first).
-    pub fn inventory_slot(&self, slot: u32) -> ItemStack {
-        unsafe { (host().client_slot)(self.raw, 0, slot) }
     }
 
     pub fn menu_slot(&self, slot: u32) -> ItemStack {
@@ -301,7 +318,9 @@ impl Client {
     #[allow(clippy::too_many_arguments)]
     fn draw(&self, group: Option<&crate::GizmoGroup>, kind: u32, a: [f64; 3], b: [f64; 3], color: u32, key: &str, args: &[crate::Arg]) {
         let raw = crate::ui::raw_args(args);
-        unsafe { (host().client_draw)(self.raw, s(group.map_or("", |g| g.name())), kind, &a, &b, color, s(key), crate::abi::Slice::new(&raw)) }
+        unsafe {
+            (host().client_draw)(self.raw, s(group.map_or("", |g| g.name())), kind, &a, &b, color, s(key), crate::abi::Slice::new(&raw))
+        }
     }
 
     /// The server's `draw_*` for this frame only: always, or with a `group` while the player
@@ -489,12 +508,8 @@ impl World {
     }
 
     /// Opens `menu` on the block entity at `pos`; false (and a logged reason) if there is none.
-    pub fn open_menu_at(&self, player: u64, menu: &crate::Menu, pos: [i32; 3]) -> bool {
-        self.open_menu_kind_at(player, menu.id(), pos)
-    }
-
-    pub fn open_menu_kind_at(&self, player: u64, menu: u32, pos: [i32; 3]) -> bool {
-        unsafe { (host().open_menu_at)(self.raw(), player, menu, &pos) != 0 }
+    pub fn open_menu_at(&self, player: u64, menu: impl Into<crate::Id<crate::Menu>>, pos: [i32; 3]) -> bool {
+        unsafe { (host().open_menu_at)(self.raw(), player, menu.into().raw(), &pos) != 0 }
     }
 
     /// An inventory of `slots` not tied to a block (tests, backpacks): menus open on it like on
@@ -554,7 +569,7 @@ impl World {
         unsafe { (host().skip_ticks)(self.raw(), ticks) }
     }
 
-    /// 0 survival, 1 creative, 2 spectator.
+    /// `abi::game_mode`.
     pub fn set_game_mode(&self, player: u64, mode: u32) {
         unsafe { (host().set_game_mode)(self.raw(), player, mode) }
     }
@@ -571,7 +586,9 @@ impl Registry {
     /// instead of the engine's steps, idle noises and death smoke; `e.engine_effects()` keeps
     /// those. One per kind: a later mod's replaces an earlier one's.
     pub fn client_entity_tick(&mut self, kind: &crate::Entity, f: impl Fn(&Client, &ClientEntity) + Send + Sync + 'static) {
-        let cb = callback(move |a: &mut abi::ClientEntityArgs| f(&Client::from_raw(a.client), unsafe { &*(a as *const abi::ClientEntityArgs as *const ClientEntity) }));
+        let cb = callback(move |a: &mut abi::ClientEntityArgs| {
+            f(&Client::from_raw(a.client), unsafe { &*(a as *const abi::ClientEntityArgs as *const ClientEntity) })
+        });
         unsafe { (host().reg_client_entity_tick)(self.raw, s(kind.name()), cb) }
     }
 

@@ -12,6 +12,8 @@ struct VOut {
     @location(5) @interpolate(flat) rect: vec4<f32>,
     @location(6) @interpolate(flat) fx: u32,
     @location(7) @interpolate(flat) size: vec2<f32>,
+    @location(8) uv_next: vec2<f32>,
+    @location(9) @interpolate(flat) blend: f32,
 }
 
 fn unpack(c: u32) -> vec4<f32> {
@@ -33,11 +35,14 @@ fn vs(@builtin(vertex_index) vi: u32) -> VOut {
     }
     out.clip = vec4(p.x / screen.size.x * 2.0 - 1.0, 1.0 - p.y / screen.size.y * 2.0, 0.0, 1.0);
     out.uv = mix(q.uv.xy, q.uv.zw, c);
-    // A strip of frames (`.anim` next to the texture): the frame of this tick.
+    out.uv_next = out.uv;
+    out.blend = 0.0;
+    // A strip of frames (`.anim` next to the texture): the one to show now, picked on the CPU.
     if q.layer != 0u && q.mode != UI_MODE_FONT {
-        let frames = f32(q.layer & 0xffffu);
-        let f = floor(screen.size.z * 20.0 / f32(max(q.layer >> 16u, 1u))) % frames;
-        out.uv.y = (out.uv.y + f) / frames;
+        let frames = f32(q.layer >> UI_STRIP_COUNT_SHIFT);
+        out.uv_next.y = (out.uv.y + f32((q.layer >> UI_STRIP_BITS) & UI_STRIP_MASK)) / frames;
+        out.uv.y = (out.uv.y + f32(q.layer & UI_STRIP_MASK)) / frames;
+        out.blend = q.index;
     }
     out.tex = q.tex;
     out.layer = q.layer;
@@ -46,6 +51,14 @@ fn vs(@builtin(vertex_index) vi: u32) -> VOut {
     out.fx = q.fx;
     out.size = vec2(length(q.u), length(q.v));
     return out;
+}
+
+fn strip_pixel(in: VOut) -> vec4<f32> {
+    let t = textureSampleLevel(textures[in.tex], nearest_clamp, in.uv, 0.0);
+    if in.blend > 0.0 {
+        return mix(t, textureSampleLevel(textures[in.tex], nearest_clamp, in.uv_next, 0.0), in.blend);
+    }
+    return t;
 }
 
 @fragment
@@ -60,13 +73,13 @@ fn fs(in: VOut) -> @location(0) vec4<f32> {
         return gui_fill(in.fx, GuiPixel(in.uv, in.size, in.color, screen.size.z));
     }
     if in.mode == UI_MODE_ICON {
-        let t = textureSampleLevel(textures[in.tex], nearest_clamp, in.uv, 0.0);
+        let t = strip_pixel(in);
         if t.a < 0.1 {
             discard;
         }
         return t * in.color;
     }
-    let t = textureSampleLevel(textures[in.tex], nearest_clamp, in.uv, 0.0);
+    let t = strip_pixel(in);
     if in.mode == UI_MODE_FONT {
         return vec4(in.color.rgb, in.color.a * t.r);
     }

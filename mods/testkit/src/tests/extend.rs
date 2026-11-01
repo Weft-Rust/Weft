@@ -3,12 +3,14 @@
 use std::collections::HashMap;
 use std::time::Duration;
 
-
 use super::{add, at};
 use crate::runner::{R, T};
 
 fn counts(s: &str) -> HashMap<String, u32> {
-    s.split_whitespace().filter_map(|kv| kv.split_once('=')).map(|(k, v)| (k.to_string(), v.parse().unwrap_or(0))).collect()
+    s.split_whitespace()
+        .filter_map(|kv| kv.split_once('='))
+        .map(|(k, v)| (k.to_string(), v.parse().unwrap_or(0)))
+        .collect()
 }
 
 pub async fn events_batched(t: T) -> R {
@@ -26,15 +28,18 @@ pub async fn events_batched(t: T) -> R {
     t.look_at(ground);
     t.frames(3).await?;
     t.press("core:use");
-    t.until("dirt placed", Duration::from_secs(5), |t| t.c().inventory_slot(0).count == 3).await?;
+    t.until("dirt placed", Duration::from_secs(5), |t| t.c().inventory_slot(0).count == 3)
+        .await?;
     t.cmd("/feed 10").await?;
     t.op("put me 1 bread 2").await?;
     t.c().select(1);
     t.secs(0.3).await?;
     t.hold("core:use", 2.0);
-    t.until("ate", Duration::from_secs(5), |t| t.c().inventory_slot(1).count == 1).await?;
+    t.until("ate", Duration::from_secs(5), |t| t.c().inventory_slot(1).count == 1)
+        .await?;
     // The broken stone dropped cobblestone next to the player.
-    t.c().teleport([f[0] as f64 + 3.5, f[1] as f64, f[2] as f64 + 1.5]);
+    t.c()
+        .teleport([f[0] as f64 + 3.5, f[1] as f64, f[2] as f64 + 1.5]);
     t.secs(1.0).await?;
     let n = counts(&t.op("events").await?);
     t.check_eq(n["block_broken"], 3, "block_broken events");
@@ -63,7 +68,8 @@ pub async fn vetoes_and_timers(t: T) -> R {
     t.check_eq(t.c().inventory_slot(1).count, 2, "question::USE_ITEM denied, the bread stays");
     t.cmd("/rule testkit:no_use 0").await?;
     t.hold("core:use", 2.0);
-    t.until("ate", Duration::from_secs(5), |t| t.c().inventory_slot(1).count == 1).await?;
+    t.until("ate", Duration::from_secs(5), |t| t.c().inventory_slot(1).count == 1)
+        .await?;
     let before: u32 = t.op("rings").await?.parse().unwrap_or(0);
     t.op("after 30").await?;
     t.op("after 20").await?;
@@ -93,14 +99,14 @@ pub async fn facing_placement(t: T) -> R {
     t.check_eq(t.block(add(wall, [0, 0, -1])).await?, "testmod:vent[facing=north]".to_string(), "the vent faces north");
     // States by name in a command, and one property changed by name keeping the other.
     let p = add(f, [3, 0, 0]);
-    t.cmd(&format!("/setblock {} base:furnace[lit=true,facing=east]", at(p))).await?;
+    t.cmd(&format!("/setblock {} base:furnace[lit=true,facing=east]", at(p)))
+        .await?;
     t.check_eq(t.block(p).await?, "base:furnace[facing=east,lit=true]".to_string(), "/setblock with properties");
     t.check_eq(t.op(&format!("setprop {} lit false", at(p))).await?, "1".to_string(), "set_prop");
     t.check_eq(t.block(p).await?, "base:furnace[facing=east,lit=false]".to_string(), "put out, still facing east");
     t.check_eq(t.op(&format!("setprop {} lit maybe", at(p))).await?, "0".to_string(), "an unknown value is refused");
     Ok(())
 }
-
 
 /// One naming rule for every kind of thing: a name without a namespace is the declaring mod's,
 /// another mod's is written in full, and both resolve the same way when read.
@@ -128,7 +134,11 @@ pub async fn block_properties(t: T) -> R {
     let p = add(t.feet(), [3, 0, 0]);
     t.set(p, "mossy_cobblestone").await?;
     t.frames(5).await?;
-    let l: u32 = t.op(&format!("light {}", at(add(p, [0, 1, 0])))).await?.parse().map_err(|e| format!("light: {e}"))?;
+    let l: u32 = t
+        .op(&format!("light {}", at(add(p, [0, 1, 0]))))
+        .await?
+        .parse()
+        .map_err(|e| format!("light: {e}"))?;
     t.check_eq([(l >> 8) & 255, (l >> 16) & 255, l >> 24], [0, 0, 8], "block light above the overridden block (r, g, b)");
     Ok(())
 }
@@ -141,10 +151,12 @@ pub async fn client_entity_tick(t: T) -> R {
     let p = add(t.feet(), [3, 0, 0]);
     let before = crate::PIG_TICKS.load(Relaxed);
     t.op(&format!("spawn pig {}", at(p))).await?;
-    t.until("the pig's client tick", Duration::from_secs(3), |_| crate::PIG_TICKS.load(Relaxed) > before + 10).await?;
+    t.until("the pig's client tick", Duration::from_secs(3), |_| crate::PIG_TICKS.load(Relaxed) > before + 10)
+        .await?;
     let deaths = crate::PIG_DEATHS.load(Relaxed);
     t.cmd("/kill @e[type=base:pig]").await?;
-    t.until("the last call when the death ends", Duration::from_secs(5), |_| crate::PIG_DEATHS.load(Relaxed) > deaths).await?;
+    t.until("the last call when the death ends", Duration::from_secs(5), |_| crate::PIG_DEATHS.load(Relaxed) > deaths)
+        .await?;
     let smoke = t.state().particles;
     t.check(smoke >= 10, format!("the engine's death smoke through engine_effects: {smoke} particles"));
     Ok(())
@@ -154,10 +166,13 @@ pub async fn client_entity_tick(t: T) -> R {
 /// typed, no bytes handled by hand.
 pub async fn typed_channels(t: T) -> R {
     t.flat().await?;
-    t.c().send(&crate::server::ECHO, &crate::server::Echo { n: 21 });
-    t.until("the doubled echo", Duration::from_secs(5), |_| crate::ECHOED.load(std::sync::atomic::Ordering::Relaxed) == 42).await?;
+    t.c()
+        .send(&crate::server::ECHO, &crate::server::Echo { n: 21 });
+    t.until("the doubled echo", Duration::from_secs(5), |_| crate::ECHOED.load(std::sync::atomic::Ordering::Relaxed) == 42)
+        .await?;
     t.c().send(&crate::server::GREET, &"Steve".to_string());
-    t.until("the greeting", Duration::from_secs(5), |_| *crate::GREETED.lock().unwrap() == "hello, Steve").await?;
+    t.until("the greeting", Duration::from_secs(5), |_| *crate::GREETED.lock().unwrap() == "hello, Steve")
+        .await?;
     Ok(())
 }
 

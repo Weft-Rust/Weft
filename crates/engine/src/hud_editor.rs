@@ -39,7 +39,15 @@ impl HudEditor {
     fn place(&self, hud: &mut Hud, name: &str, corner: Vec2, size: Vec2) {
         let (w, h) = (size.x, size.y);
         let window = hud.ui.size;
-        let third = |c: f32, all: f32| if c < all / 3.0 { 0.0 } else if c < all * 2.0 / 3.0 { 0.5 } else { 1.0 };
+        let third = |c: f32, all: f32| {
+            if c < all / 3.0 {
+                0.0
+            } else if c < all * 2.0 / 3.0 {
+                0.5
+            } else {
+                1.0
+            }
+        };
         let (ax, ay) = (third(corner.x + w / 2.0, window.x), third(corner.y + h / 2.0, window.y));
         let mut x = corner.x + ax * w - ax * window.x;
         let mut y = corner.y + ay * h - ay * window.y;
@@ -100,7 +108,10 @@ impl Screen for HudEditor {
             }
             return true;
         }
-        if ui.find("hud_tools").is_some_and(|t| ui.nodes[t].rect.contains(cursor)) {
+        if ui
+            .find("hud_tools")
+            .is_some_and(|t| ui.nodes[t].rect.contains(cursor))
+        {
             // Its empty parts move it; its buttons work as usual.
             if left && ui.hit(cursor).is_none() {
                 let at = self.tools.unwrap_or(Vec2::new(ui.size.x / 2.0, 8.0));
@@ -170,7 +181,10 @@ impl Screen for HudEditor {
                 });
             }
             ui.container(row(), |ui| {
-                button(ui, cx, "hud.edit.lines", &[], 104.0, |c| c.requests.push(Request::Screen("core:debug_options".into())));
+                button(ui, cx, "hud.edit.lines", &[], 104.0, |c| {
+                    c.requests
+                        .push(Request::Screen("core:debug_options".into()))
+                });
                 button(ui, cx, "hud.edit.reset_all", &[], 104.0, |c| {
                     if let Some(s) = c.screen::<HudEditor>() {
                         s.pending = Some(Pending::ResetAll);
@@ -202,53 +216,65 @@ impl Screen for DebugOptions {
         let lines = hud::debug_lines();
         let groups = cx.settings.debug_groups();
         frame(ui, cx, "hud.options.title", |ui| {
-            let list = ui.panel("panel", Style::default().pad(8.0).gap(3.0).stretch().w(420.0).h(0.0).grow().min_h(60.0).scroll(), |ui| {
-                let row = |ui: &mut Ui, id: String, name: Vec<crate::ui::text::Span>| {
-                    let state = lines.get(&id).copied().unwrap_or_default();
-                    ui.container(Style::row().gap(6.0).self_align(crate::ui::Align::Stretch), |ui| {
-                        let n = ui.text(name, "default");
-                        ui.nodes[n].style.grow = 1.0;
-                        let shown = id.clone();
-                        let b = button(ui, cx, state.key(), &[], 90.0, move |c| {
-                            hud::set_debug_line(&id, state.next());
-                            c.requests.push(Request::Rebuild);
+            let list = ui.panel(
+                "panel",
+                Style::default()
+                    .pad(8.0)
+                    .gap(3.0)
+                    .stretch()
+                    .w(420.0)
+                    .h(0.0)
+                    .grow()
+                    .min_h(60.0)
+                    .scroll(),
+                |ui| {
+                    let row = |ui: &mut Ui, id: String, name: Vec<crate::ui::text::Span>| {
+                        let state = lines.get(&id).copied().unwrap_or_default();
+                        ui.container(Style::row().gap(6.0).self_align(crate::ui::Align::Stretch), |ui| {
+                            let n = ui.text(name, "default");
+                            ui.nodes[n].style.grow = 1.0;
+                            let shown = id.clone();
+                            let b = button(ui, cx, state.key(), &[], 90.0, move |c| {
+                                hud::set_debug_line(&id, state.next());
+                                c.requests.push(Request::Rebuild);
+                            });
+                            ui.set_id(b, &format!("line:{shown}"));
                         });
-                        ui.set_id(b, &format!("line:{shown}"));
-                    });
-                };
-                let mods = hud::mod_debug_groups();
-                let group = |ui: &mut Ui, i: usize, title: &str| {
-                    let on = groups & (1 << i) != 0;
-                    let key = if on { "hud.debug.shown" } else { "hud.debug.hidden" };
-                    ui.add(Kind::Container { class: None }, Style::default().h(3.0));
-                    ui.container(Style::row().gap(6.0).self_align(crate::ui::Align::Stretch), |ui| {
-                        let n = ui.text(cx.t(title, &[]), "default");
-                        ui.nodes[n].style.grow = 1.0;
-                        let b = button(ui, cx, "hud.options.group", &[Arg::Int(i as i64 + 1), Arg::Key(key.into())], 90.0, move |c| {
-                            let groups = c.settings.debug_groups();
-                            c.settings.set("debug_groups", (groups ^ (1 << i)) as f64);
-                            c.requests.push(Request::Rebuild);
+                    };
+                    let mods = hud::mod_debug_groups();
+                    let group = |ui: &mut Ui, i: usize, title: &str| {
+                        let on = groups & (1 << i) != 0;
+                        let key = if on { "hud.debug.shown" } else { "hud.debug.hidden" };
+                        ui.add(Kind::Container { class: None }, Style::default().h(3.0));
+                        ui.container(Style::row().gap(6.0).self_align(crate::ui::Align::Stretch), |ui| {
+                            let n = ui.text(cx.t(title, &[]), "default");
+                            ui.nodes[n].style.grow = 1.0;
+                            let b = button(ui, cx, "hud.options.group", &[Arg::Int(i as i64 + 1), Arg::Key(key.into())], 90.0, move |c| {
+                                let groups = c.settings.debug_groups();
+                                c.settings.set("debug_groups", (groups ^ (1 << i)) as f64);
+                                c.requests.push(Request::Rebuild);
+                            });
+                            ui.set_id(b, &format!("group:{i}"));
                         });
-                        ui.set_id(b, &format!("group:{i}"));
-                    });
-                };
-                for (i, (title, _, panels)) in hud::DEBUG_GROUPS.iter().enumerate() {
-                    group(ui, i, title);
-                    for (_, panel) in panels.iter() {
-                        for (key, _) in panel.iter() {
-                            let id = hud::line_id(key).to_string();
-                            let name = cx.t(&format!("hud.options.line.{id}"), &[]);
-                            row(ui, id, name);
+                    };
+                    for (i, (title, _, panels)) in hud::DEBUG_GROUPS.iter().enumerate() {
+                        group(ui, i, title);
+                        for (_, panel) in panels.iter() {
+                            for (key, _) in panel.iter() {
+                                let id = hud::line_id(key).to_string();
+                                let name = cx.t(&format!("hud.options.line.{id}"), &[]);
+                                row(ui, id, name);
+                            }
                         }
                     }
-                }
-                for (k, m) in mods.iter().enumerate() {
-                    group(ui, hud::DEBUG_GROUPS.len() + k, m.0);
-                    row(ui, m.3.to_string(), cx.t(m.0, &[]));
-                }
-                label(ui, cx, "hud.debug.group.help", &[], "default");
-                row(ui, "help".to_string(), cx.t("hud.options.line.help", &[]));
-            });
+                    for (k, m) in mods.iter().enumerate() {
+                        group(ui, hud::DEBUG_GROUPS.len() + k, m.0);
+                        row(ui, m.3.to_string(), cx.t(m.0, &[]));
+                    }
+                    label(ui, cx, "hud.debug.group.help", &[], "default");
+                    row(ui, "help".to_string(), cx.t("hud.options.line.help", &[]));
+                },
+            );
             ui.set_id(list, "debug_options");
             ui.container(Style::row().gap(6.0), |ui| {
                 button(ui, cx, "hud.options.reset", &[], 120.0, |c| {

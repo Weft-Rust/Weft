@@ -17,8 +17,8 @@ pub struct W(pub Vec<u8>);
 
 pub struct R<'a>(pub &'a [u8]);
 
-impl R<'_> {
-    fn take(&mut self, n: usize) -> Option<&[u8]> {
+impl<'a> R<'a> {
+    pub fn take(&mut self, n: usize) -> Option<&'a [u8]> {
         if self.0.len() < n {
             return None;
         }
@@ -26,11 +26,28 @@ impl R<'_> {
         self.0 = b;
         Some(a)
     }
+    pub fn u8(&mut self) -> Option<u8> {
+        Some(self.take(1)?[0])
+    }
+    pub fn u16(&mut self) -> Option<u16> {
+        Some(u16::from_le_bytes(self.take(2)?.try_into().ok()?))
+    }
+    pub fn u32(&mut self) -> Option<u32> {
+        u32::get(self)
+    }
+    pub fn u64(&mut self) -> Option<u64> {
+        u64::get(self)
+    }
+    pub fn f32(&mut self) -> Option<f32> {
+        f32::get(self)
+    }
+    pub fn f64(&mut self) -> Option<f64> {
+        f64::get(self)
+    }
 }
 
 /// Lengths of lists; byte strings may be longer.
 const MAX_LEN: usize = 1 << 20;
-const MAX_BYTES: usize = 64 << 20;
 
 pub trait Wire: Sized {
     fn put(&self, w: &mut W);
@@ -74,7 +91,7 @@ impl Wire for Vec<u8> {
         w.0.extend_from_slice(self);
     }
     fn get(r: &mut R) -> Option<Self> {
-        let n = get_len(r, MAX_BYTES)?;
+        let n = get_len(r, super::MAX_MESSAGE)?;
         Some(r.take(n)?.to_vec())
     }
 }
@@ -187,12 +204,12 @@ impl Wire for GameMode {
 /// Stack data by component name: interned handles differ between processes.
 impl Wire for ItemStack {
     fn put(&self, w: &mut W) {
-        let data = if self.data == 0 { Vec::new() } else { crate::stack::to_names(self.data) };
-        (self.item, self.count, data).put(w);
+        (self.item, self.count).put(w);
+        crate::stack::put_named(w, self.data);
     }
     fn get(r: &mut R) -> Option<Self> {
-        let (item, count, data): (u32, u32, Vec<(String, Vec<u8>)>) = Wire::get(r)?;
-        Some(ItemStack { item, count, data: crate::stack::from_names(data) })
+        let (item, count): (u32, u32) = Wire::get(r)?;
+        Some(ItemStack { item, count, data: crate::stack::get_named(r)? })
     }
 }
 
@@ -296,8 +313,26 @@ mod tests {
     fn server_messages_roundtrip() {
         let msgs = [
             ToServer::Join { name: "Ann".into(), key: "k".into() },
-            ToServer::Use { pos: IVec3::new(-5, 70, 3), face: 3, look: [0.1, -0.5, 0.8], sneak: true, frame: 0 },
-            ToServer::Move { pos: DVec3::new(1.5, 64.0, -3.25), yaw: 1.0, pitch: -0.5, on_ground: true, pose: crate::world::Pose::Swim, sprint: true, flying: false, frame: Some((7, DVec3::ONE)) },
+            ToServer::Use {
+                pos: IVec3::new(-5, 70, 3),
+                part: 7,
+                face: 3,
+                hit: [0.5, 1.0, 0.25],
+                look: [0.1, -0.5, 0.8],
+                sneak: true,
+                frame: 0,
+            },
+            ToServer::Move {
+                jumped: false,
+                pos: DVec3::new(1.5, 64.0, -3.25),
+                yaw: 1.0,
+                pitch: -0.5,
+                on_ground: true,
+                pose: crate::world::Pose::Swim,
+                sprint: true,
+                flying: false,
+                frame: Some((7, DVec3::ONE)),
+            },
             ToServer::UseItem { target: Some((IVec3::new(1, 2, 3), 4)) },
             ToServer::Click { slot: 7, button: 1, shift: true },
             ToServer::Drag { slots: vec![3, 4, 9], button: 0 },
@@ -314,7 +349,15 @@ mod tests {
 
     #[test]
     fn tags_follow_the_message_table() {
-        for m in [ToClient::Died, ToClient::Chat(Msg::new("chat.message", vec![Arg::Text("me".into()), Arg::Int(-3), Arg::Msg(Msg::new("k", vec![Arg::Float(1.5, 2)]))])), ToClient::Despawn(vec![(4, true)]), ToClient::Animate(Vec::new())] {
+        for m in [
+            ToClient::Died,
+            ToClient::Chat(Msg::new(
+                "chat.message",
+                vec![Arg::Text("me".into()), Arg::Int(-3), Arg::Msg(Msg::new("k", vec![Arg::Float(1.5, 2)]))],
+            )),
+            ToClient::Despawn(vec![(4, true)]),
+            ToClient::Animate(Vec::new()),
+        ] {
             let bytes = encode_client(&m);
             assert_eq!(bytes[0] as usize, m.kind());
             assert_eq!(decode_client(&bytes).map(|b| b.kind()), Some(m.kind()));
@@ -333,8 +376,36 @@ mod tests {
 
     #[test]
     fn gizmos_roundtrip() {
-        let g = crate::net::GizmoShape { group: "regions".into(), kind: 1, a: DVec3::new(1.0, 2.0, 3.0), b: DVec3::splat(-4.5), color: 0xFF8000FF, ticks: 21, text: Msg::new("gizmo.value", vec![Arg::Text("r0".into())]) };
+        let g = crate::net::GizmoShape {
+            group: "regions".into(),
+            kind: 1,
+            a: DVec3::new(1.0, 2.0, 3.0),
+            b: DVec3::splat(-4.5),
+            color: 0xFF8000FF,
+            ticks: 21,
+            text: Msg::new("gizmo.value", vec![Arg::Text("r0".into())]),
+        };
         let Some(ToClient::Gizmos(back)) = decode_client(&encode_client(&ToClient::Gizmos(vec![g.clone()]))) else { panic!("not decoded") };
         assert_eq!(back, vec![g]);
+    }
+}
+
+#[cfg(test)]
+mod named_tests {
+    use super::*;
+
+    /// More than a save's list ever got back whole: what follows it must still read right.
+    #[test]
+    fn long_lists_keep_what_follows() {
+        let list: Vec<(String, Vec<u8>)> = (0..100)
+            .map(|i| (format!("c{i}"), vec![i as u8; 3]))
+            .collect();
+        let mut w = W::default();
+        list.put(&mut w);
+        7u32.put(&mut w);
+        let mut r = R(&w.0);
+        let got: Vec<(String, Vec<u8>)> = Wire::get(&mut r).unwrap();
+        assert_eq!(got, list);
+        assert_eq!(r.u32(), Some(7));
     }
 }

@@ -64,7 +64,9 @@ impl Field<'_> {
     }
 
     pub fn selection(&self) -> Option<(usize, usize)> {
-        self.anchor.filter(|&a| a != *self.caret).map(|a| (a.min(*self.caret), a.max(*self.caret)))
+        self.anchor
+            .filter(|&a| a != *self.caret)
+            .map(|a| (a.min(*self.caret), a.max(*self.caret)))
     }
 
     fn set(&mut self, chars: Vec<char>) {

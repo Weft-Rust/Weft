@@ -26,7 +26,7 @@ pub trait CubeMap {
     }
 }
 
-const DIRS: [IVec3; 6] = [IVec3::NEG_X, IVec3::X, IVec3::NEG_Y, IVec3::Y, IVec3::NEG_Z, IVec3::Z];
+use super::DIRS;
 pub const SKY_FULL: u8 = 15;
 
 /// The one rule light moves by: from a block at `v` into one taking `op` (its opacity, or the
@@ -63,9 +63,9 @@ pub enum SkyBelow {
 /// What comes down from `above` (`None`: not loaded; `open`: open sky is there, `open_above`).
 pub fn sky_below(above: Option<&Cube>, open: bool) -> SkyBelow {
     let Some(a) = above else { return if open { SkyBelow::Full } else { SkyBelow::Dark } };
-    let sky = |i: usize| a.light(crate::world::cube::index(i % 16, 0, i / 16)) & 0xFF;
+    let sky = |i: usize| weft_abi::light::sky(a.light(crate::world::cube::index(i % 16, 0, i / 16)));
     let v = match a.uniform_light() {
-        Some(l) => l & 0xFF,
+        Some(l) => weft_abi::light::sky(l),
         None if (1..256).all(|i| sky(i) == sky(0)) => sky(0),
         None => return SkyBelow::Partial,
     };
@@ -81,7 +81,22 @@ const SKY: usize = 0;
 #[inline]
 /// The sky's level in a light value as cubes store it.
 pub fn sky_of(v: u32) -> u8 {
-    ch(v, SKY)
+    weft_abi::light::sky(v) as u8
+}
+
+/// What a block changing at `p` from `old` does to the light around it, what bodies' lights give
+/// included, on the server and in a client's guess alike. Returns the cubes that changed.
+pub fn block_changed(
+    map: &mut impl CubeMap,
+    c: &crate::content::Content,
+    sky: bool,
+    glow: &rustc_hash::FxHashMap<IVec3, [u8; 3]>,
+    p: IVec3,
+    old: u32,
+) -> Vec<IVec3> {
+    let mut lighter = Lighter::new(map, c, sky).with_extra(glow);
+    lighter.block_changed(p, old);
+    std::mem::take(&mut lighter.changed).into_iter().collect()
 }
 
 fn ch(v: u32, c: usize) -> u8 {
@@ -142,7 +157,8 @@ impl<'a, M: CubeMap> Lighter<'a, M> {
             return unsafe { ptr.as_ref() };
         }
         let r = self.map.cube(cp);
-        self.cache.set((cp, r.map_or(std::ptr::null(), |c| c as *const Cube)));
+        self.cache
+            .set((cp, r.map_or(std::ptr::null(), |c| c as *const Cube)));
         r
     }
 
@@ -255,9 +271,18 @@ impl<'a, M: CubeMap> Lighter<'a, M> {
         let base = cp * 16;
         let Some(cube) = self.map.cube(cp) else { return };
         let states = &self.c.tight;
-        let all_clear = cube.palette().iter().all(|&s| states[s as usize].opacity == 0);
-        let all_opaque = cube.palette().iter().all(|&s| states[s as usize].opacity >= 15);
-        let emits = cube.palette().iter().any(|&s| states[s as usize].light != [0; 3]);
+        let all_clear = cube
+            .palette()
+            .iter()
+            .all(|&s| states[s as usize].opacity == 0);
+        let all_opaque = cube
+            .palette()
+            .iter()
+            .all(|&s| states[s as usize].opacity >= 15);
+        let emits = cube
+            .palette()
+            .iter()
+            .any(|&s| states[s as usize].light != [0; 3]);
         self.map.cube_mut(cp).unwrap().fill_light(0);
         self.cache.set((IVec3::MAX, std::ptr::null()));
         self.changed.insert(cp);
@@ -356,7 +381,10 @@ impl<'a, M: CubeMap> Lighter<'a, M> {
         self.changed.insert(cp);
         let base = cp * 16;
         let Some(cube) = self.map.cube(cp) else { return };
-        let all_opaque = cube.palette().iter().all(|&s| self.c.tight[s as usize].opacity >= 15);
+        let all_opaque = cube
+            .palette()
+            .iter()
+            .all(|&s| self.c.tight[s as usize].opacity >= 15);
         if all_opaque {
             return;
         }
@@ -414,7 +442,10 @@ impl<'a, M: CubeMap> Lighter<'a, M> {
         if cube.uniform_light().is_some_and(|l| ch(l, c) >= level) {
             return false;
         }
-        !cube.palette().iter().all(|&s| self.c.tight[s as usize].opacity >= 15)
+        !cube
+            .palette()
+            .iter()
+            .all(|&s| self.c.tight[s as usize].opacity >= 15)
     }
 
     fn seed_from_neighbors(&mut self, cp: IVec3, c: usize, dirs: &[usize]) {
@@ -502,7 +533,11 @@ impl<'a, M: CubeMap> Lighter<'a, M> {
 /// value), for `Lighter::spread`. Only reads, so cubes lit apart can be looked at side by side.
 pub fn outward<M: CubeMap>(map: &M, c: &Content, sky: bool, cp: IVec3, out: &mut Vec<(IVec3, u8, u8)>) {
     let Some(cube) = map.cube(cp) else { return };
-    let opaque = |cube: &Cube| cube.palette().iter().all(|&s| c.tight[s as usize].opacity >= 15);
+    let opaque = |cube: &Cube| {
+        cube.palette()
+            .iter()
+            .all(|&s| c.tight[s as usize].opacity >= 15)
+    };
     if opaque(cube) {
         return;
     }
@@ -576,7 +611,14 @@ pub fn prelight(c: &Content, cube: &mut Cube, sky: bool) {
                 continue;
             }
             let (x, y, z) = (i & 15, i >> 8, (i >> 4) & 15);
-            for (d, ok, n) in [(0, x > 0, i.wrapping_sub(1)), (1, x < 15, i + 1), (2, y > 0, i.wrapping_sub(256)), (3, y < 15, i + 256), (4, z > 0, i.wrapping_sub(16)), (5, z < 15, i + 16)] {
+            for (d, ok, n) in [
+                (0, x > 0, i.wrapping_sub(1)),
+                (1, x < 15, i + 1),
+                (2, y > 0, i.wrapping_sub(256)),
+                (3, y < 15, i + 256),
+                (4, z > 0, i.wrapping_sub(16)),
+                (5, z < 15, i + 16),
+            ] {
                 if !ok {
                     continue;
                 }
@@ -624,7 +666,9 @@ pub fn prelight(c: &Content, cube: &mut Cube, sky: bool) {
             flood(&mut light[ch + 1], &mut queue, &|k| props[k].absorb[ch], false);
         }
     }
-    let packed: Box<[u32; 4096]> = Box::new(std::array::from_fn(|i| light[0][i] as u32 | (light[1][i] as u32) << 8 | (light[2][i] as u32) << 16 | (light[3][i] as u32) << 24));
+    let packed: Box<[u32; 4096]> = Box::new(std::array::from_fn(|i| {
+        light[0][i] as u32 | (light[1][i] as u32) << 8 | (light[2][i] as u32) << 16 | (light[3][i] as u32) << 24
+    }));
     cube.set_light_all(packed);
 }
 

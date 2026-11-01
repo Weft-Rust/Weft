@@ -37,6 +37,8 @@ pub const BUILTIN: &[(&str, &str)] = &[
     (abi::comp::SUPPORT, "tag"),
     (abi::comp::SUPPORT_NEAR, "tag"),
     (abi::comp::SPREADS_TO, "tag"),
+    (abi::comp::GROW_TIME, "f32"),
+    (abi::comp::GROW_LIGHT, "u32"),
     (abi::comp::SPREAD_TIME, "f32"),
     (abi::comp::SPREAD_LIGHT, "u32"),
     (abi::comp::SMOTHERED_INTO, "block"),
@@ -66,7 +68,11 @@ impl RawValue {
         unsafe {
             let schema = v.schema.as_str().to_string();
             let bytes = v.value.as_slice().to_vec();
-            let text = (written_as_text(&schema) && bytes.len() == size_of::<Str>()).then(|| std::ptr::read_unaligned(bytes.as_ptr() as *const Str).as_str().to_string());
+            let text = (written_as_text(&schema) && bytes.len() == size_of::<Str>()).then(|| {
+                std::ptr::read_unaligned(bytes.as_ptr() as *const Str)
+                    .as_str()
+                    .to_string()
+            });
             RawValue { name: v.name.as_str().to_string(), schema, bytes, text }
         }
     }
@@ -131,7 +137,12 @@ struct Table {
 impl Table {
     fn new(entries: usize, components: usize) -> Table {
         let words = components.div_ceil(64).max(1);
-        Table { entries: entries as u32, words: words as u32, bits: vec![0; entries * words], cols: (0..components).map(|_| (0, Vec::new())).collect() }
+        Table {
+            entries: entries as u32,
+            words: words as u32,
+            bits: vec![0; entries * words],
+            cols: (0..components).map(|_| (0, Vec::new())).collect(),
+        }
     }
 
     #[inline]
@@ -183,22 +194,33 @@ impl Components {
 
     /// Typed read; the caller knows the schema (engine built-ins).
     pub fn get<T: Copy>(&self, kind: usize, entry: u32, comp: u32) -> Option<T> {
-        self.bytes(kind, entry, comp).filter(|b| b.len() >= size_of::<T>()).map(|b| unsafe { std::ptr::read_unaligned(b.as_ptr() as *const T) })
+        self.bytes(kind, entry, comp)
+            .filter(|b| b.len() >= size_of::<T>())
+            .map(|b| unsafe { std::ptr::read_unaligned(b.as_ptr() as *const T) })
     }
 
     pub fn text(&self, kind: usize, entry: u32, comp: u32) -> Option<&str> {
-        (self.schemas.get(comp as usize).map(String::as_str) == Some("str")).then(|| self.get::<Str>(kind, entry, comp)).flatten().map(|s| unsafe { s.as_str() })
+        (self.schemas.get(comp as usize).map(String::as_str) == Some("str"))
+            .then(|| self.get::<Str>(kind, entry, comp))
+            .flatten()
+            .map(|s| unsafe { s.as_str() })
     }
 
     /// Component ids an entry has, in id order.
     pub fn of(&self, kind: usize, entry: u32) -> impl Iterator<Item = u32> + '_ {
         let t = &self.tables[kind];
         let row: &[u64] = if entry < t.entries { &t.bits[(entry * t.words) as usize..((entry + 1) * t.words) as usize] } else { &[] };
-        row.iter().enumerate().flat_map(|(w, &bits)| (0..64).filter(move |b| bits >> b & 1 != 0).map(move |b| w as u32 * 64 + b))
+        row.iter().enumerate().flat_map(|(w, &bits)| {
+            (0..64)
+                .filter(move |b| bits >> b & 1 != 0)
+                .map(move |b| w as u32 * 64 + b)
+        })
     }
 
     pub fn is_tag(&self, comp: u32) -> bool {
-        self.schemas.get(comp as usize).is_some_and(|s| s.is_empty())
+        self.schemas
+            .get(comp as usize)
+            .is_some_and(|s| s.is_empty())
     }
 
     pub fn table(&self) -> *const abi::ComponentTable {
@@ -216,7 +238,11 @@ fn layout_of(schema: &str) -> Option<(usize, usize)> {
         "u64" | "i64" | "f64" => return Some((8, 8)),
         _ => {}
     }
-    if let Some((t, n)) = s.strip_prefix('[').and_then(|r| r.strip_suffix(']')).and_then(|r| r.rsplit_once(';')) {
+    if let Some((t, n)) = s
+        .strip_prefix('[')
+        .and_then(|r| r.strip_suffix(']'))
+        .and_then(|r| r.rsplit_once(';'))
+    {
         let (size, align) = layout_of(t)?;
         return Some((size * n.trim().parse::<usize>().ok()?, align));
     }
@@ -305,9 +331,19 @@ pub struct Builder {
 
 impl Default for Builder {
     fn default() -> Self {
-        let mut b = Builder { decl: FxHashMap::default(), names: Vec::new(), ids: FxHashMap::default(), tables: Vec::new(), texts: Vec::new(), setters: FxHashMap::default(), errors: Vec::new(), refs: None };
+        let mut b = Builder {
+            decl: FxHashMap::default(),
+            names: Vec::new(),
+            ids: FxHashMap::default(),
+            tables: Vec::new(),
+            texts: Vec::new(),
+            setters: FxHashMap::default(),
+            errors: Vec::new(),
+            refs: None,
+        };
         for (name, schema) in BUILTIN {
-            b.decl.insert(name.to_string(), (schema.to_string(), "the engine".into()));
+            b.decl
+                .insert(name.to_string(), (schema.to_string(), "the engine".into()));
         }
         b
     }
@@ -334,7 +370,8 @@ impl Builder {
             }
             Some(_) => {}
             None => {
-                self.decl.insert(name.to_string(), (schema.to_string(), who()));
+                self.decl
+                    .insert(name.to_string(), (schema.to_string(), who()));
             }
         }
     }
@@ -354,8 +391,15 @@ impl Builder {
     pub fn start(&mut self, entries: [usize; KINDS]) {
         let mut names: Vec<String> = self.decl.keys().cloned().collect();
         names.sort();
-        self.ids = names.iter().enumerate().map(|(i, n)| (n.clone(), i as u32)).collect();
-        self.tables = entries.iter().map(|&n| Table::new(n, names.len())).collect();
+        self.ids = names
+            .iter()
+            .enumerate()
+            .map(|(i, n)| (n.clone(), i as u32))
+            .collect();
+        self.tables = entries
+            .iter()
+            .map(|&n| Table::new(n, names.len()))
+            .collect();
         self.names = names;
     }
 
@@ -374,14 +418,23 @@ impl Builder {
         for &c in comps {
             mask[(c / 64) as usize] |= 1 << (c % 64);
         }
-        (0..t.entries).filter(|&e| t.bits[(e * t.words) as usize..((e + 1) * t.words) as usize].iter().zip(&mask).any(|(b, m)| b & m != 0)).collect()
+        (0..t.entries)
+            .filter(|&e| {
+                t.bits[(e * t.words) as usize..((e + 1) * t.words) as usize]
+                    .iter()
+                    .zip(&mask)
+                    .any(|(b, m)| b & m != 0)
+            })
+            .collect()
     }
 
     fn encode<'v>(&mut self, v: &'v RawValue) -> Result<std::borrow::Cow<'v, [u8]>, String> {
         match &v.text {
             Some(t) if v.schema == "tag" => {
                 let tag = crate::refs::tag_name(t)?;
-                self.id(tag).map(|id| id.to_le_bytes().to_vec().into()).ok_or_else(|| format!("unknown tag {tag}"))
+                self.id(tag)
+                    .map(|id| id.to_le_bytes().to_vec().into())
+                    .ok_or_else(|| format!("unknown tag {tag}"))
             }
             Some(t) if v.schema != "str" => match &self.refs {
                 Some(resolve) => resolve(&v.schema, t).map(Into::into),
@@ -391,7 +444,11 @@ impl Builder {
                 let boxed: Box<str> = t.as_str().into();
                 let s = Str { ptr: boxed.as_ptr(), len: boxed.len() };
                 self.texts.push(boxed);
-                Ok(unsafe { std::slice::from_raw_parts(&s as *const Str as *const u8, size_of::<Str>()).to_vec().into() })
+                Ok(unsafe {
+                    std::slice::from_raw_parts(&s as *const Str as *const u8, size_of::<Str>())
+                        .to_vec()
+                        .into()
+                })
             }
             None => Ok(v.bytes.as_slice().into()),
         }
@@ -416,10 +473,14 @@ impl Builder {
         if let Some((_, mod_name)) = setter {
             let changed = t.value(entry, comp).is_some_and(|old| old != &*bytes);
             if had && changed {
-                let before = self.setters.get(&(kind, entry, comp)).map_or("its registration", String::as_str);
+                let before = self
+                    .setters
+                    .get(&(kind, entry, comp))
+                    .map_or("its registration", String::as_str);
                 log::info!("{mod_name} overrides {} on {} (was set by {before})", v.name, label());
             }
-            self.setters.insert((kind, entry, comp), mod_name.to_string());
+            self.setters
+                .insert((kind, entry, comp), mod_name.to_string());
         }
         let t = &mut self.tables[kind];
         if !bytes.is_empty() {
@@ -430,7 +491,8 @@ impl Builder {
             }
             if bytes.len() != *stride as usize {
                 // Marking it present with no value would read as zero.
-                self.errors.push(format!("{}: {} has a value of {} bytes, others have {}", label(), v.name, bytes.len(), stride));
+                self.errors
+                    .push(format!("{}: {} has a value of {} bytes, others have {}", label(), v.name, bytes.len(), stride));
                 return;
             }
             let at = (entry * *stride) as usize;
@@ -455,10 +517,14 @@ impl Builder {
             return;
         }
         let row = (from.1 * src.words) as usize;
-        let set: Vec<u32> = (0..src.words as usize).flat_map(|w| {
-            let bits = src.bits[row + w];
-            (0..64u32).filter(move |b| bits >> b & 1 != 0).map(move |b| w as u32 * 64 + b)
-        }).collect();
+        let set: Vec<u32> = (0..src.words as usize)
+            .flat_map(|w| {
+                let bits = src.bits[row + w];
+                (0..64u32)
+                    .filter(move |b| bits >> b & 1 != 0)
+                    .map(move |b| w as u32 * 64 + b)
+            })
+            .collect();
         for comp in set {
             if self.tables[to.0].has(to.1, comp) {
                 continue;
@@ -483,7 +549,15 @@ impl Builder {
     pub fn finish(self) -> Components {
         let Builder { decl, names, ids, tables, texts, .. } = self;
         let schemas: Vec<String> = names.iter().map(|n| decl[n].0.clone()).collect();
-        let columns: Vec<Vec<abi::Column>> = tables.iter().map(|t| t.cols.iter().map(|(stride, data)| abi::Column { data: data.as_ptr(), stride: *stride }).collect()).collect();
+        let columns: Vec<Vec<abi::Column>> = tables
+            .iter()
+            .map(|t| {
+                t.cols
+                    .iter()
+                    .map(|(stride, data)| abi::Column { data: data.as_ptr(), stride: *stride })
+                    .collect()
+            })
+            .collect();
         let kinds: [abi::KindTable; KINDS] = std::array::from_fn(|k| {
             let t = &tables[k];
             abi::KindTable { entries: t.entries, words: t.words, bits: t.bits.as_ptr(), columns: columns[k].as_ptr() }
@@ -551,7 +625,8 @@ mod tests {
         let mut errors = Vec::new();
         b.declare("leaves", "block", None, &|| "a".into(), &mut errors);
         b.start([1, 0, 0, 0, 0]);
-        b.refs = Some(Box::new(|_, t| if t == "a:oak_leaves" { Ok(7u32.to_le_bytes().to_vec()) } else { Err(format!("unknown block {t}")) }));
+        b.refs =
+            Some(Box::new(|_, t| if t == "a:oak_leaves" { Ok(7u32.to_le_bytes().to_vec()) } else { Err(format!("unknown block {t}")) }));
         let v = |t: &str| RawValue { name: "leaves".into(), schema: "block".into(), bytes: vec![], text: Some(t.into()) };
         b.put(BLOCK, 0, &v("a:oak_leaves"), None, &|| "log".into());
         b.put(BLOCK, 0, &v("a:oak_leafs"), None, &|| "log".into());
@@ -570,7 +645,9 @@ mod tests {
         b.start([3, 2, 0, 0, 0]);
         b.put(BLOCK, 1, &value("fuel", "u32", 300), None, &|| "x".into());
         b.put(BLOCK, 2, &RawValue::tag("plant_soil"), None, &|| "x".into());
-        b.put(ITEM, 0, &RawValue { name: "label".into(), schema: "str".into(), bytes: vec![], text: Some("hi".into()) }, None, &|| "x".into());
+        b.put(ITEM, 0, &RawValue { name: "label".into(), schema: "str".into(), bytes: vec![], text: Some("hi".into()) }, None, &|| {
+            "x".into()
+        });
         b.inherit((BLOCK, 1), (ITEM, 1));
         b.put(BLOCK, 1, &value("fuel", "u32", 100), Some((ModId(1), "testmod")), &|| "x".into());
         let c = b.finish();

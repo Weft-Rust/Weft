@@ -11,6 +11,7 @@ pub mod redstone;
 mod scene;
 mod sync;
 mod ui;
+mod unify;
 mod visual;
 mod world;
 
@@ -39,12 +40,14 @@ pub fn all() -> Vec<TestDef> {
         ui::inventory_crafting,
         ui::creative_inventory,
         ui::chat,
+        ui::chat_overflow,
         ui::mod_settings,
         ui::recipe_viewer,
         ui::inventory_hotkeys,
         world::persistence,
         world::missing_dimension,
         world::dimensions,
+        world::world_seed,
         world::virtual_menus,
         world::worldgen,
         world::plants_on_cube_tops,
@@ -65,6 +68,11 @@ pub fn all() -> Vec<TestDef> {
         gameplay::mining_and_wear,
         gameplay::creative_and_invulnerable,
         gameplay::creative_clicks,
+        gameplay::block_shapes,
+        gameplay::cell_parts,
+        gameplay::hitboxes,
+        gameplay::furnace_one_coal,
+        gameplay::creative_middle_click,
         gameplay::presses_never_wait,
         gameplay::replaced_plants_drop,
         gameplay::swimming,
@@ -132,6 +140,21 @@ pub fn all() -> Vec<TestDef> {
         visual::gizmos,
         visual::multiplayer,
         visual::client_hooks,
+        unify::push_is_the_same_for_all,
+        unify::water_beside_a_slab_ends_a_fall,
+        unify::thrown_up_is_no_jump,
+        unify::jumping_while_mining,
+        unify::unbreakable_in_creative,
+        unify::mining_at_a_slow_tick_rate,
+        unify::virtual_inventory_stays,
+        unify::spectators_push_nothing,
+        unify::tinted_in_the_hand,
+        unify::swings_count_on_both_sides,
+        unify::thrown_from_a_menu,
+        unify::game_modes_for_mods,
+        unify::wrong_item_ids,
+        unify::bed_drop_in_its_table,
+        unify::beds_every_way,
         audit::saved_entities_stay_gone,
         audit::death_is_a_state,
         audit::respawn_keeps_mode,
@@ -159,6 +182,8 @@ pub fn all() -> Vec<TestDef> {
         looks::third_person_shakes,
         looks::block_dust_scatters,
         looks::ctm_off_the_cube,
+        looks::translucent_order,
+        looks::light_by_day,
         looks::ctm_any_model,
         redstone::redstone_wire,
         redstone::redstone_on_walls,
@@ -172,9 +197,10 @@ pub fn all() -> Vec<TestDef> {
         redstone::redstone_contest,
         redstone::redstone_rides,
         redstone::redstone_body_edges,
-        redstone::redstone_motors_together,
-        redstone::redstone_motor_up,
-        redstone::redstone_motor,
+        redstone::redstone_floaters_together,
+        redstone::redstone_floater_up,
+        redstone::redstone_floater_riders,
+        redstone::redstone_floater,
         redstone::redstone_lift_api,
         redstone::redstone_copper_lamp,
         redstone::redstone_body_light,
@@ -224,6 +250,7 @@ pub fn all() -> Vec<TestDef> {
         redstone::body_walking,
         bodies::natural_spawning,
         bodies::zombie_chases,
+        bodies::neutral_mobs,
         bodies::morph,
     ]
 }
@@ -245,7 +272,8 @@ impl T {
     pub async fn flat(&self) -> R {
         self.world(1).await?;
         self.cmd("/dim base:flatlands").await?;
-        self.until("flatlands", Duration::from_secs(20), |t| t.state().dim != 0 || t.state().pos[1] < 10.0).await?;
+        self.until("flatlands", Duration::from_secs(20), |t| t.state().dim != 0 || t.state().pos[1] < 10.0)
+            .await?;
         self.loaded().await?;
         self.op("mode survival").await?;
         self.idle().await
@@ -264,6 +292,9 @@ impl T {
     /// Counts entities of a kind near the player as the server has them.
     pub async fn count_near(&self, kind: &str, r: f64) -> Result<usize, String> {
         let list = self.op(&format!("near ~ ~ ~ {r}")).await?;
-        Ok(list.split_whitespace().filter(|e| e.ends_with(&format!(":{kind}"))).count())
+        Ok(list
+            .split_whitespace()
+            .filter(|e| e.ends_with(&format!(":{kind}")))
+            .count())
     }
 }
