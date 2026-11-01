@@ -466,6 +466,7 @@ pub fn register(r: &mut Registry) {
         .hardness(0.3)
         .tab(&crate::tabs::NATURAL);
     r.block(&BRICKS)
+        .faces(["bricks_side_1", "bricks_side_4", "bricks_bottom", "bricks_top", "bricks_side_3", "bricks_side_2"])
         .sound_group("stone")
         .hardness(2.0)
         .mineable("pickaxe")
@@ -473,7 +474,7 @@ pub fn register(r: &mut Registry) {
         .tab(&crate::tabs::BUILDING);
     r.block(&STONE_BRICKS)
         .sound_group("stone")
-        .texture("stonebrick")
+        .faces(["stonebrick_side_1", "stonebrick_side_4", "stonebrick_bottom", "stonebrick_top", "stonebrick_side_3", "stonebrick_side_2"])
         .hardness(1.5)
         .mineable("pickaxe")
         .needs_tool(0)
