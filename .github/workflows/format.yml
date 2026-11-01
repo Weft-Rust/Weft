@@ -1,0 +1,28 @@
+# Fails when any Rust file is not formatted per rustfmt.toml. To fix: run `cargo fmt --all`
+# (and the second command below for the example mod), then commit.
+name: Format
+
+on:
+  pull_request:
+  push:
+    branches: [master]
+
+permissions:
+  contents: read
+
+jobs:
+  rustfmt:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+
+      - name: Workspace
+        run: cargo fmt --all --check
+
+      # Its own cargo root outside the workspace, so `--all` above does not reach it.
+      - name: Example mod
+        run: cargo fmt --check --manifest-path examples/examplemod/Cargo.toml

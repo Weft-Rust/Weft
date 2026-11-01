@@ -1,0 +1,9 @@
+# Formatting for every crate in this repository, checked on each pull request.
+# Run `cargo fmt --all` before committing (the example mod needs its own run, see the workflow).
+
+# Wide lines suit the dense engine code.
+max_width = 140
+# Keep short if/else, struct literals and call arguments on one line as long as they fit max_width.
+use_small_heuristics = "Max"
+# ...except method chains: longer than this, they get one call per line.
+chain_width = 60
