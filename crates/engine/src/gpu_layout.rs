@@ -37,7 +37,9 @@ shared! {
     }
     /// Free-form quad record, eight words: four corners (10 bits per axis, 1/16 block from -2),
     /// texture and biome (like a face's word 1), uv (5 bits each, 1/16) and tint kind with
-    /// `FLAT`, corner light (like a face's).
+    /// `FLAT`, corner light (like a face's). Twelve free bits hold 1/8ths of those uv units, for
+    /// an unwrap on a big texture: 8 of each word's top, the rest beside the tint. A shader
+    /// pack's older copy goes by the whole units and is none the worse for it.
     quad {
         POS_MASK = 1023,
         POS_BITS = 10,
@@ -45,6 +47,9 @@ shared! {
         POS_OFFSET = 32,
         UV_MASK = 31,
         UV_BITS = 5,
+        UV_FINE_BITS = 3,
+        UV_FINE_LOW_SHIFT = 30,
+        UV_FINE_HIGH_SHIFT = 20,
         TINT_SHIFT = 24,
         /// Tint flag: no directional shading (plants).
         FLAT = 16,
@@ -263,10 +268,15 @@ pub fn quad_pos(p: [f32; 3]) -> u32 {
     e(p[0]) | e(p[1]) << quad::POS_BITS | e(p[2]) << (2 * quad::POS_BITS)
 }
 
-/// A quad's uv word: `uv` (u0, v0, u1, v1) in 1/16, tint kind and flags.
+/// A quad's uv word, and what goes on top of each of its corners' words: `uv` (u0, v0, u1, v1, 16
+/// across a texture), tint kind and flags.
 #[inline]
-pub fn quad_uv(uv: [u32; 4], tint: u32) -> u32 {
-    uv[0] | uv[1] << quad::UV_BITS | uv[2] << (2 * quad::UV_BITS) | uv[3] << (3 * quad::UV_BITS) | tint << quad::TINT_SHIFT
+pub fn quad_uv(uv: [f32; 4], tint: u32) -> (u32, [u32; 4]) {
+    let e = uv.map(|v| ((v * 8.0).round() as i32).clamp(0, (quad::UV_MASK as i32 + 1) * 8 - 1) as u32);
+    let [whole, fine] = [e.map(|v| v >> quad::UV_FINE_BITS), e.map(|v| v & ((1 << quad::UV_FINE_BITS) - 1))];
+    let fine = fine[0] | fine[1] << quad::UV_FINE_BITS | fine[2] << (2 * quad::UV_FINE_BITS) | fine[3] << (3 * quad::UV_FINE_BITS);
+    let word = whole[0] | whole[1] << quad::UV_BITS | whole[2] << (2 * quad::UV_BITS) | whole[3] << (3 * quad::UV_BITS) | (fine >> 8) << quad::UV_FINE_HIGH_SHIFT | tint << quad::TINT_SHIFT;
+    (word, std::array::from_fn(|i| ((fine >> (2 * i)) & 3) << quad::UV_FINE_LOW_SHIFT))
 }
 
 /// A distant terrain record (`lod_face`): the `dir` face of a box at `pos` in the tile, `size`
@@ -305,10 +315,18 @@ fn records() -> String {
         "    let p = vec3<u32>(w, w >> QUAD_POS_BITS, w >> (2u * QUAD_POS_BITS)) & vec3(QUAD_POS_MASK);\n",
         "    return (vec3<f32>(p) - f32(QUAD_POS_OFFSET)) / 16.0;\n",
         "}\n",
-        "// u0, v0, u1, v1.\n",
+        "// u0, v0, u1, v1, in whole 1/16ths of a texture.\n",
         "fn quad_uv(w: u32) -> vec4<f32> {\n",
         "    let b = QUAD_UV_BITS;\n",
         "    return vec4<f32>(vec4<u32>(w, w >> b, w >> (2u * b), w >> (3u * b)) & vec4(QUAD_UV_MASK)) / 16.0;\n",
+        "}\n",
+        "// The same to the 1/8th, from the uv word and the four corners' words.\n",
+        "fn quad_uv_fine(w: u32, c0: u32, c1: u32, c2: u32, c3: u32) -> vec4<f32> {\n",
+        "    let s = QUAD_UV_FINE_LOW_SHIFT;\n",
+        "    let f = (c0 >> s) | (c1 >> s) << 2u | (c2 >> s) << 4u | (c3 >> s) << 6u | ((w >> QUAD_UV_FINE_HIGH_SHIFT) & 15u) << 8u;\n",
+        "    let b = QUAD_UV_FINE_BITS;\n",
+        "    let fine = vec4<u32>(f, f >> b, f >> (2u * b), f >> (3u * b)) & vec4(7u);\n",
+        "    return quad_uv(w) + vec4<f32>(fine) / (8.0 * 16.0);\n",
         "}\n",
         "fn lod_pos(w0: u32, w2: u32) -> vec3<f32> {\n",
         "    return vec3<f32>(f32(w0 & LOD_FACE_POS_MASK), f32(bitcast<i32>(w2 << LOD_FACE_HALF_SHIFT) >> LOD_FACE_HALF_SHIFT), f32((w0 >> LOD_FACE_Z_SHIFT) & LOD_FACE_POS_MASK));\n",
@@ -792,6 +810,22 @@ pub fn particle_sim_prelude(window_reach: i32) -> String {
 }
 
 #[cfg(test)]
+mod quad_uv_tests {
+    use super::*;
+
+    #[test]
+    fn quad_uv_keeps_a_fine_unwrap() {
+        let (w, on) = quad_uv([0.25, 16.0, 1.25, 31.875], quad::FLAT);
+        let m = quad::UV_MASK;
+        // Whole units where they always were, for what reads only those.
+        assert_eq!([w & m, (w >> 5) & m, (w >> 10) & m, (w >> 15) & m], [0, 16, 1, 31]);
+        assert_eq!((w >> quad::TINT_SHIFT) & 31, quad::FLAT);
+        let fine = on[0] >> 30 | (on[1] >> 30) << 2 | (on[2] >> 30) << 4 | (on[3] >> 30) << 6 | ((w >> 20) & 15) << 8;
+        assert_eq!([fine & 7, (fine >> 3) & 7, (fine >> 6) & 7, (fine >> 9) & 7], [2, 0, 2, 7]);
+    }
+}
+
+#[cfg(test)]
 mod tests {
     use super::*;
 
@@ -817,7 +851,7 @@ mod tests {
         assert_eq!([l[3] & 0xFFFF, l[2] >> 16, l[3] >> 16], [16, 7, 32]);
         let src = format!(
             "{}{}const F0: u32 = {}u;\nconst Q: u32 = {}u;\nconst L0: u32 = {}u;\nconst L2: u32 = {}u;\nconst L3: u32 = {}u;\n\
-             @compute @workgroup_size(1) fn main() {{ _ = face_pos(F0); _ = face_dir(F0); _ = face_ao(F0); _ = quad_pos(Q); _ = lod_pos(L0, L2); _ = lod_size(L2, L3); _ = corner_light(1u, 2u, 3u); _ = quad_uv(Q); _ = lod_dir(L0); _ = lod_tint(L0); }}\n",
+             @compute @workgroup_size(1) fn main() {{ _ = face_pos(F0); _ = face_dir(F0); _ = face_ao(F0); _ = quad_pos(Q); _ = lod_pos(L0, L2); _ = lod_size(L2, L3); _ = corner_light(1u, 2u, 3u); _ = quad_uv(Q); _ = quad_uv_fine(Q, Q, Q, Q, Q); _ = lod_dir(L0); _ = lod_tint(L0); }}\n",
             wgsl(),
             records(),
             f[0],

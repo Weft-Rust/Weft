@@ -23,6 +23,13 @@ pub struct ModelBox {
     pub tilt: weft_abi::BoxTilt,
 }
 
+impl ModelBox {
+    /// A whole cube showing these textures.
+    pub fn whole(textures: [u32; 6]) -> ModelBox {
+        ModelBox { min: [0.0; 3], max: [1.0; 3], textures, uv: [[-1.0; 4]; 6], turn: [0; 6], tilt: weft_abi::BoxTilt::NONE }
+    }
+}
+
 /// What a state is to redstone (`abi::SignalDesc`, worked out for quick reading).
 #[derive(Clone, Copy, Default)]
 pub struct Signal {
@@ -91,15 +98,6 @@ impl StateInfo {
         match self.model {
             Model::Cross | Model::None | Model::Wire => Some(self.textures[0]),
             _ => None,
-        }
-    }
-
-    /// Boxes an item of this block is drawn with when it is not a sprite (block units).
-    pub fn item_shape(&self) -> Vec<ModelBox> {
-        if self.model == Model::Boxes && !self.boxes.is_empty() {
-            self.boxes.clone()
-        } else {
-            vec![ModelBox { min: [0.0; 3], max: [1.0; 3], textures: self.textures, uv: [[-1.0; 4]; 6], turn: [0; 6], tilt: weft_abi::BoxTilt::NONE }]
         }
     }
 }
@@ -864,7 +862,7 @@ fn apply_model(b: &mut RawBlock, m: &crate::block_model::FileModel) {
         if s.layer == Layer::Opaque {
             s.layer = Layer::Cutout;
         }
-        s.boxes = m.boxes.iter().map(|x| (x.min, x.max, x.textures.clone(), x.uv, [0; 6], weft_abi::BoxTilt::NONE)).collect();
+        s.boxes = m.boxes.iter().map(|x| (x.min, x.max, x.textures.clone(), x.uv, x.turn, x.tilt)).collect();
     }
 }
 
@@ -1665,18 +1663,7 @@ fn number_items(mods: &[ModMeta], items: Vec<(ModId, RawItem)>, blocks: &BlockTa
                         icon = textures.intern(&t);
                     }
                     let own = if icon == u32::MAX { 0 } else { icon };
-                    model = m
-                        .boxes
-                        .iter()
-                        .map(|b| ModelBox {
-                            turn: [0; 6],
-                            tilt: weft_abi::BoxTilt::NONE,
-                            min: b.min.map(|v| v / 16.0),
-                            max: b.max.map(|v| v / 16.0),
-                            textures: std::array::from_fn(|i| if b.textures[i].is_empty() { own } else { textures.intern(&b.textures[i]) }),
-                            uv: b.uv,
-                        })
-                        .collect();
+                    model = m.boxes.iter().map(|b| b.model_box(|t, _| if t.is_empty() { own } else { textures.intern(t) })).collect();
                 }
                 Ok(None) => {}
                 Err(e) => errors.push(e),

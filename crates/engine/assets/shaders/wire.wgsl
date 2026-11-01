@@ -1,4 +1,4 @@
-﻿// Redstone wire: a quad on a block's face for each piece and each arm of one, colored by the power
+// Redstone wire: a quad on a block's face for each piece and each arm of one, colored by the power
 // of its piece (`client/wires.rs`).
 
 struct WirePush {

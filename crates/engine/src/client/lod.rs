@@ -113,10 +113,11 @@ pub fn mesh(c: &Content, key: TileKey, words: &[u32]) -> (Vec<[u32; 4]>, (i32, i
         let (a, b) = (words[k], words[k + 1]);
         ((a & 0xFFFF) as u16 as i16 as i32, a >> 16, b & 0xFFFF, b >> 16)
     };
+    let looks = super::looks::current();
     let face_of = |state: u32, dir: usize| {
         let info = &c.states[state as usize];
         let tint = if info.tint_faces & (1 << dir) != 0 { info.tint as u32 } else { 0 };
-        (info.textures[dir] & face::TEX_MASK, tint)
+        (looks.drawn(state, info).textures[dir] & face::TEX_MASK, tint)
     };
     let mut out = Vec::new();
     let (mut lo, mut hi) = (i32::MAX, i32::MIN);

@@ -581,20 +581,10 @@ impl UiRenderer {
 
     /// Item icon: flat sprite, or an isometric cube for block items.
     pub fn item_icon(&mut self, c: &Content, tex: &GameTextures, x: f32, y: f32, size: f32, item: u32) {
-        let Some(def) = c.items.get(item as usize) else { return };
-        if item == 0 {
-            return;
-        }
         let looks = crate::client::looks::current();
-        let look = looks.item(item);
-        let model = look.and_then(|l| l.model.as_deref()).unwrap_or(&def.model);
-        let icon = look.and_then(|l| l.icon).unwrap_or(def.icon);
-        if !model.is_empty() {
-            self.boxes_icon(tex, x, y, size, model, &c.states[0]);
-            return;
-        }
-        if icon != u32::MAX {
-            self.quads.push(Quad {
+        match looks.item_draw(c, item) {
+            crate::client::looks::ItemDraw::Model(model) => self.boxes_icon(tex, x, y, size, model, &c.states[0]),
+            crate::client::looks::ItemDraw::Icon(icon) => self.quads.push(Quad {
                 p0: [x, y],
                 u: [size, 0.0],
                 v: [0.0, size],
@@ -603,17 +593,17 @@ impl UiRenderer {
                 tex: tex.texture(icon),
                 mode: ui_mode::ICON,
                 ..Default::default()
-            });
-            return;
+            }),
+            crate::client::looks::ItemDraw::Block(state) => self.state_icon(c, tex, x, y, size, state),
+            crate::client::looks::ItemDraw::Nothing => {}
         }
-        let Some(state) = def.block else { return };
-        self.state_icon(c, tex, x, y, size, state);
     }
 
     /// A block state the way block items show: a sprite for flat blocks, else an isometric model.
     pub fn state_icon(&mut self, c: &Content, tex: &GameTextures, x: f32, y: f32, size: f32, state: u32) {
         let Some(s) = c.states.get(state as usize) else { return };
-        if let Some(t) = s.item_sprite() {
+        let looks = crate::client::looks::current();
+        if let Some(t) = looks.block_sprite(state, s) {
             let tint = if s.tint == 0 || s.tint_faces & 1 == 0 { 0xFFFFFFFF } else { crate::content::item_tint(s.tint) << 8 | 0xFF };
             self.quads.push(Quad {
                 p0: [x, y],
@@ -627,7 +617,7 @@ impl UiRenderer {
             });
             return;
         }
-        self.boxes_icon(tex, x, y, size, &s.item_shape(), s);
+        self.boxes_icon(tex, x, y, size, &looks.block_shape(state, s), s);
     }
 
     /// Model boxes drawn isometric, tinted like `s` (air for an item's own model).
@@ -666,7 +656,7 @@ impl UiRenderer {
                 let p0 = top_left;
                 let u = [top_right[0] - p0[0], top_right[1] - p0[1]];
                 let v = [bottom_left[0] - p0[0], bottom_left[1] - p0[1]];
-                let uv = uv.map(|t| t as f32 / 16.0);
+                let uv = uv.map(|t| t / 16.0);
                 self.quads.push(Quad { p0, u, v, uv, color: shade(tint(face), k), tex: tex.texture(b.textures[face]), mode: ui_mode::ICON, ..Default::default() });
                 // Tinted overlay on top of its face.
                 if let Some(&ov) = tex.overlays.get(b.textures[face] as usize).filter(|&&ov| ov != 0) {

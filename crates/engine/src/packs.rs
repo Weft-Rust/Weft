@@ -70,14 +70,19 @@ pub fn pack_uses(name: &str, what: &str) -> bool {
 
 fn pack_source(name: &str) -> Option<String> {
     let path = SHADER_PACK.read().unwrap().as_ref().map(|d| d.join(name))?;
-    std::fs::read_to_string(path).ok()
+    std::fs::read_to_string(path).ok().map(|s| without_bom(&s).to_string())
+}
+
+/// Windows editors may save a file with a byte order mark, which WGSL has no place for.
+fn without_bom(src: &str) -> &str {
+    src.strip_prefix('\u{feff}').unwrap_or(src)
 }
 
 /// An engine shader as an asset (`core:shaders/<name>`) like everything else: development runs
 /// read the source tree, so edits show after a reload.
 fn engine_source(assets: &Assets, name: &str) -> String {
     let asset = format!("core:{}", name.trim_end_matches(".wgsl"));
-    assets.read(&asset, "shaders", "wgsl").map(|b| String::from_utf8_lossy(&b).into_owned()).unwrap_or_else(|| {
+    assets.read(&asset, "shaders", "wgsl").map(|b| without_bom(&String::from_utf8_lossy(&b)).to_string()).unwrap_or_else(|| {
         log::error!("engine shader {name} is missing from the assets");
         String::new()
     })

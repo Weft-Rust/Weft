@@ -181,7 +181,7 @@ fn vs_quad(@builtin(vertex_index) vi: u32, @builtin(instance_index) ii: u32) -> 
     let local = quad_pos(records[base + c]);
     let w4 = records[base + 4u];
     let uvw = records[base + 5u];
-    let uv = quad_uv(uvw);
+    let uv = quad_uv_fine(uvw, records[base], records[base + 1u], records[base + 2u], records[base + 3u]);
     var uvs = array<vec2<f32>, 4>(vec2(uv.x, uv.w), vec2(uv.z, uv.w), vec2(uv.z, uv.y), vec2(uv.x, uv.y));
     let n = normalize(cross(p1 - p0, p2 - p1));
     // Face shading blended by normal; plants opt out like vanilla's crossed squares.
@@ -211,8 +211,14 @@ fn vs_quad(@builtin(vertex_index) vi: u32, @builtin(instance_index) ii: u32) -> 
         tint = tint_color(tint_kind, w4 >> FACE_BIOME_SHIFT, o.x * 16 + i32(round(local.x)), o.z * 16 + i32(round(local.z)));
     }
     out.tint = tint;
-    out.color = tint * shade;
-    out.overlay = 0u;
+    let ov = frames[g.extra.x + tex_id];
+    if ov != 0u {
+        out.overlay = texture_frame(ov - 1u).a + 1u;
+        out.color = vec3(shade);
+    } else {
+        out.overlay = 0u;
+        out.color = tint * shade;
+    }
     return out;
 }
 

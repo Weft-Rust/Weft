@@ -55,6 +55,8 @@ pub fn register(r: &mut Registry) {
     static VARIED_BOX: Block = Block::named("varied_box");
     r.block(&VARIED_PLANT).texture("varied").plant().no_item();
     r.block(&VARIED_BOX).texture("varied").model_box([2.0, 0.0, 2.0], [14.0, 16.0, 14.0]).no_item();
+    static VARIED_CUBE: Block = Block::named("varied_cube");
+    r.block(&VARIED_CUBE).texture("varied_cube").no_item();
     // A mod's own redstone: a gate on when both its rear and a side have power, another wire.
     static AND_GATE: Block = Block::named("and_gate");
     static BLUE_WIRE: Block = Block::named("blue_wire");

@@ -1620,6 +1620,7 @@ fn reload_assets(r: &mut Running, opts: &Options) {
         g.client.weather_render.reload(&mut *r.gpu, &r.assets);
         g.client.sky.reload(&mut *r.gpu, &r.assets);
         g.client.world.remesh_all();
+        g.client.entities.values_mut().filter_map(|e| e.structure.as_mut()).for_each(|s| s.remesh_all());
     }
     r.rebuild_all();
     log::info!("assets reloaded");

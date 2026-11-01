@@ -8,7 +8,8 @@ those port with little more than renaming files.
 ## Note
 CTM is created without code and works from both mods and resource packs, a pack's file overrides the mod's one.\
 It works on blocks only, so no CTM on items or entities.\
-Plants and block models (`model_box` or a model file) take `random` and `fixed`: every other method needs neighbors on a cube's face, and a rule like that on a texture they show logs an error and stops the game. Keep it off them with `blocks =`. A plant counts as a side for [faces](#faces).\
+Every method works on every block except for liquids: a method looks at neighbors, not at what is drawn. A plant is one west face, so `vertical` and `top` are what it has most use for, and `horizontal` looks along z. The one exception is `compact`. Its tiles are cut for a cube's face: on a texture a plant or a model shows it logs `compact ctm doesn't support custom models` and stops the game. Use full `ctm`, or keep it off them with `blocks =`.\
+A tile can also [be a model](#models-as-tiles).\
 Examples to copy from are in `mods/base/assets/textures/block/`: `glass.ctm`, `log_oak.ctm`, `stone.ctm`.
 
 Check [textures guide](textures.md) for more texturing options like overlays, glow and animation.
@@ -66,6 +67,8 @@ examples:\
 `tiles = glass/0-4`\
 `tiles = <default> stone/1-3`\
 `tiles = log_oak/0 log_oak/1 log_oak/2 log_oak/3`
+
+A tile with a model file of the same name is that model, see [models as tiles](#models-as-tiles).
 
 If there are fewer tiles than the method needs, the rule is skipped and the log says
 `needs N tiles, has M`.
@@ -215,7 +218,41 @@ Needs `width * height` tiles.
 ### fixed
 always 1 tile. Handy together with `blocks`, `heights` or `biomes` to swap the texture there.
 
+## Models as tiles
+A tile doesn't have to be a picture. If `models/block/<tile>.json` exists, a Java block model the way Blockbench exports it, that tile redraws the whole block, whatever shape it had before. Every method can pick one, and every block can get one.
+
+A random cactus, one in five with a flower or a branch:
+```
+textures/block/cactus_side.ctm
+textures/block/cactus/1.png        <- an unwrap, any size
+models/block/cactus/1.json
+...
+```
+`cactus_side.ctm`:
+```
+method = random
+tiles = <default> cactus/1-3
+weights = 12 1 1 1
+```
+The method chooses the tile and the model shows its picture: a face the file gives no texture shows the picture named like the tile (`textures/block/cactus/1.png`), else the texture the `.ctm` belongs to. A file can name its own textures as usual, each face with its `uv` on them, in a model's 0 to 16 across the picture however big it is. Fractions are fine down to 1/8, that's what an unwrap on a 64x64 or 128x128 texture comes down to. The edge of a part can bleed a screen pixel into what is next to it on the picture, so leave a pixel of margin in the same color. `<default>` in the same list keeps the block as it was.
+
+Only the visual changes: collision, selection and light stay what the mod gave every player, since a server knows nothing of packs. Items show the block's plain model. A model is picked by its block's position, so `symmetry` has no say and all of its faces agree.
+
+Model corners go by whole model pixels, a corner at 1.5 lands on 2.
+
+### hides_neighbors
+A block the mod made opaque keeps hiding the faces next to it. If a model leaves gaps in such a block, you would look through the world there, so say it does:
+
+`hides_neighbors = false`
+
+The faces next to any block the rule goes for are then drawn. It goes on any rule, a `fixed` one with `tiles = <default>` is enough for a `models/block/<name>.json` of a pack. Light still treats the block as solid, so those faces take their light from what is around.
+
 ## Examples
+### Sugar cane
+```
+method = vertical
+tiles = reeds/0-3
+```
 
 ### Glass
 `glass.ctm`:
@@ -255,7 +292,7 @@ tiles = <default> sand_1 sand_2
 ```
 
 ## Debugging
-The log says `connected textures: N rules, M tiles, K generated` when any rule is loaded.\
+The log says `connected textures: N rules, M models, T textures, K generated` when any rule is loaded.\
 `unknown method` or `needs N tiles` lines name the file and the rule that was skipped, and a skipped
 rule just shows the plain texture.\
 A tile file that doesn't exist shows up as the "missing texture" pattern.

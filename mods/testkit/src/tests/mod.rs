@@ -159,6 +159,7 @@ pub fn all() -> Vec<TestDef> {
         looks::third_person_shakes,
         looks::block_dust_scatters,
         looks::ctm_off_the_cube,
+        looks::ctm_any_model,
         redstone::redstone_wire,
         redstone::redstone_on_walls,
         redstone::redstone_conduction,

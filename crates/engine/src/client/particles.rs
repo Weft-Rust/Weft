@@ -255,11 +255,15 @@ impl Particles {
             return;
         }
         // Block dust shows the block's side texture (a box model's first box's).
-        let side = |s: &crate::content::StateInfo| match s.boxes.first() {
-            Some(b) if s.model == weft_abi::Model::Boxes => b.textures[1],
-            // A piece of wire shows its dot, red: the picture has no color of its own.
-            _ if s.model == weft_abi::Model::Wire => s.textures[3],
-            _ => s.textures[1],
+        let looks = super::looks::current();
+        let side = |s: &crate::content::StateInfo| {
+            let d = looks.drawn(b.block as u32, s);
+            match d.boxes.first() {
+                Some(b) if d.model == weft_abi::Model::Boxes => b.textures[1],
+                // A piece of wire shows its dot, red: the picture has no color of its own.
+                _ if d.model == weft_abi::Model::Wire => d.textures[3],
+                _ => d.textures[1],
+            }
         };
         let dust = c.states.get(b.block as usize).filter(|_| k.frames.is_empty());
         let layer = dust.map_or(0, side);
