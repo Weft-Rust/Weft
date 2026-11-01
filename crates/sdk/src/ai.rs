@@ -141,9 +141,9 @@ pub fn watch_player(range: f64) -> impl Goal {
         if !w.navigating(id) {
             if let Some((_, ps)) = nearest_player(w, st, range) {
                 let (dx, dz) = (ps.pos[0] - st.pos[0], ps.pos[2] - st.pos[2]);
-                let dy = ps.pos[1] + ps.size[2] as f64 - (st.pos[1] + st.size[2] as f64);
+                let dy = ps.eye()[1] - st.eye()[1];
                 let mut now = *st;
-                now.yaw = (-dx).atan2(-dz) as f32;
+                now.yaw = crate::yaw_toward(st.pos, ps.pos);
                 now.pitch = dy.atan2((dx * dx + dz * dz).sqrt()) as f32;
                 w.set_entity(id, &now);
             }

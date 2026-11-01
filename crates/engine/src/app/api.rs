@@ -16,7 +16,6 @@ use crate::client::Client;
 use crate::client::modui::ClientView;
 use crate::input::Key;
 use crate::ui::Kind;
-use winit::keyboard::KeyCode;
 
 static LAUNCH: OnceLock<FxHashMap<String, String>> = OnceLock::new();
 static EXIT_CODE: AtomicI32 = AtomicI32::new(0);
@@ -283,11 +282,7 @@ pub unsafe extern "C" fn client_input(c: *mut abi::ClientCtx, op: u32, text: Str
         match op {
             ci::ACTION => match r.input.key_of(text) {
                 Some(c) => {
-                    for (bit, k) in [
-                        (crate::input::CTRL, KeyCode::ControlLeft),
-                        (crate::input::SHIFT, KeyCode::ShiftLeft),
-                        (crate::input::ALT, KeyCode::AltLeft),
-                    ] {
+                    for (bit, _, k, _) in crate::input::MODIFIERS {
                         if c.mods & bit != 0 {
                             r.hold(Key::Code(k), x);
                         }
@@ -296,7 +291,7 @@ pub unsafe extern "C" fn client_input(c: *mut abi::ClientCtx, op: u32, text: Str
                 }
                 None => return 0,
             },
-            ci::KEY => match crate::settings::parse_key(text) {
+            ci::KEY => match crate::input::Key::parse(text) {
                 Some(k) => r.hold(k, x),
                 None => return 0,
             },
@@ -431,11 +426,6 @@ pub unsafe extern "C" fn client_command(c: *mut abi::ClientCtx, op: u32, text: S
                 r.open(s);
             }
             op_::CLOSE_SCREEN => {
-                if r.screens.last().is_some_and(|(s, _)| s.shows_menu()) {
-                    if let Some(g) = r.game.as_mut() {
-                        g.client.close_menu();
-                    }
-                }
                 if !r.screens.is_empty() {
                     r.handle(vec![Request::Close]);
                 }
@@ -493,16 +483,17 @@ pub unsafe extern "C" fn client_text(c: *mut abi::ClientCtx, which: u32, index: 
     }
 }
 
-pub unsafe extern "C" fn client_block(c: *mut abi::ClientCtx, pos: *const [i32; 3]) -> u32 {
-    unsafe { client(c).map_or(u32::MAX, |cl| cl.world.block(IVec3::from_array(*pos))) }
-}
-
-pub unsafe extern "C" fn client_structure_block(c: *mut abi::ClientCtx, entity: u64, pos: *const [i32; 3]) -> u32 {
+pub unsafe extern "C" fn client_block_in(c: *mut abi::ClientCtx, frame: u64, pos: *const [i32; 3]) -> u32 {
     unsafe {
-        client(c)
-            .and_then(|cl| cl.entities.get(&entity))
+        let Some(cl) = client(c) else { return u32::MAX };
+        let p = IVec3::from_array(*pos);
+        if frame == 0 {
+            return cl.world.block(p);
+        }
+        cl.entities
+            .get(&frame)
             .and_then(|e| e.structure.as_ref())
-            .map_or(u32::MAX, |s| s.block(IVec3::from_array(*pos)))
+            .map_or(u32::MAX, |s| s.block(p))
     }
 }
 

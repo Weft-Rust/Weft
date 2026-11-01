@@ -154,7 +154,7 @@ pub fn register(r: &mut Registry) {
 fn check_players(w: &World) {
     for id in w.players() {
         let Some(st) = w.entity(id) else { continue };
-        if st.age % 20 != 0 || w.creative(id) {
+        if st.age % 20 != 0 || w.exempt(id) {
             continue;
         }
         let inv = w.inventory(id);
@@ -182,7 +182,7 @@ fn check_players(w: &World) {
 /// Grants every advancement whose rule `met` says so to `player`, if it is a player in survival
 /// that doesn't have it yet, and tells their client.
 fn grant_where(w: &World, player: u64, met: impl Fn(&Rule) -> bool) {
-    if player == 0 || w.creative(player) {
+    if player == 0 || w.exempt(player) {
         return;
     }
     let Some(a) = w.component_mut(player, &ADVANCEMENTS) else { return };

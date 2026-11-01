@@ -983,7 +983,7 @@ impl Terrain {
         let def = &content().dims[self.dim as usize];
         let mut around = Around::default();
         for i in 0..27u32 {
-            let n = pos + IVec3::new(i as i32 % 3 - 1, i as i32 / 9 - 1, i as i32 / 3 % 3 - 1);
+            let n = pos + crate::world::cube::around(i as i32);
             if i == 13 || n.y < def.min_cube_y || n.y > def.max_cube_y || self.cubes.contains_key(&n) {
                 continue;
             }

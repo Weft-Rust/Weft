@@ -148,12 +148,13 @@ pub fn register(r: &mut Registry) {
                 // Bows to whoever used it.
                 let w = e.world();
                 if let (Some(mut me), Some(them)) = (w.entity(id), w.entity(e.other())) {
-                    me.yaw = (-(them.pos[0] - me.pos[0]) as f32).atan2(-(them.pos[2] - me.pos[2]) as f32);
+                    me.yaw = yaw_toward(me.pos, them.pos);
                     w.set_entity(id, &me);
                 }
                 bowed.push(id);
                 w.play_animation(id, "bow", false);
             }
+            true
         });
     let ring = Part::new("ring", [0.0, 8.0, 0.0]).child_of(0);
     let ring = [[6.0, -1.0, -1.0], [-8.0, -1.0, -1.0], [-1.0, -1.0, 6.0], [-1.0, -1.0, -8.0]]
@@ -217,7 +218,7 @@ fn wisps(t: &EntityTick) {
         }
         st.vel[1] = ((time as f64 + phase as f64) * 0.1).sin() * 0.8;
         w.set_entity(id, &st);
-        w.walk(id, [-st.yaw.sin(), -st.yaw.cos()], 1.0, false);
+        w.walk(id, yaw_dir(st.yaw), 1.0, false);
         if (time + phase) % 20 == 0 {
             w.spawn_particles(&SPARK, [st.pos[0], st.pos[1] + 0.2, st.pos[2]])
                 .count(WISP_SPARKS.get().max(0) as u32)

@@ -5,7 +5,7 @@
 # It works once this folder is the root of a repository of its own (GitHub only reads
 # `.github/workflows` there), and `weft_sdk` in Cargo.toml points at the game's git repository
 # instead of a path, with the tag of the game version your players run:
-#   weft_sdk = { git = "https://github.com/VortexSo4/Weft", tag = "v26.10.2" }
+#   weft_sdk = { git = "https://github.com/Weft-Rust/Weft", tag = "v26.10.2" }
 # When the game updates, change that tag and push a new one of your own: a mod built for another
 # game version refuses to load.
 name: Release

@@ -792,7 +792,7 @@ impl Dim {
         if !lights.is_empty() {
             self.space.body_lights.insert(id, lights);
         }
-        let Space { cubes, body_light, body_lights, light_dirty, .. } = &mut *self.space;
+        let Space { cubes, body_light, body_lights, body_light_changes, light_dirty, .. } = &mut *self.space;
         let mut changed = Vec::new();
         for &cell in &touched {
             let all = body_lights
@@ -807,6 +807,7 @@ impl Dim {
                     None => body_light.remove(&cell),
                 };
                 changed.push(cell);
+                body_light_changes.push((cell, all));
             }
         }
         let def = &c.dims[self.id as usize];

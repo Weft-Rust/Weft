@@ -58,18 +58,12 @@ pub fn find(c: &Content, block: &impl crate::physics::Cells, from: IVec3, to: IV
         let free = |s: u32| {
             let st = &c.states[s as usize];
             top(s).is_none()
-                && st
-                    .liquid
-                    .is_none_or(|l| c.liquids[l as usize].temperature < crate::server::liquid::BURNING)
+                && st.liquid.is_none_or(|l| !c.liquids[l as usize].burns())
         };
         block.main(p).is_some_and(free) && block.extras(p).iter().all(|&s| free(s))
     };
     let room = |p: IVec3| (0..height).all(|k| open(p + IVec3::Y * k));
-    let burns = |s: u32| {
-        c.states[s as usize]
-            .liquid
-            .is_some_and(|l| c.liquids[l as usize].temperature >= 1000)
-    };
+    let burns = |s: u32| c.states[s as usize].liquid.is_some_and(|l| c.liquids[l as usize].burns());
     let ground = |p: IVec3| {
         let below = p - IVec3::Y;
         let holds = |s: u32| c.states[s as usize].liquid.is_some() || top(s).is_some_and(|t| t >= 0.5);

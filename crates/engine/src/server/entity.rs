@@ -63,6 +63,8 @@ pub struct Entity {
     pub jumped: bool,
     /// Ticks since it last swung or changed items (players): what a hit's strength is judged by.
     pub swing_ticks: u32,
+    /// What it held when that was last looked at (`notice_hand`).
+    pub in_hand: ItemStack,
     /// What its last hit did while `hurt_cooldown` runs: a stronger one only adds the difference.
     pub last_hurt: f32,
     /// Where it walks to by itself (`Host::navigate`).
@@ -127,6 +129,7 @@ impl Entity {
             flying: false,
             jumped: false,
             swing_ticks: u32::MAX / 2,
+            in_hand: ItemStack::EMPTY,
             last_hurt: 0.0,
             nav: None,
         }
@@ -141,13 +144,16 @@ impl Entity {
     /// Half width, height and eye height of its box: its own size if a mod gave it one, else
     /// its kind's; crouching lowers either.
     pub fn dims(&self, c: &Content) -> (f64, f64, f64) {
-        let k = &c.game.entities[self.kind as usize];
-        let [w, h, eye] = self
-            .size
-            .unwrap_or([k.width, k.height, k.eye])
-            .map(|v| v as f64);
-        let (h, eye) = physics::posed(self.pose, h, eye);
-        (w / 2.0, h, eye)
+        physics::posed(self.size.unwrap_or(c.game.entities[self.kind as usize].size()), self.pose)
+    }
+
+    /// Another thing in hand starts the swing over; the same item again (a count, damage or slot
+    /// change) doesn't.
+    pub fn notice_hand(&mut self, held: ItemStack) {
+        if !crate::content::same_in_hand(held, self.in_hand) {
+            self.swing_ticks = 0;
+        }
+        self.in_hand = held;
     }
 
     pub fn height(&self, c: &Content) -> f64 {
@@ -169,14 +175,21 @@ impl Entity {
         self.pos + DVec3::Y * (self.eye(c) - 0.3)
     }
 
-    /// Something that stands in the world and can be hit: not a dropped item, a block's entity or
-    /// a spectator.
+    /// A thing of its own in the world, for others to see: not a block's entity, and not what is
+    /// only something it holds (`NOT_IN_WORLD`).
+    pub fn in_world(&self, c: &Content) -> bool {
+        !self.removed && self.anchor.is_none() && !c.game.entities[self.kind as usize].is(ef::NOT_IN_WORLD)
+    }
+
+    /// Something that stands in the world and can be hit: not a dropped item or a spectator either.
     pub fn is_body(&self, c: &Content) -> bool {
-        !self.removed
-            && self.item.is_empty()
-            && self.anchor.is_none()
-            && self.kind != c.game.virtual_kind
-            && self.mode != crate::world::GameMode::Spectator
+        self.in_world(c) && self.item.is_empty() && self.mode != crate::world::GameMode::Spectator
+    }
+
+    /// It comes and goes with the world's cube it is in: players have a file of their own, what is
+    /// on a body goes with the body.
+    pub fn saved_with_cube(&self, c: &Content) -> bool {
+        !self.removed && !self.player && self.block_frame() == 0 && !c.game.entities[self.kind as usize].is(ef::NOT_IN_WORLD)
     }
 
     pub fn state(&self, c: &Content, max_health: f32) -> weft_abi::EntityState {
@@ -223,10 +236,15 @@ pub struct Entities {
     pub killed: Vec<u64>,
     /// Item entities picked up whole this tick, and by whom (clients pull them in).
     pub taken: Vec<(u64, u64)>,
-    /// Hurt entities and where the hit came from (players move themselves, so they get told).
-    /// Velocity changes for players' clients: (player, change, halve the velocity first), in
-    /// blocks per tick like the client's own.
-    pub pushed: Vec<(u64, ([f32; 3], bool))>,
+    /// What moves players, whose clients move them, so they get told.
+    pub pushed: Vec<(u64, Pushed)>,
+}
+
+/// In blocks per tick, like the client's own velocity.
+#[derive(Clone, Copy)]
+pub enum Pushed {
+    Knock([f32; 3]),
+    Add([f32; 3]),
 }
 
 /// Falls up to this many blocks do no damage.
@@ -486,20 +504,15 @@ impl Entities {
         if stack.count == 0 { ItemStack::EMPTY } else { stack }
     }
 
-    /// What can be hit and is alive within `radius`.
-    pub fn near_bodies(&self, c: &Content, pos: DVec3, radius: f64) -> Vec<u64> {
-        self.list
-            .iter()
-            .filter(|e| e.is_body(c) && e.alive() && (e.pos - pos).length_squared() <= radius * radius)
-            .map(|e| e.id)
-            .collect()
-    }
-
-    pub fn near(&self, pos: DVec3, radius: f64, kind: u32) -> Vec<u64> {
+    /// Within `radius`, of `kind` (`u32::MAX`: any), `abi::near` saying what else.
+    pub fn near(&self, c: &Content, pos: DVec3, radius: f64, kind: u32, flags: u32) -> Vec<u64> {
         let r2 = radius * radius;
+        let bodies = flags & weft_abi::near::BODIES != 0;
         self.list
             .iter()
             .filter(|e| !e.removed && (kind == u32::MAX || e.kind == kind) && (e.pos - pos).length_squared() <= r2)
+            .filter(|e| !c.game.entities[e.kind as usize].is(ef::NOT_IN_WORLD))
+            .filter(|e| !bodies || (e.is_body(c) && e.alive()))
             .map(|e| e.id)
             .collect()
     }
@@ -539,7 +552,7 @@ pub fn step(c: &Content, e: &mut Entity, gravity: f64, block: &impl physics::Cel
     const DT: f64 = crate::world::TICK;
     let k = &c.game.entities[e.kind as usize];
     let mut out = Stepped { land: None, crushed: false };
-    if e.anchor.is_some() {
+    if e.anchor.is_some() || k.is(ef::NOT_IN_WORLD) {
         return out;
     }
     if k.is(ef::KINEMATIC) || e.motion == Motion::Parked {
@@ -569,21 +582,11 @@ pub fn step(c: &Content, e: &mut Entity, gravity: f64, block: &impl physics::Cel
         return out;
     }
     let (hw, h, _) = e.dims(c);
-    // The body it rides moves it first (blocks still stop it), then bodies that ran into it push.
-    let ride = physics::ride(c, e.pos, hw, e.on_ground, &mut e.frame, bodies, e.id);
-    if ride.carry != DVec3::ZERO {
-        e.pos = physics::move_box(c, block, e.pos, hw, h, ride.carry, 0.0).pos;
-    }
-    if let Some(d) = ride.released {
+    let moved_by = physics::carried(c, block, &mut e.pos, hw, h, e.on_ground, &mut e.frame, bodies, e.id);
+    if let Some(d) = moved_by.released {
         e.vel += d / DT;
     }
-    let (shift, crushes) = physics::push(c, e.pos, hw, h, bodies, e.id, e.frame);
-    if shift != DVec3::ZERO {
-        // Blocks stop the push; a crushing body hurts what it cannot push away.
-        let to = physics::move_box(c, block, e.pos, hw, h, shift, 0.0).pos;
-        out.crushed = crushes && (to - e.pos - shift).length_squared() > 1e-6;
-        e.pos = to;
-    }
+    out.crushed = moved_by.crushed;
     // After riding: falls and walking are measured relative to the body.
     let start = e.pos;
     // The step players take, in blocks per tick: a mob walks at its target speed on plain
@@ -596,20 +599,20 @@ pub fn step(c: &Content, e: &mut Entity, gravity: f64, block: &impl physics::Cel
         ctl.ground = target * (1.0 - 0.6 * 0.91);
         ctl.air = 0.02;
         if jump {
-            ctl.jump = 0.42 * e.jump_mul as f64;
+            ctl.jump = physics::JUMP * e.jump_mul as f64;
             ctl.swim = true;
         }
     }
     let frame = physics::Frame {
         half_width: hw,
         height: h,
-        step: if e.item.is_empty() { 0.6 } else { 0.0 },
-        gravity: if k.is(ef::NO_GRAVITY) { 0.0 } else { gravity * DT * DT },
+        step: if e.item.is_empty() { physics::STEP_UP } else { 0.0 },
+        gravity: if k.is(ef::NO_GRAVITY) { 0.0 } else { physics::gravity_per_tick(gravity) },
     };
     let mut v = e.vel * DT;
     let r = physics::walk(c, block, bodies, e.id, &mut e.pos, &mut v, e.on_ground, &ctl, &frame);
     e.vel = v / DT;
-    e.in_liquid = r.in_liquid;
+    e.jumped = r.jumped;
     e.blocked = r.hit[0] || r.hit[2];
     e.on_ground = r.on_ground;
     if r.on_ground {
@@ -619,10 +622,9 @@ pub fn step(c: &Content, e: &mut Entity, gravity: f64, block: &impl physics::Cel
     }
     let dy = e.pos.y - start.y;
     e.moved = ((e.pos.x - start.x).powi(2) + (e.pos.z - start.z).powi(2)).sqrt() as f32;
-    let at = e.pos.floor().as_ivec3();
-    let climbs = |s: u32| c.states[s as usize].flags & weft_abi::block_flags::CLIMBABLE != 0;
-    let climbing = block.main(at).is_some_and(climbs) || block.extras(at).iter().any(|&s| climbs(s));
-    if let Some(land) = track_fall(&mut e.fall, dy, e.on_ground, e.in_liquid || climbing) {
+    let here = if physics::same_around(start, e.pos, h) { r.started_in } else { physics::around(c, block, e.pos, h) };
+    e.in_liquid = here.in_liquid;
+    if let Some(land) = track_fall(&mut e.fall, dy, e.on_ground, here.in_liquid || here.climbing) {
         out.land = Some(land);
     }
     out
@@ -637,7 +639,7 @@ const MAX_CRAMMING: u32 = 24;
 pub fn soft_push(c: &Content, list: &[Entity]) -> Vec<(usize, DVec3)> {
     let soft = |e: &Entity| {
         let k = &c.game.entities[e.kind as usize];
-        !e.removed && e.item.is_empty() && e.anchor.is_none() && k.is(ef::PUSHABLE) && !k.is(ef::SOLID)
+        k.is(ef::PUSHABLE) && !k.is(ef::SOLID) && e.is_body(c) && e.alive()
     };
     let mut cells: FxHashMap<(i32, i32), Vec<usize>> = FxHashMap::default();
     for (i, e) in list.iter().enumerate().filter(|(_, e)| soft(e)) {

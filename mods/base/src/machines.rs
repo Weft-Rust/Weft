@@ -25,11 +25,7 @@ pub fn register(r: &mut Registry) {
                 .prop("lit", ["false", "true"])
                 .states(|p, s| {
                     let lit = p.is("lit", "true");
-                    let mut f = ["furnace_side"; 6];
-                    f[2] = "furnace_top";
-                    f[3] = "furnace_top";
-                    f[p.facing().face() as usize] = if lit { "furnace_front_lit" } else { "furnace_front" };
-                    let s = s.faces(f);
+                    let s = s.front_faces(p.facing(), "furnace_side", "furnace_top", if lit { "furnace_front_lit" } else { "furnace_front" });
                     if lit { s.light_rgb(13, 11, 8) } else { s }
                 })
                 .hardness(3.5)
@@ -71,41 +67,15 @@ pub fn register(r: &mut Registry) {
             b.sound_group("wood")
                 .facing(Facings::HORIZONTAL, Toward::Player)
                 .states(|p, s| {
-                    let d = p.facing();
-                    let mut f = ["chest_side"; 6];
-                    f[2] = "chest_top";
-                    f[3] = "chest_top";
-                    f[d.face() as usize] = "chest_front";
-                    s.faces(f).model_box([1.0, 0.0, 1.0], [15.0, 14.0, 15.0])
+                    s.front_faces(p.facing(), "chest_side", "chest_top", "chest_front")
+                        .model_box([1.0, 0.0, 1.0], [15.0, 14.0, 15.0])
                 })
                 .hardness(2.5)
                 .mineable("axe")
                 .tab(&crate::tabs::FUNCTIONAL)
         })
         .group("chest", Slots::chest(3))
-        .screen(|ui| {
-            ui.panel("panel", S::col().pad(7.0).gap(4.0), |ui| {
-                ui.title();
-                ui.group("chest");
-                ui.player_inventory(true);
-            });
-        });
-}
-
-fn ratio(a: u32, b: u32) -> f32 {
-    if b == 0 { 0.0 } else { a as f32 / b as f32 }
-}
-
-/// Items the output slot still takes of `out`, as whole results.
-fn room_for(output: ItemStack, out: ItemStack) -> u32 {
-    let room = if output.is_empty() {
-        max_stack(out.item)
-    } else if output.stacks_with(&out) {
-        max_stack(out.item).saturating_sub(output.count)
-    } else {
-        0
-    };
-    room / out.count.max(1)
+        .plain_screen();
 }
 
 /// `ticks` of one furnace at once (its area was unloaded, the time jumped): it smelts while
@@ -122,11 +92,8 @@ fn catch_up(w: &World, id: u64, s: &mut Smelting, ticks: u32) {
     {
         let q = abi::Query { entity: id, item: input.item, ..query() };
         s.cook_max = w.compute(&SMELT_TIME, time as f64, &q).round().max(1.0) as u32;
-        let items = (input.count).min(room_for(output, out)) as u64;
-        let per_fuel = FUEL
-            .on_item(fuel.item)
-            .filter(|_| !fuel.is_empty())
-            .unwrap_or(0) as u64;
+        let items = (input.count).min(output.room_for(out)) as u64;
+        let per_fuel = FUEL.on_filled(&fuel).unwrap_or(0) as u64;
         let fuel_items = if per_fuel > 0 { fuel.count as u64 } else { 0 };
         let work = (items * s.cook_max as u64).saturating_sub(s.cook as u64);
         let worked = idle.min(work).min(s.burn as u64 + fuel_items * per_fuel);
@@ -145,8 +112,7 @@ fn catch_up(w: &World, id: u64, s: &mut Smelting, ticks: u32) {
         s.cook = (total % s.cook_max as u64) as u32;
         if done > 0 {
             input_slot.set(0, input.shrink(done));
-            output_slot
-                .set(0, if output.is_empty() { ItemStack { count: out.count * done, ..out } } else { output.grow(out.count * done) });
+            output_slot.set(0, output.merged(out, done));
             for _ in 0..done {
                 w.emit(&SMELTED, Smelted { furnace: id, input: input.item, output: out });
             }
@@ -187,10 +153,9 @@ fn tick_furnaces(b: &mut SystemBatch<Smelting>) {
         let recipe = (!input.is_empty())
             .then(|| recipe_process(&crate::recipes::SMELTING, input.item))
             .flatten();
-        let fits = recipe
-            .is_some_and(|(out, _)| output.is_empty() || (output.stacks_with(&out) && output.count + out.count <= max_stack(out.item)));
+        let fits = recipe.is_some_and(|(out, _)| output.room_for(out) > 0);
         if s.burn == 0 && fits {
-            if let Some(ticks) = FUEL.on_item(fuel.item).filter(|_| !fuel.is_empty()) {
+            if let Some(ticks) = FUEL.on_filled(&fuel) {
                 s.burn = ticks;
                 s.burn_max = ticks;
                 fuel_slot.set(0, use_one(fuel));
@@ -204,8 +169,7 @@ fn tick_furnaces(b: &mut SystemBatch<Smelting>) {
             if s.cook >= s.cook_max {
                 s.cook = 0;
                 input_slot.set(0, input.shrink(1));
-                let merged = if output.is_empty() { out } else { output.grow(out.count) };
-                output_slot.set(0, merged);
+                output_slot.set(0, output.merged(out, 1));
                 w.emit(&SMELTED, Smelted { furnace: id, input: input.item, output: out });
             }
         } else if s.burn > 0 {

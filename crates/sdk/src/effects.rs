@@ -4,11 +4,11 @@
 //! static SPARK: Particle = Particle::named("spark");
 //! r.particle(&SPARK).textures(&["glint_0", "glint_1"]).life(0.3, 0.6).fullbright();
 //! w.spawn_particles(&SPARK, pos).count(12).speed(2.0);          // server: everyone nearby sees them
-//! r.text_condition(&CHARGED, |v| v.player_component(&CHARGE).is_some_and(|c| *c > 0));
+//! r.text_condition(&CHARGED, |v| v.component(&CHARGE).is_some_and(|c| *c > 0));
 //! c.post_effect("mymod:underwater", 1.0);                  // client: until turned off
 //! ```
 //! Shaders for text (`{fx:..}`), GUI panels (`shader` in a class's `.gui`), particles, entities and screen
-//! effects are assets: `shaders/fx|gui|particle|entity|post/<name>.wgsl` in the mod's folder.
+//! effects are assets: `shaders/fx|gui|particle|entity|block|sky|post/<name>.wgsl` in the mod's folder.
 
 use std::marker::PhantomData;
 

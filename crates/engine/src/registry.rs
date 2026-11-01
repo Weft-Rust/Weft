@@ -120,6 +120,11 @@ pub struct EntityKind {
 }
 
 impl EntityKind {
+    /// Width, height and eye height standing, as `Entity::dims` starts from.
+    pub fn size(&self) -> [f32; 3] {
+        [self.width, self.height, self.eye]
+    }
+
     pub fn is(&self, f: u32) -> bool {
         self.flags & f != 0
     }
@@ -804,6 +809,7 @@ pub struct PlayerGroup {
     pub name: String,
     pub start: u32,
     pub count: u32,
+    pub cols: u32,
 }
 
 #[derive(Clone, Debug)]
@@ -843,14 +849,14 @@ impl PlayerLayout {
         let mut at = 0;
         let mut out = Vec::new();
         for (name, cols, rows, _) in ordered {
-            out.push(PlayerGroup { name: name.clone(), start: at, count: cols * rows });
+            out.push(PlayerGroup { name: name.clone(), start: at, count: cols * rows, cols: *cols });
             at += cols * rows;
         }
         let worn = at..at + equipment.len() as u32;
         for (i, e) in equipment.iter().enumerate() {
-            out.push(PlayerGroup { name: e.name.clone(), start: worn.start + i as u32, count: 1 });
+            out.push(PlayerGroup { name: e.name.clone(), start: worn.start + i as u32, count: 1, cols: 1 });
         }
-        out.push(PlayerGroup { name: EQUIPMENT_GROUP.into(), start: worn.start, count: worn.len() as u32 });
+        out.push(PlayerGroup { name: EQUIPMENT_GROUP.into(), start: worn.start, count: worn.len() as u32, cols: 1 });
         PlayerLayout { slots: worn.end, hotbar, worn, groups: out, equipment }
     }
 
@@ -1138,8 +1144,16 @@ fn write_cell(cell: usize, id: u32) {
     }
 }
 
-/// Eye height as a share of an entity's height, unless it says otherwise (vanilla's default).
-pub const EYE: f32 = 0.85;
+
+pub use weft_abi::EYE_SHARE as EYE;
+
+/// What an entity kind's `sounds` hold.
+pub mod entity_sound {
+    pub const HURT: usize = 0;
+    pub const DEATH: usize = 1;
+    pub const AMBIENT: usize = 2;
+    pub const STEP: usize = 3;
+}
 
 fn builtin(name: &str, width: f32, height: f32, flags: u32) -> EntityKind {
     EntityKind {
@@ -1215,7 +1229,7 @@ pub fn freeze_entities(raws: &mut [RawGame], errors: &mut Vec<String>) -> Entiti
     entities.push(RawEntity {
         name: VIRTUAL.into(),
         cell: 0,
-        desc: builtin(VIRTUAL, 0.0, 0.0, ef::INVULNERABLE | ef::NO_GRAVITY),
+        desc: builtin(VIRTUAL, 0.0, 0.0, ef::INVULNERABLE | ef::NO_GRAVITY | ef::NOT_IN_WORLD),
         replace: false,
         components: Vec::new(),
     });
@@ -1226,10 +1240,10 @@ pub fn freeze_entities(raws: &mut [RawGame], errors: &mut Vec<String>) -> Entiti
         replace: false,
         components: Vec::new(),
     });
-    let mut moving = builtin(MOVING, 1.0, 1.0, ef::INVULNERABLE | ef::SOLID | ef::KINEMATIC | ef::NO_GRAVITY);
+    let mut moving = builtin(MOVING, 1.0, 1.0, ef::INVULNERABLE | ef::SOLID | ef::KINEMATIC);
     moving.carry_height = 1.0;
     entities.push(RawEntity { name: MOVING.into(), cell: 0, desc: moving, replace: false, components: Vec::new() });
-    let mut platform = builtin(PLATFORM, 1.0, 1.0, ef::INVULNERABLE | ef::SOLID | ef::KINEMATIC | ef::NO_GRAVITY);
+    let mut platform = builtin(PLATFORM, 1.0, 1.0, ef::INVULNERABLE | ef::SOLID | ef::KINEMATIC);
     platform.carry_height = 3.0;
     entities.push(RawEntity { name: PLATFORM.into(), cell: 0, desc: platform, replace: false, components: Vec::new() });
     entities.sort_by(|a, b| a.name.cmp(&b.name).then(a.replace.cmp(&b.replace)));
@@ -1441,11 +1455,11 @@ pub fn freeze(
     // The engine's settings, with a binding per key: the engine's and the mods'.
     let mut keys: Vec<(String, String)> = crate::input::ENGINE_KEYS
         .iter()
-        .map(|(a, k)| (a.to_string(), crate::settings::chord_id((*k).into())))
+        .map(|(a, k)| (a.to_string(), crate::input::Chord::id((*k).into())))
         .collect();
     for (action, key) in &g.keys {
-        match crate::settings::parse_chord(key) {
-            Some(k) => keys.push((action.clone(), crate::settings::chord_id(k))),
+        match crate::input::Chord::parse(key) {
+            Some(k) => keys.push((action.clone(), crate::input::Chord::id(k))),
             None => errors.push(format!("key {action}: unknown key {key}")),
         }
     }
@@ -1905,6 +1919,16 @@ impl Game {
 
     pub fn component(&self, name: &str) -> Option<u32> {
         self.component_names.get(name).copied()
+    }
+
+    /// Bytes read back for a component, cut or filled to its size as it is now (0: variable, like
+    /// attribute modifiers).
+    pub fn fit_component(&self, id: u32, mut bytes: Vec<u8>) -> Box<[u8]> {
+        let size = self.components[id as usize].size as usize;
+        if size > 0 {
+            bytes.resize(size, 0);
+        }
+        bytes.into_boxed_slice()
     }
 
     /// Finds the recipe whose pattern fits the grid (any position, mirrored allowed) or whose

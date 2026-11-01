@@ -48,12 +48,16 @@ pub struct LocalPlayer {
     /// Touched the ground at any physics step since the last move sent: a quick re-jump can
     /// leave the ground before the next send, and the server would add up the falls.
     pub landed: bool,
+    /// Jumped at any physics step since the last move sent.
+    pub jumped: bool,
     pub flying: bool,
     /// Spectator: moves through blocks.
     pub noclip: bool,
     /// Flying speed multiplier, changed with the scroll wheel in spectator mode.
     pub fly_speed: f32,
     pub in_liquid: bool,
+    /// On a ladder.
+    pub climbing: bool,
     /// Physics steps until the next jump while the key stays held (vanilla's 10 ticks), so a
     /// two-block gap cannot be used to bounce at full speed.
     pub jump_cooldown: u32,
@@ -75,7 +79,7 @@ pub struct LocalPlayer {
     /// The solid body it rides.
     pub support: Option<u64>,
     /// Its box standing (width, height, eye): the player kind's, or what a mod gave it.
-    pub size: [f64; 3],
+    pub size: [f32; 3],
     /// Riding a body: its id and the position relative to it at the previous and the last
     /// step. Drawn on the body as shown, so a rider and its deck never drift apart.
     pub riding: Option<(u64, DVec3, DVec3)>,
@@ -146,9 +150,7 @@ const PULL_SECS: f32 = 0.15;
 impl LocalPlayer {
     /// Half width, height and eye height now (crouching lowers them).
     pub fn dims(&self) -> (f64, f64, f64) {
-        let [w, h, eye] = self.size;
-        let (h, eye) = physics::posed(self.pose, h, eye);
-        (w / 2.0, h, eye)
+        physics::posed(self.size, self.pose)
     }
 }
 
@@ -158,6 +160,12 @@ fn words(bytes: &[u8]) -> impl Iterator<Item = [u8; 4]> + '_ {
 }
 
 impl ClientEntity {
+    /// Something that can be bumped into or hit, like the server's `Entity::is_body`: what isn't
+    /// a thing to hit never gets here, and the dead lie there only to be seen.
+    pub fn is_body(&self) -> bool {
+        self.item.is_empty() && self.dying.is_none()
+    }
+
     /// What its kind's client tick gets (`client` filled in by the caller).
     pub fn args(&self, id: u64, dt: f32) -> weft_abi::ClientEntityArgs {
         weft_abi::ClientEntityArgs {
@@ -175,13 +183,7 @@ impl ClientEntity {
 
     /// Half width, height and eye height of its box, like the server's `Entity::dims`.
     pub fn dims(&self) -> (f64, f64, f64) {
-        let k = &content().game.entities[self.kind as usize];
-        let [w, h, eye] = self
-            .size
-            .unwrap_or([k.width, k.height, k.eye])
-            .map(|v| v as f64);
-        let (h, eye) = physics::posed(self.pose, h, eye);
-        (w / 2.0, h, eye)
+        physics::posed(self.size.unwrap_or(content().game.entities[self.kind as usize].size()), self.pose)
     }
 
     /// The kind whose model, texture and animations draw it.
@@ -283,7 +285,9 @@ pub struct Client {
     drawn_frames: FxHashSet<u64>,
     start: Instant,
     /// Ticks counted since the server last said the time (`Scene` ticks).
-    since_time: u32,
+    since_time: f64,
+    /// Ticks a second the server runs at.
+    tick_rate: f64,
     /// Particle kind per block state shown around the player (`ambient`), `u32::MAX` none.
     ambient_kinds: Option<Vec<Vec<u32>>>,
     /// The frame's `Scene`, one buffer per frame in flight.
@@ -336,8 +340,10 @@ pub struct Client {
     hand_stack: ItemStack,
     /// How far the hand is up, 0..1.
     hand_height: f32,
-    /// Seconds since the last swing or change of items, and the attribute multiplying its speed.
+    /// Seconds since the last swing or change of items, and what was in hand then, as the server
+    /// judges a hit by.
     swing_since: f32,
+    swing_held: ItemStack,
     /// This player's attributes, by id, as the server says.
     pub(crate) attributes: Vec<f32>,
     /// What the server refused to have mined; the button let go or another block lifts it.
@@ -413,9 +419,9 @@ pub struct Client {
     /// On fire, as the server says.
     burning: bool,
     /// Who else is mining what, and how far along.
-    others_mining: Vec<(u64, IVec3, f32)>,
+    others_mining: Vec<crate::net::Crack>,
     /// What the server was last told this player mines.
-    told_mining: Option<(u64, IVec3)>,
+    told_mining: Option<(u64, IVec3, u32)>,
     /// What the server says this player may do (`abi::permission`).
     pub permission: u32,
     /// Seconds since it died, while it is.
@@ -552,6 +558,7 @@ impl Client {
                 pitch: 0.0,
                 on_ground: false,
                 landed: false,
+                jumped: false,
                 jump_cooldown: 0,
                 eye: 1.62,
                 fov_mul: 1.0,
@@ -562,15 +569,13 @@ impl Client {
                 swim_anywhere: false,
                 can_sprint: true,
                 support: None,
-                size: {
-                    let k = &c.game.entities[c.game.player_kind as usize];
-                    [k.width, k.height, k.eye].map(|v| v as f64)
-                },
+                size: c.game.entities[c.game.player_kind as usize].size(),
                 riding: None,
                 flying: false,
                 noclip: false,
                 fly_speed: 1.0,
                 in_liquid: false,
+                climbing: false,
                 speed_mul: 1.0,
                 jump_mul: 1.0,
                 sneak: false,
@@ -586,7 +591,8 @@ impl Client {
             offset_target: 0.0,
             drawn_frames: FxHashSet::default(),
             start: Instant::now(),
-            since_time: 0,
+            since_time: 0.0,
+            tick_rate: crate::world::TPS as f64,
             ambient_kinds: None,
             scene_bufs: Vec::new(),
             target: None,
@@ -641,6 +647,7 @@ impl Client {
             hand_stack: ItemStack::default(),
             hand_height: 1.0,
             swing_since: 1000.0,
+            swing_held: ItemStack::default(),
             attributes: content()
                 .game
                 .attributes
@@ -711,8 +718,8 @@ impl Client {
     pub fn swing_strength(&self) -> f32 {
         crate::content::swing_charge(
             content(),
-            self.hand_stack.item,
-            self.swing_since * crate::world::TPS as f32,
+            self.swing_held.item,
+            self.swing_since * self.tick_rate as f32,
             self.attribute(crate::server::extend::ATTACK_SPEED),
         )
     }
@@ -890,14 +897,9 @@ impl Client {
         let walking = self.player.on_ground && !self.player.flying && self.player.pose != Pose::Swim && !self.dead;
         // Vanilla: amplitude follows the per-tick speed capped at 0.1, eased by 0.4 per tick.
         self.walk_dist += moved * 0.6;
-        let target = if walking { (speed / 20.0).min(0.1) } else { 0.0 };
+        let target = if walking { (speed * crate::world::TICK as f32).min(0.1) } else { 0.0 };
         self.bob += (target - self.bob) * (1.0 - 0.6f32.powf(dt as f32 * crate::world::TPS as f32));
-        if let Some(p) = &mut self.hand_swing {
-            *p += dt as f32 / 0.3;
-            if *p >= 1.0 {
-                self.hand_swing = None;
-            }
-        }
+        advance_swing(&mut self.hand_swing, dt as f32);
         // A use swings only when the server says it did something (`ToClient::Swing`).
         if input.captured && !spectator && (input.pressed("core:attack") || (input.held("core:attack") && self.breaking.is_some())) {
             self.swing_arm();
@@ -905,8 +907,12 @@ impl Client {
         // Vanilla's 0.4 per tick: the old item goes down, the new one comes up. More of the same
         // item (a count or damage change) is not a change.
         let held = self.held();
-        let same = held.is_empty() == self.hand_stack.is_empty() && (held.is_empty() || held.item == self.hand_stack.item);
+        let same = crate::content::same_in_hand(held, self.hand_stack);
         self.swing_since += dt as f32;
+        if !crate::content::same_in_hand(held, self.swing_held) {
+            self.swing_since = 0.0;
+        }
+        self.swing_held = held;
         self.player.using = self.using.is_some();
         self.body_particles(dt as f32);
         self.frame_dt = dt as f32;
@@ -916,9 +922,6 @@ impl Client {
         let up = if same { self.swing_strength().powi(3) } else { 0.0 };
         self.hand_height += (up - self.hand_height).clamp(-step, step);
         if same || self.hand_height < 0.1 {
-            if !same {
-                self.swing_since = 0.0;
-            }
             self.hand_stack = held;
         }
         let k_lag = 1.0 - 0.5f32.powf(dt as f32 * crate::world::TPS as f32);
@@ -952,7 +955,7 @@ impl Client {
             self.accum += dt.min(0.25);
             while self.accum >= STEP {
                 self.accum -= STEP;
-                self.since_time = (self.since_time + 1).min(20);
+                self.since_time = (self.since_time + STEP * self.tick_rate).min(crate::world::TPS as f64);
                 ambient_steps += 1;
                 // A rider is where it is on its body: if moves arrived late and the body's past
                 // changed, the rider moves with it, not over the deck.
@@ -970,25 +973,21 @@ impl Client {
                 // ones nudging the player aside.
                 self.body_clock += STEP;
                 let at = self.body_tick(self.body_clock);
+                // Bodies move by the server's ticks, this step by its own clock.
+                let step_ticks = STEP * self.tick_rate;
                 let mut bodies = Vec::new();
                 let mut push = DVec3::ZERO;
                 for (&id, e) in &self.entities {
                     let k = &c.game.entities[e.kind as usize];
+                    if !e.is_body() {
+                        continue;
+                    }
                     if k.is(weft_abi::entity_flags::SOLID) {
-                        let (now, delta) = (e.known(at), e.known(at) - e.known(at - 1.0));
-                        let aabb = physics::Aabb::around(now, k.width as f64 / 2.0, k.height as f64);
-                        let built = e.structure.as_deref();
-                        let aabb = match built {
-                            Some(s) => {
-                                let Some((lo, hi)) = s.bounds else { continue };
-                                physics::Transform::of(now)
-                                    .box_to_world(physics::Aabb { min: lo.as_dvec3(), max: (hi + IVec3::ONE).as_dvec3() })
-                            }
-                            None => aabb,
-                        };
-                        let blocks = built.map(|s| (s as &dyn physics::Blocks, physics::Transform::of(now)));
-                        bodies.push(physics::Body { id, aabb, delta, carry: k.carry_height as f64, crushes: false, blocks });
-                    } else if k.is(weft_abi::entity_flags::PUSHABLE) && e.item.is_empty() && e.dying.is_none() {
+                        let (now, delta) = (e.known(at), e.known(at) - e.known(at - step_ticks));
+                        let (hw, h, _) = e.dims();
+                        let built = e.structure.as_deref().map(|s| s as &dyn physics::Blocks);
+                        bodies.extend(physics::Body::of(id, k, now, (hw, h), delta, built));
+                    } else if k.is(weft_abi::entity_flags::PUSHABLE) {
                         let d = self.player.pos - e.pos;
                         let ((ehw, eh, _), (hw, h, _)) = (e.dims(), self.player.dims());
                         let reach = ehw + hw;
@@ -1013,7 +1012,7 @@ impl Client {
                 self.player.riding = p.support.and_then(|b| {
                     entities
                         .get(&b)
-                        .map(|e| (b, p.prev - e.known(at - 1.0), p.pos - e.known(at)))
+                        .map(|e| (b, p.prev - e.known(at - step_ticks), p.pos - e.known(at)))
                 });
                 if crate::log::on(crate::log::Channel::Physics, log::Level::Trace) {
                     let p = &self.player;
@@ -1080,8 +1079,9 @@ impl Client {
         look
     }
 
-    fn move_message(&self, landed: bool) -> ToServer {
+    fn move_message(&self, landed: bool, jumped: bool) -> ToServer {
         ToServer::Move {
+            jumped,
             frame: self.player.riding.map(|(b, _, now)| (b, now)),
             pos: self.player.pos,
             yaw: self.player.yaw,
@@ -1098,7 +1098,7 @@ impl Client {
         self.use_delay -= dt as f32;
         // The server judges actions by where the player looks, which it only hears 20 times a
         // second: a turn made just before a click must arrive first.
-        let mut send_look = LookOnce(self.joined.then(|| self.move_message(self.player.landed)));
+        let mut send_look = LookOnce(self.joined.then(|| self.move_message(self.player.landed, false)));
         if !input.captured || self.dead {
             self.breaking = None;
             return;
@@ -1122,28 +1122,28 @@ impl Client {
                 if input.pressed("core:attack") {
                     send_look.send(&mut self.conn);
                     self.conn.send(ToServer::Attack(id));
+                    self.conn.send(ToServer::Swing);
                     self.swing_since = 0.0;
                 }
                 self.breaking = None;
             } else if refused {
                 self.breaking = None;
             } else if let Some(hit) = self.target {
-                let held = self.held().item;
-                let time = crate::server::mining_time(
+                let rate = crate::server::mining_rate(
                     c,
                     hit.state,
-                    held,
+                    self.held().item,
                     self.eye_liquid().is_some(),
                     self.player.on_ground,
                     self.attribute(crate::server::extend::MINING_SPEED),
+                    self.mode == GameMode::Creative,
                 );
-                let time = if self.mode == GameMode::Creative { 0.0 } else { time };
                 let done = match self.breaking {
                     Some((f, p, v)) if (f, p) == (hit.frame, hit.block) && self.breaking_part == hit.state => v,
                     _ => 0.0,
                 };
                 self.breaking_part = hit.state;
-                let progress = if time <= 0.0 { 1.0 } else { done + dt as f32 / time };
+                let progress = if rate >= 1.0 { 1.0 } else { done + dt as f32 * self.tick_rate as f32 * rate };
                 if progress >= 1.0 && (input.pressed("core:attack") || self.break_delay <= 0.0) {
                     send_look.send(&mut self.conn);
                     self.conn
@@ -1159,7 +1159,7 @@ impl Client {
                     }
                     self.breaking = None;
                     self.break_delay = 0.25;
-                } else if time > 0.0 {
+                } else if rate < 1.0 {
                     self.breaking = Some((hit.frame, hit.block, progress.min(1.0)));
                 } else {
                     // Instant breaks (creative, grass) show no cracks while the next waits.
@@ -1173,14 +1173,15 @@ impl Client {
         }
         // Hitting nothing still spends the swing.
         if input.pressed("core:attack") && self.target_entity.is_none() && self.target.is_none() {
+            self.conn.send(ToServer::Swing);
             self.swing_since = 0.0;
         }
         // The server times mining too, and shows the cracks to the others.
-        let mining = self.breaking.map(|(f, p, _)| (f, p));
+        let mining = self.breaking.map(|(f, p, _)| (f, p, self.breaking_part));
         if mining != self.told_mining {
             self.told_mining = mining;
             self.conn.send(match mining {
-                Some((frame, pos)) => ToServer::StartBreak { pos, frame },
+                Some((frame, pos, part)) => ToServer::StartBreak { pos, part, frame },
                 None => ToServer::StopBreak,
             });
         }
@@ -1188,7 +1189,7 @@ impl Client {
 
     fn use_held(&mut self, input: &Input, dt: f64, look: DVec3, send_look: &mut LookOnce) {
         if let Some((left, _)) = &mut self.using {
-            *left = (*left - dt as f32 * crate::world::TPS as f32).max(0.0);
+            *left = (*left - dt as f32 * self.tick_rate as f32).max(0.0);
             if !input.held("core:use") {
                 self.using = None;
                 self.conn.send(ToServer::StopUsing);
@@ -1212,12 +1213,13 @@ impl Client {
 
     fn send_move(&mut self, dt: f64) {
         self.tick_accum += dt;
-        if self.tick_accum >= 0.05 {
+        if self.tick_accum >= STEP {
             // Keeps the fraction, so moves go out 20 times a second at any frame rate.
-            self.tick_accum = (self.tick_accum - 0.05).min(0.05);
+            self.tick_accum = (self.tick_accum - STEP).min(STEP);
             if self.joined && !self.dead {
                 let landed = std::mem::replace(&mut self.player.landed, false);
-                self.conn.send(self.move_message(landed));
+                let jumped = std::mem::replace(&mut self.player.jumped, false);
+                self.conn.send(self.move_message(landed, jumped));
             }
         }
     }
@@ -1275,10 +1277,7 @@ impl Client {
             dyaw = (dyaw + std::f32::consts::PI).rem_euclid(std::f32::consts::TAU) - std::f32::consts::PI;
             e.yaw += dyaw * k as f32;
             e.body_yaw = turn_body(e.body_yaw, e.yaw, walked.unwrap_or(e.pos - before), dt as f32);
-            e.arm_swing = e
-                .arm_swing
-                .map(|p| p + dt as f32 / 0.3)
-                .filter(|&p| p < 1.0);
+            advance_swing(&mut e.arm_swing, dt as f32);
             e.flash = (e.flash - dt as f32).max(0.0);
             let speed = (walked.unwrap_or(e.pos - before).with_y(0.0).length() / dt.max(1e-4)) as f32;
             e.walked += speed * dt as f32;
@@ -1418,10 +1417,10 @@ impl Client {
         let (w, on_ground) = (self.player.size[0] as f32 / 2.0, self.player.on_ground);
         let fell = self.was_falling;
         let drop = (self.fall_top - pos.y) as f32;
-        if on_ground && !self.was_on_ground && drop > 3.0 && under != 0 {
+        if on_ground && !self.was_on_ground && drop > crate::server::entity::SAFE_FALL && under != 0 {
             if let Some(kind) = name(weft_abi::particle::BLOCK) {
                 // Vanilla's `checkFallDamage`, and what its particles make of no speed of their own.
-                let count = (150.0 * (0.2 + (drop - 3.0).ceil() / 15.0).min(2.5)) as u32;
+                let count = (150.0 * (0.2 + (drop - crate::server::entity::SAFE_FALL).ceil() / 15.0).min(2.5)) as u32;
                 self.particles.spawn(
                     &weft_abi::ParticleBurst {
                         kind,
@@ -1437,7 +1436,7 @@ impl Client {
                 );
             }
         }
-        if on_ground && self.player.sprinting && under != 0 && self.chance() < dt * 20.0 {
+        if on_ground && self.player.sprinting && under != 0 && self.chance() < dt * crate::world::TPS as f32 {
             if let Some(kind) = name(weft_abi::particle::BLOCK) {
                 // Vanilla's `spawnSprintParticle`: back and up, in a particle's own speeds.
                 let mut noise = || self.rng.float() * 0.8 - 0.4;
@@ -1497,27 +1496,29 @@ impl Client {
         self.was_on_ground = on_ground;
         self.was_wet = self.player.in_liquid;
         self.was_falling = (-self.player.vel.y as f32).max(0.0);
-        self.fall_top = if on_ground || self.player.in_liquid || self.player.flying { pos.y } else { self.fall_top.max(pos.y) };
+        // The same that ends a fall on the server.
+        let safe = on_ground || self.player.in_liquid || self.player.climbing || self.player.flying;
+        self.fall_top = if safe { pos.y } else { self.fall_top.max(pos.y) };
     }
 
     /// What goes over the screen: the inside of a liquid, of a block, a fire.
-    fn overlays(&self, cam: &Camera) -> Vec<sky::Overlay> {
+    fn overlays(&self, cam: &Camera, textures: &GameTextures) -> Vec<sky::Overlay> {
         let c = content();
         let mut out = Vec::new();
         if self.view != 0 || self.hide_gui {
             return out;
         }
         let light = self.daylight().max(0.25);
+        let looks = looks::current();
         if let Some(l) = self
             .eye_liquid()
             .map(|l| &c.liquids[l as usize])
             .filter(|l| l.overlay_opacity > 0.0)
         {
             let st = &c.states[l.first_state as usize];
-            let own = c
-                .textures
-                .get(st.textures[0] as usize)
-                .map_or("", String::as_str);
+            let own = looks
+                .texture_name(c, looks.drawn(l.first_state, st).textures[0])
+                .unwrap_or("");
             let tint = if st.tint != 0 { sky::rgb(crate::content::item_tint(st.tint)) } else { Vec3::ONE };
             out.push(sky::Overlay {
                 picture: if l.overlay.is_empty() { own.to_string() } else { l.overlay.clone() },
@@ -1538,12 +1539,11 @@ impl Client {
             if let Some(st) = self
                 .world
                 .block_or_air(head)
-                .map(|s| s as usize)
-                .filter(|&s| c.states[s].flags & weft_abi::block_flags::SOLID != 0 && c.tight[s].opacity >= 15)
+                .filter(|&s| c.states[s as usize].flags & weft_abi::block_flags::SOLID != 0 && c.tight[s as usize].opacity >= 15)
             {
-                if let Some(picture) = c.textures.get(c.states[st].textures[1] as usize) {
+                if let Some(picture) = looks.texture_name(c, looks.drawn(st, &c.states[st as usize]).textures[1]) {
                     out.push(sky::Overlay {
-                        picture: picture.clone(),
+                        picture: picture.to_string(),
                         color: [0.01, 0.01, 0.01, 1.0],
                         tiles: 1.0,
                         slide: [0.0, 0.0],
@@ -1555,7 +1555,10 @@ impl Client {
         }
         if self.burning {
             if let Some(picture) = c.textures.get(c.fire_texture as usize) {
-                let frame = (self.start.elapsed().as_secs_f32() * crate::world::TPS as f32) as u32;
+                let ticks = self.start.elapsed().as_secs_f32() * crate::world::TPS as f32;
+                // Loaded by being asked for its picture, for mobs too.
+                textures.texture(c.fire_texture);
+                let frame = textures.strip_frame(c.fire_texture, ticks);
                 out.push(sky::Overlay {
                     picture: picture.clone(),
                     color: [1.0, 1.0, 1.0, 0.9],
@@ -1642,12 +1645,15 @@ impl Client {
     /// timer), and a puff of smoke when its death animation ends (vanilla's 20 poof particles).
     pub fn entity_effects(&mut self, a: &weft_abi::ClientEntityArgs) {
         use crate::audio::Play;
+        use crate::content::block_sound;
+        use crate::registry::entity_sound;
         let c = content();
         let k = &c.game.entities[a.kind as usize];
         let pos = DVec3::from_array(a.pos);
         if a.dying >= 1.0 {
             if let Some(&kind) = c.game.particle_names.get(weft_abi::particle::POOF) {
-                let (w, h) = (k.width * 0.5, k.height * 0.5);
+                let (hw, h, _) = physics::posed(k.size(), Pose::Stand);
+                let (w, h) = (hw as f32, h as f32 * 0.5);
                 let at = (pos + DVec3::Y * h as f64).to_array();
                 self.particles.spawn(
                     &weft_abi::ParticleBurst {
@@ -1670,21 +1676,22 @@ impl Client {
         let Some(e) = self.entities.get_mut(&a.entity) else { return };
         if a.walked >= e.next_step {
             e.next_step = a.walked + 1.6;
-            let sound = if k.sounds[3] != u32::MAX {
-                k.sounds[3]
+            let sound = if k.sounds[entity_sound::STEP] != u32::MAX {
+                k.sounds[entity_sound::STEP]
             } else {
                 self.world
                     .block_or_air((pos - DVec3::Y * 0.2).floor().as_ivec3())
-                    .map_or(u32::MAX, |s| c.states[s as usize].sounds[2])
+                    .map_or(u32::MAX, |s| c.states[s as usize].sounds[block_sound::STEP])
             };
             if sound != u32::MAX {
                 self.sounds
                     .push(Play { sound, pos: Some(pos), volume: 0.2, pitch: 0.0 });
             }
         }
-        if k.sounds[2] != u32::MAX && self.chance() < a.dt / 12.0 {
+        let eye = e.dims().2;
+        if k.sounds[entity_sound::AMBIENT] != u32::MAX && self.chance() < a.dt / 12.0 {
             self.sounds
-                .push(Play { sound: k.sounds[2], pos: Some(pos + DVec3::Y * k.eye as f64), volume: 1.0, pitch: 0.0 });
+                .push(Play { sound: k.sounds[entity_sound::AMBIENT], pos: Some(pos + DVec3::Y * eye), volume: 1.0, pitch: 0.0 });
         }
     }
 
@@ -1692,10 +1699,11 @@ impl Client {
     /// travels for them.
     fn creature_sounds(&mut self, dt: f32, moved: f32) {
         use crate::audio::Play;
+        use crate::content::block_sound;
         let c = content();
         let below = |w: &world::ClientWorld, p: DVec3| {
             w.block_or_air((p - DVec3::Y * 0.2).floor().as_ivec3())
-                .map_or(u32::MAX, |s| c.states[s as usize].sounds[2])
+                .map_or(u32::MAX, |s| c.states[s as usize].sounds[block_sound::STEP])
         };
         if self.player.on_ground && !self.player.flying && self.mode != GameMode::Spectator {
             self.next_step -= moved;
@@ -1715,7 +1723,7 @@ impl Client {
             if self.hit_sound <= 0.0 {
                 // Vanilla knocks every four ticks while mining.
                 self.hit_sound = 0.2;
-                let sound = c.states[hit.state as usize].sounds[3];
+                let sound = c.states[hit.state as usize].sounds[block_sound::HIT];
                 self.sounds.push(Play {
                     sound,
                     pos: Some(
@@ -1735,15 +1743,12 @@ impl Client {
         let c = content();
         let cam = self.camera();
         let eye = cam.pos.floor().as_ivec3();
-        let liquid = physics::Cells::liquid(&world::SeenCells { world: &self.world, air_if_missing: false }, c, eye)
-            .and_then(|s| c.states[s as usize].liquid)
-            .map(|l| c.liquids[l as usize].temperature);
         crate::audio::Listener {
             pos: cam.pos,
             yaw: cam.yaw,
             pitch: cam.pitch,
-            underwater: liquid.is_some_and(|t| t < 1000),
-            enclosed: self.world.light(eye) & 255 < 6 && c.dims[self.world.dim as usize].sky_light,
+            underwater: self.eye_liquid().is_some_and(|l| !c.liquids[l as usize].burns()),
+            enclosed: weft_abi::light::sky(self.world.light(eye)) < 6 && c.dims[self.world.dim as usize].sky_light,
             dim: self.world.dim,
             day: self.daylight() > 0.5,
             creative: self.mode == GameMode::Creative,
@@ -1753,8 +1758,8 @@ impl Client {
     fn pick_entity(&self, eye: DVec3, dir: DVec3, max: f64) -> Option<u64> {
         let mut best: Option<(f64, u64)> = None;
         for (&id, e) in &self.entities {
-            // Structures are aimed at by their blocks; the dead lie there only to be seen.
-            if !e.item.is_empty() || id == self.player_id || e.structure.is_some() || e.dying.is_some() {
+            // Structures are aimed at by their blocks.
+            if !e.is_body() || id == self.player_id || e.structure.is_some() {
                 continue;
             }
             let (hw, h, _) = e.dims();
@@ -1796,8 +1801,7 @@ impl Client {
                 }
             } else if comp == shape {
                 let (size, look) = shaped();
-                let k = &c.game.entities[c.game.player_kind as usize];
-                self.player.size = size.unwrap_or([k.width, k.height, k.eye]).map(|v| v as f64);
+                self.player.size = size.unwrap_or(c.game.entities[c.game.player_kind as usize].size());
                 self.self_look = look;
             }
             return;
@@ -1873,7 +1877,7 @@ impl Client {
 
     /// Server tick (fractional) bodies are shown at when the client clock reads `clock`.
     fn body_tick(&self, clock: f64) -> f64 {
-        (clock - self.tick_offset.unwrap_or(clock)) / STEP - INTERP_TICKS
+        (clock - self.tick_offset.unwrap_or(clock)) * self.tick_rate - INTERP_TICKS
     }
 
     /// Position drawn this frame, between the last two physics ticks; on a body, on the body as
@@ -1932,9 +1936,7 @@ impl Client {
     /// Vanilla's swing: starts over once past halfway, which is the quick arm of holding a block
     /// being mined.
     fn swing_arm(&mut self) {
-        if self.hand_swing.is_none_or(|p| p >= 0.5) {
-            self.hand_swing = Some(0.0);
-        }
+        restart_swing(&mut self.hand_swing);
     }
 
     /// The camera drawn from: the eye, or up to 4 blocks behind or in front of it in third person,
@@ -2042,8 +2044,8 @@ impl Client {
 
     /// Game ticks now, with the fraction of the current one.
     fn smooth_time(&self) -> f64 {
-        let fraction = if self.since_time < 20 { (self.accum / STEP).clamp(0.0, 1.0) } else { 0.0 };
-        self.world.time as f64 + self.since_time as f64 + fraction
+        let fraction = if self.since_time < crate::world::TPS as f64 { self.accum.clamp(0.0, STEP) * self.tick_rate } else { 0.0 };
+        self.world.time as f64 + self.since_time + fraction
     }
 
     /// Fog color (linear): the liquid's from inside one; else vanilla's dimming towards night,
@@ -2151,7 +2153,7 @@ impl Client {
         let mut late = std::mem::take(&mut self.late);
         late.clear();
         // The sky fills what the opaque world left, and translucent things are seen against it.
-        let overlays = self.overlays(&cam);
+        let overlays = self.overlays(&cam, textures);
         self.sky.draw(
             gpu,
             &mut late,
@@ -2182,15 +2184,17 @@ impl Client {
         let light = |p: IVec3| world.light(p);
         let mut hand_late = std::mem::take(&mut self.hand_late);
         hand_late.clear();
-        let mut cracks: Vec<(IVec3, f32, DVec3)> = self
+        let mut cracks: Vec<entity_render::Crack> = self
             .others_mining
             .iter()
-            .map(|&(_, p, v)| (p, v, DVec3::ZERO))
+            .map(|&(_, pos, state, progress)| entity_render::Crack { pos, progress, at: DVec3::ZERO, state })
             .collect();
-        cracks.extend(
-            self.breaking
-                .map(|(f, p, v)| (p, v, self.frame_place(f).origin())),
-        );
+        cracks.extend(self.breaking.map(|(f, pos, progress)| entity_render::Crack {
+            pos,
+            progress,
+            at: self.frame_place(f).origin(),
+            state: self.breaking_part,
+        }));
         self.entity_render.draw(
             gpu,
             list,
@@ -2249,6 +2253,18 @@ pub(crate) fn turn_body(body: f32, head: f32, moved: DVec3, dt: f32) -> f32 {
     head - angle_diff(head, body)
 }
 
+/// Vanilla's swing starts over once past halfway.
+fn restart_swing(swing: &mut Option<f32>) {
+    if swing.is_none_or(|p| p >= 0.5) {
+        *swing = Some(0.0);
+    }
+}
+
+/// An arm's swing goes on, 0.3 seconds from start to end.
+fn advance_swing(swing: &mut Option<f32>, dt: f32) {
+    *swing = swing.map(|p| p + dt / 0.3).filter(|&p| p < 1.0);
+}
+
 /// `a - b` the short way around, radians.
 fn angle_diff(a: f32, b: f32) -> f32 {
     (a - b + std::f32::consts::PI).rem_euclid(std::f32::consts::TAU) - std::f32::consts::PI
@@ -2261,24 +2277,16 @@ fn step_player(p: &mut LocalPlayer, input: &Input, block: &impl physics::Cells, 
     let c = content();
     if let Some(yaw) = p.lying {
         (p.yaw, p.pitch, p.vel, p.pose) = (yaw, 0.0, DVec3::ZERO, Pose::Sleep);
-        p.eye = physics::posed(Pose::Sleep, 1.8, 1.62).1;
+        p.eye = p.dims().2;
         return;
     }
     // The body the player rides moves it first, like on the server.
     let (hw, _, _) = p.dims();
     if !p.noclip {
         let h = p.dims().1;
-        let ride = physics::ride(c, p.pos, hw, p.on_ground, &mut p.support, bodies, 0);
-        if ride.carry != DVec3::ZERO {
-            let moved = physics::move_box(c, block, p.pos, hw, h, ride.carry, 0.0).pos;
-            p.pos = moved;
-        }
-        if let Some(d) = ride.released {
+        let moved_by = physics::carried(c, block, &mut p.pos, hw, h, p.on_ground, &mut p.support, bodies, 0);
+        if let Some(d) = moved_by.released {
             p.vel += d;
-        }
-        let (shift, _) = physics::push(c, p.pos, hw, h, bodies, 0, p.support);
-        if shift != DVec3::ZERO {
-            p.pos = physics::move_box(c, block, p.pos, hw, h, shift, 0.0).pos;
         }
     } else {
         p.support = None;
@@ -2318,7 +2326,7 @@ fn step_player(p: &mut LocalPlayer, input: &Input, block: &impl physics::Cells, 
         Pose::Stand
     };
     let fits = |pose: Pose| {
-        p.noclip || !physics::collides(c, block, physics::Aabb::around(p.pos, hw - 1e-3, physics::posed(pose, p.size[1], p.size[2]).0))
+        p.noclip || !physics::collides(c, block, physics::Aabb::around(p.pos, hw - 1e-3, physics::posed(p.size, pose).1))
     };
     p.pose = if fits(want) {
         want
@@ -2344,7 +2352,7 @@ fn step_player(p: &mut LocalPlayer, input: &Input, block: &impl physics::Cells, 
     let right = DVec3::new(cy, 0.0, -sy);
     // Vanilla's moveRelative input: normalized only when longer than 1.
     let wish = forward * fwd_in + right * side_in;
-    let g = 0.08 * gravity / 32.0;
+    let g = physics::gravity_per_tick(gravity);
 
     let height = p.dims().1;
     let before = p.pos;
@@ -2379,7 +2387,8 @@ fn step_player(p: &mut LocalPlayer, input: &Input, block: &impl physics::Cells, 
                 p.flying = false;
             }
         }
-        p.in_liquid = physics::in_liquid(c, block, p.pos, 0.0);
+        let here = physics::around(c, block, p.pos, height);
+        (p.in_liquid, p.climbing) = (here.in_liquid, here.climbing);
         p.vel.y *= 0.6;
         p.vel.x *= 0.91;
         p.vel.z *= 0.91;
@@ -2395,19 +2404,21 @@ fn step_player(p: &mut LocalPlayer, input: &Input, block: &impl physics::Cells, 
         wish,
         ground: if sprint { 0.13 } else { 0.1 } * p.speed_mul,
         air: if sprint { 0.026 } else { 0.02 },
-        jump: if jump && p.jump_cooldown == 0 { 0.42 * p.jump_mul } else { 0.0 },
+        jump: if jump && p.jump_cooldown == 0 { physics::JUMP * p.jump_mul } else { 0.0 },
         jump_boost: if sprint { forward * 0.2 } else { DVec3::ZERO },
         swim: jump,
         careful: sneak,
         sprint: swimming,
         swim_look: swimming.then(|| (p.pitch as f64).sin()),
     };
-    let frame = physics::Frame { half_width: hw, height, step: 0.6, gravity: g };
+    let frame = physics::Frame { half_width: hw, height, step: physics::STEP_UP, gravity: g };
     let w = physics::walk(c, block, bodies, 0, &mut p.pos, &mut p.vel, p.on_ground, &ctl, &frame);
     if w.jumped {
         p.jump_cooldown = 10;
+        p.jumped = true;
     }
-    p.in_liquid = w.in_liquid;
+    let here = physics::around(c, block, p.pos, height);
+    (p.in_liquid, p.climbing) = (here.in_liquid, here.climbing);
     if w.on_ground {
         if let Some(b) = physics::standing_on(c, p.pos, hw, bodies, 0) {
             p.support = Some(b);

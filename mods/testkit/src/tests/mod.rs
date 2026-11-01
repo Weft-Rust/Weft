@@ -11,6 +11,7 @@ pub mod redstone;
 mod scene;
 mod sync;
 mod ui;
+mod unify;
 mod visual;
 mod world;
 
@@ -139,6 +140,21 @@ pub fn all() -> Vec<TestDef> {
         visual::gizmos,
         visual::multiplayer,
         visual::client_hooks,
+        unify::push_is_the_same_for_all,
+        unify::water_beside_a_slab_ends_a_fall,
+        unify::thrown_up_is_no_jump,
+        unify::jumping_while_mining,
+        unify::unbreakable_in_creative,
+        unify::mining_at_a_slow_tick_rate,
+        unify::virtual_inventory_stays,
+        unify::spectators_push_nothing,
+        unify::tinted_in_the_hand,
+        unify::swings_count_on_both_sides,
+        unify::thrown_from_a_menu,
+        unify::game_modes_for_mods,
+        unify::wrong_item_ids,
+        unify::bed_drop_in_its_table,
+        unify::beds_every_way,
         audit::saved_entities_stay_gone,
         audit::death_is_a_state,
         audit::respawn_keeps_mode,

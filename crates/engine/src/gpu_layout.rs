@@ -79,6 +79,12 @@ shared! {
         FILLED = 5,
         QUAD = 6,
     }
+    /// `Quad::layer` of a texture animated as a strip: the frame, the next and how many there are.
+    ui_strip {
+        BITS = 11,
+        MASK = 2047,
+        COUNT_SHIFT = 22,
+    }
     /// UI quad modes (`ui.wgsl`).
     ui_mode {
         SOLID = 0,
@@ -291,6 +297,10 @@ pub fn quad_middle(q: &[u32; 8]) -> [i32; 3] {
 /// A quad's uv word, and what goes on top of each of its corners' words: `uv` (u0, v0, u1, v1, 16
 /// across a texture), tint kind and flags.
 #[inline]
+pub fn ui_strip_record(frame: u32, next: u32, count: u32) -> u32 {
+    frame.min(ui_strip::MASK) | next.min(ui_strip::MASK) << ui_strip::BITS | count << ui_strip::COUNT_SHIFT
+}
+
 pub fn quad_uv(uv: [f32; 4], tint: u32) -> (u32, [u32; 4]) {
     let e = uv.map(|v| ((v * 8.0).round() as i32).clamp(0, (quad::UV_MASK as i32 + 1) * 8 - 1) as u32);
     let [whole, fine] = [e.map(|v| v >> quad::UV_FINE_BITS), e.map(|v| v & ((1 << quad::UV_FINE_BITS) - 1))];
@@ -325,6 +335,11 @@ fn records() -> String {
         .map(|c| format!("vec3({:.1}, {:.1}, {:.1})", c[0] as f32, c[1] as f32, c[2] as f32))
         .collect();
     let mut s = format!("var<private> CORNERS: array<vec3<f32>, 24> = array<vec3<f32>, 24>({});\n", corners.join(", "));
+    let dirs: Vec<String> = weft_abi::FACE_DIRS
+        .iter()
+        .map(|d| format!("vec3({:.1}, {:.1}, {:.1})", d[0] as f32, d[1] as f32, d[2] as f32))
+        .collect();
+    s.push_str(&format!("var<private> FACE_DIRS: array<vec3<f32>, 6> = array<vec3<f32>, 6>({});\n", dirs.join(", ")));
     s.push_str(concat!(
         "fn face_pos(w0: u32) -> vec3<f32> {\n",
         "    return vec3<f32>(f32(w0 & FACE_POS_MASK), f32((w0 >> FACE_Y_SHIFT) & FACE_POS_MASK), f32((w0 >> FACE_Z_SHIFT) & FACE_POS_MASK));\n",
@@ -653,13 +668,12 @@ gpu_struct! {
         pub v: [f32; 2],
         /// Text effect slot (top bit set on shadows) or GUI fill slot.
         pub fx: u32,
-        /// Glyph number in its text.
+        /// Glyph number in its text, or how far an animated texture has blended into its next frame.
         pub index: f32,
         pub uv: [f32; 4],
         pub color: u32,
         pub tex: u32,
-        /// A texture animated as a strip of square frames: frame count | ticks per frame << 16
-        /// (0: still).
+        /// A texture animated as a strip of frames: `ui_strip_record` (0: still).
         pub layer: u32,
         pub mode: u32,
         /// Visible rectangle in physical pixels; empty (all zero) means unclipped.

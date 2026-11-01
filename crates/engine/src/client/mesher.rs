@@ -234,13 +234,13 @@ pub const DIR_RANK: [u8; 6] = [3, 0, 4, 1, 5, 2];
 /// A face of a model's box as it is drawn, in the world and as an item alike: its corners in the
 /// block, turned and tilted, and the part of its picture (16 across). `None`: it has no such face.
 pub fn box_face(bx: &crate::content::ModelBox, dir: usize) -> Option<([[f32; 3]; 4], [f32; 4])> {
-    if bx.uv[dir][0] <= crate::block_model::NO_FACE {
+    if bx.uv[dir][0] <= weft_abi::UV_NO_FACE[0] {
         return None;
     }
     let corners = CORNERS[dir].map(|k| std::array::from_fn(|a| if k[a] == 1 { bx.max[a] } else { bx.min[a] }));
     let uv = match bx.uv[dir] {
         r if r[0] >= 0.0 => r,
-        _ => box_uv(dir, bx.min, bx.max),
+        _ => weft_abi::box_face_uv(dir, bx.min.map(|v| v * 16.0), bx.max.map(|v| v * 16.0)),
     };
     let corners: [[f32; 3]; 4] = std::array::from_fn(|i| corners[(i + bx.turn[dir] as usize) % 4]);
     Some((if bx.tilt.degrees != 0.0 { corners.map(|p| tilted(p, &bx.tilt)) } else { corners }, uv))
@@ -261,18 +261,6 @@ fn tilted(p: [f32; 3], t: &weft_abi::BoxTilt) -> [f32; 3] {
     (o + turn * (glam::Vec3::from_array(p) - o)).to_array()
 }
 
-fn box_uv(dir: usize, min: [f32; 3], max: [f32; 3]) -> [f32; 4] {
-    let p = |v: f32| (v * 16.0).clamp(0.0, 16.0);
-    // Texture u/v follow the same axes as the face corners.
-    match dir {
-        0 => [p(min[2]), 16.0 - p(max[1]), p(max[2]), 16.0 - p(min[1])],
-        1 => [16.0 - p(max[2]), 16.0 - p(max[1]), 16.0 - p(min[2]), 16.0 - p(min[1])],
-        2 => [p(min[0]), p(min[2]), p(max[0]), p(max[2])],
-        3 => [p(min[0]), p(min[2]), p(max[0]), p(max[2])],
-        4 => [16.0 - p(max[0]), 16.0 - p(max[1]), 16.0 - p(min[0]), 16.0 - p(min[1])],
-        _ => [p(min[0]), 16.0 - p(max[1]), p(max[0]), 16.0 - p(min[1])],
-    }
-}
 
 fn corner_data(
     n: &Neighborhood,
@@ -358,9 +346,10 @@ fn darker_by_ao(light: u32, ao: u32) -> u32 {
 /// A whole picture on a quad.
 const WHOLE: [f32; 4] = [0.0, 0.0, 16.0, 16.0];
 
-/// The tint a face takes: one the block tints, or one with a tinted overlay.
+/// The tint the word of a face says; the shader gives it to the overlay when there is one.
 fn face_tint(info: &crate::content::StateInfo, ctm: &super::ctm::Ctm, dir: usize, tex: u32) -> u8 {
-    if info.tint_faces & (1 << dir) != 0 || ctm.has_overlay(tex) { info.tint } else { 0 }
+    let paint = crate::content::face_paint(info, dir, ctm.has_overlay(tex));
+    if paint.base_tinted || paint.overlay_tinted { info.tint } else { 0 }
 }
 
 fn quad(corners: [[f32; 3]; 4], uv: [f32; 4], texture: u32, biome: u32, tint: u8, light: [u32; 4]) -> [u32; 8] {

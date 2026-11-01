@@ -32,14 +32,27 @@ impl Dir {
         Dir::from_face(self.face() ^ 1)
     }
     pub fn offset(self) -> [i32; 3] {
-        [[-1, 0, 0], [1, 0, 0], [0, -1, 0], [0, 1, 0], [0, 0, -1], [0, 0, 1]][self as usize]
+        crate::abi::FACE_DIRS[self as usize]
+    }
+    /// The next way around, seen from above: north, east, south, west. Up and down stay.
+    pub fn clockwise(self) -> Dir {
+        match self {
+            Dir::North => Dir::East,
+            Dir::East => Dir::South,
+            Dir::South => Dir::West,
+            Dir::West => Dir::North,
+            d => d,
+        }
+    }
+    pub fn counter_clockwise(self) -> Dir {
+        self.clockwise().opposite()
     }
     pub fn horizontal(self) -> bool {
         !matches!(self, Dir::Down | Dir::Up)
     }
     /// The value of a `facing` property.
     pub fn name(self) -> &'static str {
-        ["west", "east", "down", "up", "north", "south"][self as usize]
+        crate::abi::FACE_NAMES[self as usize]
     }
     pub fn from_name(name: &str) -> Option<Dir> {
         Dir::ALL.into_iter().find(|d| d.name() == name)
@@ -93,6 +106,8 @@ pub enum Toward {
     Player,
     /// Out of the face that was clicked (torches and ladders on walls, logs along it).
     Face,
+    /// Where the player looks (an observer watching what it was placed against).
+    Away,
 }
 
 impl Toward {
@@ -103,9 +118,9 @@ impl Toward {
         if self == Toward::Face && allowed.allows(Dir::from_face(face)) {
             return Dir::from_face(face);
         }
-        let back = [-look[0], -look[1], -look[2]];
+        let at = if self == Toward::Away { look } else { [-look[0], -look[1], -look[2]] };
         // Horizontal-only blocks go by the horizontal part of the look alone.
-        if allowed.0 & Facings::VERTICAL.0 == 0 { Dir::nearest([back[0], 0.0, back[2]], allowed) } else { Dir::nearest(back, allowed) }
+        if allowed.0 & Facings::VERTICAL.0 == 0 { Dir::nearest([at[0], 0.0, at[2]], allowed) } else { Dir::nearest(at, allowed) }
     }
 }
 
@@ -121,5 +136,25 @@ mod tests {
         assert_eq!(Dir::from_name("north"), Some(Dir::North));
         assert_eq!(Toward::Player.choose(Facings::HORIZONTAL, 3, [0.0, -0.9, -0.4]), Dir::South);
         assert_eq!(Toward::Face.choose(f, 3, [0.0, -1.0, 0.0]), Dir::Up);
+    }
+}
+
+#[cfg(test)]
+mod turning_tests {
+    use super::*;
+
+    #[test]
+    fn around_and_back() {
+        assert_eq!(Dir::North.clockwise(), Dir::East);
+        assert_eq!(Dir::West.clockwise(), Dir::North);
+        assert_eq!(Dir::Up.clockwise(), Dir::Up);
+        assert_eq!(Dir::East.counter_clockwise(), Dir::North);
+    }
+
+    #[test]
+    fn away_looks_where_the_player_does() {
+        let look = [0.0, 0.0, -1.0];
+        assert_eq!(Toward::Away.choose(Facings::HORIZONTAL, 0, look), Dir::North);
+        assert_eq!(Toward::Player.choose(Facings::HORIZONTAL, 0, look), Dir::South);
     }
 }

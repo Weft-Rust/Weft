@@ -15,14 +15,14 @@ impl Server {
             }
             let view = self.view(&self.players[pi]);
             let full = self.full_view(&self.players[pi]);
-            let Server { players, dims, tick, storage, .. } = self;
+            let Server { players, dims, tick, storage, tick_rate, .. } = self;
             let p = &mut players[pi];
             let dim = &mut dims[p.dim as usize];
             let d = p.dim as usize;
             send_far(c, p, dim, storage.as_ref(), full, *tick);
             send_block_changes(p, dim);
             send_mining(p, &mining_now[d], *tick);
-            send_clock(p, dim, *tick);
+            send_clock(p, dim, *tick, *tick_rate);
             let viewer = dim
                 .entity(p.entity)
                 .map_or((DVec3::ZERO, GameMode::Survival), |e| (e.pos, e.mode));
@@ -43,30 +43,22 @@ impl Server {
         self.unload_unused(c);
     }
 
-    /// Who is breaking what, in tenths as crack pictures go, so most ticks nothing is sent.
-    fn mining_now(&self, c: &'static Content) -> Vec<Vec<(u64, IVec3, f32)>> {
-        let server_tick = self.tick;
-        let mut mining_now: Vec<Vec<(u64, IVec3, f32)>> = vec![Vec::new(); self.dims.len()];
-        for p in self.players.iter().filter(|p| p.joined) {
-            let Some((0, pos, start)) = p.mining else { continue };
-            let Some(r) = self.dims[p.dim as usize].entity_region_ref(p.entity) else { continue };
-            let (Some(e), Some(state)) = (r.entities.get(p.entity), r.get(pos)) else { continue };
-            let held = r
-                .entities
-                .inventories
-                .get(&p.entity)
-                .and_then(|i| i.get(e.selected as usize))
-                .map_or(0, |s| s.item);
-            let need = dim::mining_time(
-                c,
-                state,
-                held,
-                r.head_in_liquid(c, e),
-                e.on_ground,
-                r.attribute(c, e.id, extend::MINING_SPEED, false) as f32,
-            ) * TPS as f32;
-            let progress = if need > 0.0 { ((server_tick - start) as f32 / need).min(0.99) } else { 0.0 };
-            mining_now[p.dim as usize].push((p.entity, pos, (progress * 10.0).floor() / 10.0));
+    /// Mining goes on by what each one holds and where it is this tick. Returns who is breaking
+    /// what, in tenths as crack pictures go, so most ticks nothing is sent.
+    fn mining_now(&mut self, c: &'static Content) -> Vec<Vec<crate::net::Crack>> {
+        // This also runs between ticks, where nothing goes on.
+        let ticked = std::mem::replace(&mut self.mining_tick, self.tick) != self.tick;
+        let mut mining_now: Vec<Vec<crate::net::Crack>> = vec![Vec::new(); self.dims.len()];
+        for pi in 0..self.players.len() {
+            let Some(m) = self.players[pi].mining.filter(|_| self.players[pi].joined) else { continue };
+            let Some((r, id)) = self.region(pi) else { continue };
+            let rate = if ticked { r.mining_rate_of(c, id, m.frame, m.pos, m.part) } else { 0.0 };
+            let progress = (m.progress + rate).min(1.0);
+            let p = &mut self.players[pi];
+            p.mining = Some(Mining { progress, ..m });
+            if m.frame == 0 {
+                mining_now[p.dim as usize].push((p.entity, m.pos, m.part, (progress.min(0.99) * 10.0).floor() / 10.0));
+            }
         }
         mining_now
     }
@@ -131,6 +123,7 @@ impl Server {
                     st.world_light_changed = false;
                 }
                 r.space.resend.clear();
+                r.space.body_light_changes.clear();
                 r.space.changes.clear();
                 r.space.extra_changes.clear();
                 r.space.signals.level_changes.clear();
@@ -156,6 +149,15 @@ impl Server {
 
 fn send_block_changes(p: &mut Player, dim: &DimSet) {
     for reg in &dim.regions {
+        // For what the client works out itself; all of it when it gets here, then what changes.
+        let glow: Vec<(IVec3, [u8; 3])> = if !p.glow_sent {
+            reg.space.body_light.iter().map(|(c, v)| (*c, *v)).collect()
+        } else {
+            reg.space.body_light_changes.clone()
+        };
+        if !glow.is_empty() {
+            p.conn.send(ToClient::BodyGlow { dim: p.dim, cells: glow });
+        }
         for (pos, cube) in &reg.space.resend {
             if p.sent.contains(pos) {
                 p.conn
@@ -197,11 +199,12 @@ fn send_block_changes(p: &mut Player, dim: &DimSet) {
             }
         }
     }
+    p.glow_sent = true;
 }
 
 /// Everyone else's mining in this dimension: cracks for those near, and their arms.
-fn send_mining(p: &mut Player, cracks: &[(u64, IVec3, f32)], tick: u64) {
-    let mine: Vec<(u64, IVec3, f32)> = cracks
+fn send_mining(p: &mut Player, cracks: &[crate::net::Crack], tick: u64) {
+    let mine: Vec<crate::net::Crack> = cracks
         .iter()
         .copied()
         .filter(|m| m.0 != p.entity && p.known.contains(&m.0))
@@ -220,7 +223,11 @@ fn send_mining(p: &mut Player, cracks: &[(u64, IVec3, f32)], tick: u64) {
     }
 }
 
-fn send_clock(p: &mut Player, dim: &DimSet, tick: u64) {
+fn send_clock(p: &mut Player, dim: &DimSet, tick: u64, rate: u32) {
+    if p.first_sync || p.sent_rate != rate {
+        p.sent_rate = rate;
+        p.conn.send(ToClient::TickRate(rate));
+    }
     if dim.weather_moved || p.first_sync {
         p.conn
             .send(ToClient::Weather { raining: dim.raining, thunder: dim.thunder });
@@ -252,7 +259,7 @@ fn send_entities(
             .entities
             .list
             .iter()
-            .filter(|e| !e.removed && e.id != p.entity && e.anchor.is_none() && e.kind != c.game.virtual_kind && (!e.player || e.alive()))
+            .filter(|e| e.in_world(c) && e.id != p.entity && (!e.player || e.alive()))
             .filter(shown)
         {
             if (e.pos - me).length_squared() > range2 {
@@ -378,7 +385,10 @@ fn send_entities(
 fn send_own_state(c: &'static Content, p: &mut Player, dim: &mut DimSet) {
     let Some(reg) = dim.entity_region(p.entity) else { return };
     for &(_, push) in reg.entities.pushed.iter().filter(|h| h.0 == p.entity) {
-        p.conn.send(ToClient::Push(push));
+        p.conn.send(match push {
+            entity::Pushed::Knock(away) => ToClient::Knock { away },
+            entity::Pushed::Add(add) => ToClient::Velocity { add },
+        });
     }
     // The client moves its player and times its mining: it needs them all.
     if p.sent_attributes.is_empty() {

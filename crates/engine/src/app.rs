@@ -336,7 +336,7 @@ impl App {
         // Automated runs work in the background: no focus taken, under other windows, off the
         // desktop (still rendered at full size, so screenshots are the same).
         if recording() {
-            // Sized to what the owner's OBS scene keeps of the left monitor (crops 30 px above, 50 below).
+            // Fixed size and place, for a screen recorder to crop to.
             attrs = attrs
                 .with_decorations(false)
                 .with_window_level(winit::window::WindowLevel::AlwaysOnTop)
@@ -386,7 +386,7 @@ impl App {
         let post = crate::post::Post::new(&mut *gpu, &assets);
         let mut input = Input::default();
         for (action, key) in &content().game.keys {
-            match crate::settings::parse_chord(key) {
+            match crate::input::Chord::parse(key) {
                 Some(k) => input.register(action, k),
                 None => log::warn!("key binding {action}: unknown key {key}"),
             }
@@ -659,19 +659,39 @@ impl Running {
         self.set_capture(false);
     }
 
+    /// Screens just went: with none left it is back to the game, otherwise those left look again.
+    /// The one place that decides that.
+    fn screens_gone(&mut self) {
+        self.quads_dirty = true;
+        if self.screens.is_empty() {
+            self.set_capture(true);
+        } else {
+            self.rebuild_all();
+        }
+    }
+
+    /// Closes the screens `drop` picks.
+    pub(crate) fn close_screens(&mut self, drop: impl Fn(&dyn Screen) -> bool) {
+        self.screens.retain(|(s, _)| !drop(s.as_ref()));
+        self.screens_gone();
+    }
+
+    /// Closes the top screen, and the menu it shows if it does.
+    pub(crate) fn close_top(&mut self) {
+        if self.screens.last().is_some_and(|(s, _)| s.shows_menu()) {
+            if let Some(g) = &mut self.game {
+                g.client.close_menu();
+            }
+        }
+        self.screens.pop();
+        self.screens_gone();
+    }
+
     pub(crate) fn handle(&mut self, reqs: Vec<Request>) {
         for r in reqs {
             match r {
                 Request::Open(s) => self.open(s),
-                Request::Close => {
-                    self.screens.pop();
-                    self.quads_dirty = true;
-                    if self.screens.is_empty() {
-                        self.set_capture(true);
-                    } else {
-                        self.rebuild_all();
-                    }
-                }
+                Request::Close => self.close_top(),
                 Request::Quit => self.quit = true,
                 Request::Restart => {
                     match crate::paths::own_program().and_then(|exe| {
@@ -740,8 +760,7 @@ impl Running {
                     if let Some(g) = &mut self.game {
                         g.client.send(net::ToServer::Respawn);
                     }
-                    self.screens.retain(|(s, _)| !s.closes_on_respawn());
-                    self.set_capture(true);
+                    self.close_screens(|s| s.closes_on_respawn());
                 }
                 Request::SendChat(text) => {
                     if self.game.is_some() && !self.client_command(&text) && !text.trim().is_empty() {
@@ -1334,7 +1353,7 @@ impl Running {
         let dev = self.lang.dev;
         let test = |t: &text::Test| match t {
             text::Test::Keys(keys) => keys.iter().all(|k| {
-                if k.contains(':') { ctx.input.held(k) } else { crate::settings::parse_key(k).is_some_and(|key| ctx.input.held_key(key)) }
+                if k.contains(':') { ctx.input.held(k) } else { crate::input::Key::parse(k).is_some_and(|key| ctx.input.held_key(key)) }
             }),
             text::Test::Fixed(holds) => *holds,
             text::Test::If(name) => {
@@ -1667,11 +1686,6 @@ fn screen_keys_first(r: &mut Running, requests: &mut Vec<Request>) -> bool {
 fn escape(r: &mut Running, requests: &mut Vec<Request>) {
     if r.screens.last().is_some_and(|(s, _)| !s.escape_closes()) {
     } else if r.screens.len() > 1 || (r.game.is_some() && !r.screens.is_empty()) {
-        if r.screens.last().is_some_and(|(s, _)| s.shows_menu()) {
-            if let Some(g) = &mut r.game {
-                g.client.close_menu();
-            }
-        }
         requests.push(Request::Close);
     } else if r.game.is_some() && r.screens.is_empty() {
         r.open(screens::engine("core:pause"));
@@ -1870,11 +1884,7 @@ fn client_events(r: &mut Running) {
                 r.screens.retain(|(s, _)| !s.shows_menu());
                 r.open(Box::new(crate::game_screens::MenuScreen::new(kind)));
             }
-            crate::client::ClientEvent::CloseMenu => {
-                r.screens.retain(|(s, _)| !s.shows_menu());
-                r.quads_dirty = true;
-                r.set_capture(true);
-            }
+            crate::client::ClientEvent::CloseMenu => r.close_screens(|s| s.shows_menu()),
             crate::client::ClientEvent::Died => {
                 r.screens.clear();
                 r.open(screens::engine("core:death"));
@@ -1907,9 +1917,7 @@ fn world_keys(r: &mut Running) {
                 _ => None,
             })
         });
-        r.screens.pop();
-        r.set_capture(true);
-        r.quads_dirty = true;
+        r.close_top();
         if let Some(t) = text.filter(|t| !t.trim().is_empty()) {
             if let Some(g) = &mut r.game {
                 if g.client.sent.last() != Some(&t) {
@@ -1930,9 +1938,7 @@ fn world_keys(r: &mut Running) {
         if let Some(g) = &mut r.game {
             g.client.close_menu();
         }
-        r.screens.retain(|(s, _)| !s.shows_menu());
-        r.set_capture(true);
-        r.quads_dirty = true;
+        r.close_screens(|s| s.shows_menu());
     }
 }
 

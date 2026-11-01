@@ -1,4 +1,4 @@
-//! What the audit of 2026-10-31 found, each as it was reproduced there.
+//! Bugs found by going through the game, each as it was reproduced then.
 
 use std::time::Duration;
 

@@ -17,13 +17,13 @@ impl World {
     }
 
     pub fn get(&self, pos: [i32; 3]) -> u32 {
-        unsafe { (host().get_block)(self.raw, &pos) }
+        self.get_loaded(pos).unwrap_or(0)
     }
 
     /// `get` that tells air from what isn't loaded here: `None` for that. A callback sees the
     /// region it runs in, so that is also anything far from the players around it.
     pub fn get_loaded(&self, pos: [i32; 3]) -> Option<u32> {
-        let s = unsafe { (host().get_block_loaded)(self.raw, &pos) };
+        let s = unsafe { (host().block_in)(self.raw, 0, &pos) };
         (s != u32::MAX).then_some(s)
     }
 
@@ -34,35 +34,26 @@ impl World {
 
     /// False if the position is not loaded.
     pub fn set(&self, pos: [i32; 3], state: u32) -> bool {
-        unsafe { (host().set_block)(self.raw, &pos, state) != 0 }
+        unsafe { (host().set_block_in)(self.raw, 0, &pos, state) != 0 }
     }
 
     /// Every block whose middle is within `radius` of `center` becomes `state` (air for a
     /// crater), at the end of the tick and across the whole dimension: loaded cubes at once on
     /// every core, the rest when they load. Far faster than `set` per block for anything big.
-    /// `keep_unbreakable`: blocks with negative hardness stay.
-    pub fn fill_sphere(&self, center: [f64; 3], radius: f64, state: u32, keep_unbreakable: bool) {
-        let flags = if keep_unbreakable { abi::area_flags::KEEP_UNBREAKABLE } else { 0 };
-        let desc = abi::AreaFillDesc { center, radius, state, flags };
-        unsafe { (host().area_fill)(self.raw, &desc) }
-    }
-
-    /// `fill_sphere` choosing what stays (`abi::area_flags`).
-    pub fn fill_sphere_keeping(&self, center: [f64; 3], radius: f64, state: u32, flags: u32) {
-        let desc = abi::AreaFillDesc { center, radius, state, flags };
-        unsafe { (host().area_fill)(self.raw, &desc) }
+    pub fn fill_sphere(&self, center: [f64; 3], radius: f64, state: u32) -> FillSphere {
+        FillSphere { world: *self, desc: abi::AreaFillDesc { center, radius, state, flags: 0 } }
     }
 
     /// A block of moving structure `entity` (in its own coordinates; block (0, 0, 0) is centered
     /// on the entity); `None` if the entity is not one.
     pub fn structure_block(&self, entity: u64, pos: [i32; 3]) -> Option<u32> {
-        let s = unsafe { (host().structure_block)(self.raw, entity, &pos) };
+        let s = unsafe { (host().block_in)(self.raw, entity, &pos) };
         (s != u32::MAX).then_some(s)
     }
 
     /// Sets a block of moving structure `entity`, like `set` in the world.
     pub fn set_structure_block(&self, entity: u64, pos: [i32; 3], state: u32) -> bool {
-        unsafe { (host().set_structure_block)(self.raw, entity, &pos, state) != 0 }
+        entity != 0 && unsafe { (host().set_block_in)(self.raw, entity, &pos, state) != 0 }
     }
 
     /// Takes `cells` out of the world into a new moving structure, whose block (0, 0, 0) is at
@@ -120,18 +111,34 @@ impl World {
         state_prop(self.get(pos), name).or_else(|| self.parts(pos).into_iter().find_map(|s| state_prop(s, name)))
     }
 
+    /// A number property of the block at `pos` (`age`, `fuse`).
+    pub fn prop_int(&self, pos: [i32; 3], name: &str) -> Option<u32> {
+        self.prop(pos, name)?.parse().ok()
+    }
+
+    /// The block at `pos` goes on to the next value of a property, the first after the last: a
+    /// lever's power, a repeater's delay. False if it has no such property.
+    pub fn cycle_prop(&self, pos: [i32; 3], name: &str) -> bool {
+        let Some(old) = self.part_with(pos, name) else { return false };
+        let next = unsafe { (host().state_next)(old, Str::new(name)) };
+        next != u32::MAX && state_prop(next, name).is_some_and(|v| self.set_prop(pos, name, v))
+    }
+
+    /// Of the block `get` gives, else of the first in the cell that has the property.
+    fn part_with(&self, pos: [i32; 3], name: &str) -> Option<u32> {
+        let own = self.get(pos);
+        if state_prop(own, name).is_some() {
+            return Some(own);
+        }
+        self.parts(pos).into_iter().find(|&s| state_prop(s, name).is_some())
+    }
+
     /// Changes one property of the block at `pos`, keeping the others (its facing stays):
     /// `w.set_prop(pos, "lit", "true")`. False if the block has no such property or value.
     pub fn set_prop(&self, pos: [i32; 3], name: &str, value: &str) -> bool {
-        // Of the block `get` gives, else of the first in the cell that has it.
-        let own = self.get(pos);
-        let part = if state_prop(own, name).is_some() {
-            Some(own)
-        } else {
-            self.parts(pos).into_iter().find(|&s| state_prop(s, name).is_some())
-        };
+        let part = self.part_with(pos, name);
         match part.and_then(|old| Some((old, state_with(old, name, value)?))) {
-            Some((old, new)) if old == own => self.set(pos, new),
+            Some((old, new)) if old == self.get(pos) => self.set(pos, new),
             Some((old, new)) => self.replace_part(pos, old, new),
             None => false,
         }
@@ -175,6 +182,54 @@ pub fn state_prop(state: u32, name: &str) -> Option<&'static str> {
 }
 
 /// `state` with property `name` set to `value`, its other properties kept.
+/// The `facing` property of a state, up if it has none.
+pub fn state_facing(state: u32) -> crate::Dir {
+    state_prop(state, "facing").and_then(crate::Dir::from_name).unwrap_or(crate::Dir::Up)
+}
+
+/// Where the other part of a `two_part` block is, from the part `state` at `pos`.
+pub fn other_part(pos: [i32; 3], state: u32, prop: &str, second: &str, way: impl Fn(u32) -> crate::Dir) -> [i32; 3] {
+    let (d, s) = (way(state).offset(), if state_prop(state, prop) == Some(second) { -1 } else { 1 });
+    [pos[0] + d[0] * s, pos[1] + d[1] * s, pos[2] + d[2] * s]
+}
+
+/// The middle of a block.
+pub fn block_center(p: [i32; 3]) -> [f64; 3] {
+    p.map(|v| v as f64 + 0.5)
+}
+
+/// The middle of a block's floor: where something stands on it.
+pub fn block_floor(p: [i32; 3]) -> [f64; 3] {
+    [p[0] as f64 + 0.5, p[1] as f64, p[2] as f64 + 0.5]
+}
+
+/// The block a point is in.
+pub fn block_at(p: [f64; 3]) -> [i32; 3] {
+    p.map(|v| v.floor() as i32)
+}
+
+/// The yaw (radians, as `EntityState` has it) that faces from one point to another.
+pub fn yaw_toward(from: [f64; 3], to: [f64; 3]) -> f32 {
+    (from[0] - to[0]).atan2(from[2] - to[2]) as f32
+}
+
+/// Where a yaw faces: x, z, of length 1.
+pub fn yaw_dir(yaw: f32) -> [f32; 2] {
+    [-yaw.sin(), -yaw.cos()]
+}
+
+/// Where a look goes (radians, as `EntityState` has them), of length 1.
+pub fn look_dir(yaw: f32, pitch: f32) -> [f64; 3] {
+    let (sy, cy) = (yaw as f64).sin_cos();
+    let (sp, cp) = (pitch as f64).sin_cos();
+    [-sy * cp, sp, -cy * cp]
+}
+
+/// `a` of `b`, 0..1, 0 of nothing: a progress bar's value.
+pub fn ratio(a: u32, b: u32) -> f32 {
+    if b == 0 { 0.0 } else { a as f32 / b as f32 }
+}
+
 pub fn state_with(state: u32, name: &str, value: &str) -> Option<u32> {
     let s = unsafe { (host().state_with)(state, Str::new(name), Str::new(value)) };
     (s != u32::MAX).then_some(s)
@@ -200,4 +255,31 @@ pub fn block_name(state: u32) -> &'static str {
 
 pub fn item_name(item: u32) -> &'static str {
     name_of(abi::entry_kind::ITEM, item)
+}
+
+/// A fill in the making (`World::fill_sphere`); it happens as this goes.
+pub struct FillSphere {
+    world: World,
+    desc: abi::AreaFillDesc,
+}
+
+impl FillSphere {
+    /// Blocks with negative hardness stay.
+    pub fn keep_unbreakable(mut self) -> Self {
+        self.desc.flags |= abi::area_flags::KEEP_UNBREAKABLE;
+        self
+    }
+    /// Liquids stay.
+    pub fn keep_liquids(mut self) -> Self {
+        self.desc.flags |= abi::area_flags::KEEP_LIQUIDS;
+        self
+    }
+}
+
+impl Drop for FillSphere {
+    fn drop(&mut self) {
+        if !std::thread::panicking() {
+            unsafe { (host().area_fill)(self.world.raw, &self.desc) }
+        }
+    }
 }

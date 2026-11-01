@@ -26,7 +26,7 @@ pub struct ModelBox {
 impl ModelBox {
     /// A whole cube showing these textures.
     pub fn whole(textures: [u32; 6]) -> ModelBox {
-        ModelBox { min: [0.0; 3], max: [1.0; 3], textures, uv: [[-1.0; 4]; 6], turn: [0; 6], tilt: weft_abi::BoxTilt::NONE }
+        ModelBox { min: [0.0; 3], max: [1.0; 3], textures, uv: [weft_abi::UV_FROM_BOX; 6], turn: [0; 6], tilt: weft_abi::BoxTilt::NONE }
     }
 }
 
@@ -81,6 +81,8 @@ pub struct StateInfo {
     pub support_near: Option<u32>,
     /// Spreads onto blocks of this tag (`abi::comp::SPREADS_TO`): mean ticks, light needed.
     pub spread: Option<(u32, f64, u32)>,
+    /// Mean ticks between growth steps and the light one needs.
+    pub grow: Option<(f64, u32)>,
     /// Turns into this state when covered (`abi::comp::SMOTHERED_INTO`), in mean ticks.
     pub smother: Option<(u32, f64)>,
     /// Sound events break, place, step, hit (`u32::MAX` none), from its `sound` component.
@@ -113,7 +115,6 @@ pub struct BlockCallbacks {
     pub merge: Option<Callback>,
     pub on_grow: Option<Callback>,
     /// Growth over time: (mean ticks per step, light needed).
-    pub grow: Option<(f64, u32)>,
     pub on_signal: Option<Callback>,
     pub signal_logic: Option<Callback>,
 }
@@ -269,6 +270,37 @@ pub fn swing_charge(c: &Content, item: u32, ticks: f32, speed: f32) -> f32 {
     ((ticks + 0.5) * swings_per_second(c, item) * speed / crate::world::TPS as f32).clamp(0.0, 1.0)
 }
 
+/// What a block's tint goes on, on one face of it, wherever that is drawn.
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub struct FacePaint {
+    pub base_tinted: bool,
+    pub overlay_tinted: bool,
+}
+
+/// `has_overlay`: the face's texture has an `_overlay` over it, which takes the whole tint (a grass
+/// side's green, on dirt).
+pub fn face_paint(s: &StateInfo, face: usize, has_overlay: bool) -> FacePaint {
+    let tints = s.tint != 0;
+    FacePaint { base_tinted: tints && !has_overlay && s.tint_faces & (1 << face) != 0, overlay_tinted: tints && has_overlay }
+}
+
+/// What a block's `sounds` hold.
+pub mod block_sound {
+    pub const BREAK: usize = 0;
+    pub const PLACE: usize = 1;
+    pub const STEP: usize = 2;
+    pub const HIT: usize = 3;
+}
+
+/// Whether changing from one to the other leaves a swing as it was: the same item, whatever its
+/// count or damage. Client and server have to agree.
+pub fn same_in_hand(a: weft_abi::ItemStack, b: weft_abi::ItemStack) -> bool {
+    a.is_empty() == b.is_empty() && (a.is_empty() || a.item == b.item)
+}
+
+/// Liquids from this hot burn what touches them, and are `hot` without being told.
+pub const BURNING: u32 = 1000;
+
 /// A liquid the engine flows (`abi::LiquidDesc`); its block has 16 states.
 pub struct LiquidDef {
     pub name: String,
@@ -287,6 +319,12 @@ pub struct LiquidDef {
     /// Asset name, empty for its own texture.
     pub overlay: String,
     pub overlay_opacity: f32,
+}
+
+impl LiquidDef {
+    pub fn burns(&self) -> bool {
+        self.temperature >= BURNING
+    }
 }
 
 /// A block or any block with a tag.
@@ -617,7 +655,7 @@ impl Content {
     /// Whether a block in `state` has growth steps ahead of it: (mean ticks, light needed).
     pub fn grows(&self, state: u32) -> Option<(f64, u32)> {
         let b = self.block_of(state);
-        b.cb.grow
+        self.states[state as usize].grow
             .filter(|_| b.cb.on_grow.is_some() || self.grown(state).is_some())
     }
 
@@ -965,6 +1003,10 @@ fn tag_fits(pattern: &str, tag: &str) -> bool {
 /// Is it what a block should be counted for: a value, or a tag saying how it is mined. Other tags
 /// say what it is, which a stair of it isn't.
 fn carries_over(v: &RawValue) -> bool {
+    // Its steps are states of that block, which a stair hasn't got.
+    if v.name == abi::comp::GROW_TIME || v.name == abi::comp::GROW_LIGHT {
+        return false;
+    }
     !v.schema.is_empty() || !v.bytes.is_empty() || v.text.is_some() || v.name.starts_with("mineable/")
 }
 
@@ -1127,7 +1169,7 @@ pub(crate) unsafe fn copy_block(d: &abi::BlockDesc) -> RawBlock {
                 model: s.model,
                 textures: std::array::from_fn(|i| s.textures[i].as_str().to_string()),
                 boxes,
-                hitbox: s.hitbox.as_slice().to_vec(),
+                hitbox: s.hitbox.as_slice().iter().map(|b| b.map(|v| v / 16.0)).collect(),
                 signal: RawSignal {
                     kind: s.signal.kind,
                     attach: s.signal.attach as u8,
@@ -1172,7 +1214,6 @@ pub(crate) unsafe fn copy_block(d: &abi::BlockDesc) -> RawBlock {
                 on_grow: cb(d.on_grow),
                 on_signal: cb(d.on_signal),
                 signal_logic: cb(d.signal_logic),
-                grow: (d.grow_seconds > 0.0).then_some((d.grow_seconds as f64 * crate::world::TPS as f64, d.grow_light)),
             },
             replace: d.replace != 0,
             own_states: d.own_states != 0,
@@ -1531,6 +1572,11 @@ pub fn freeze(mut mods: Vec<ModMeta>, regs: Vec<RawRegistrar>) -> Result<Content
     let mut errors: Vec<String> = Vec::new();
     let Merged { blocks, mut items, mut biomes, mut dims, tint_kinds, biome_tints, mut games } = merge_registrars(&mods, regs, &mut errors);
     let mut blocks = apply_replacements(&mods, blocks, &mut items);
+    for (name, _, _) in games.iter().flat_map(|g| &g.liquids).filter(|(_, _, d)| d.temperature >= BURNING) {
+        if let Some(b) = blocks.iter_mut().find(|b| b.1.name == *name) {
+            b.1.components.push(RawValue::tag(abi::comp::HOT));
+        }
+    }
     let shapes = expand_templates(&mut blocks, &mut items, &games);
     let shares_specs: Vec<(String, Vec<String>)> =
         blocks.iter().filter(|b| !b.1.shares_cell.is_empty()).map(|b| (b.1.name.clone(), b.1.shares_cell.clone())).collect();
@@ -1573,6 +1619,14 @@ pub fn freeze(mut mods: Vec<ModMeta>, regs: Vec<RawRegistrar>) -> Result<Content
     let DimTables { mut dim_defs, dim_names, spawn_dim, void_dim, .. } = dim_tables;
     let ids = component_ids(&components);
     flatten_components(&mut states, &mut item_defs, &components, &ids);
+    // Known only now: `r.set` can make a block grow.
+    for b in &block_defs {
+        let grows = (b.first_state..b.first_state + b.states).any(|s| states[s as usize].grow.is_some());
+        if grows && b.cb.on_grow.is_none() && !b.props.iter().any(|p| p.name == "age") {
+            let owner = mods.get(b.owner.0 as usize).map_or("engine", |m| m.id.as_str());
+            errors.push(format!("{owner}: block {} grows, but has no `age` property and no on_grow", b.name));
+        }
+    }
     let tool_classes = tool_classes(&components);
 
     let look = Lookups {
@@ -1854,6 +1908,7 @@ fn check_unique(
 fn number_blocks(mods: &[ModMeta], blocks: Vec<(ModId, RawBlock)>, textures: &mut TextureList, errors: &mut Vec<String>) -> BlockTables {
     let mut tex = |name: &str| textures.intern(name);
     let mut states = vec![StateInfo {
+        grow: None,
         signal: Signal::default(),
         block: 0,
         flags: abi::block_flags::REPLACEABLE | abi::block_flags::NOT_TARGETABLE,
@@ -1924,12 +1979,21 @@ fn number_blocks(mods: &[ModMeta], blocks: Vec<(ModId, RawBlock)>, textures: &mu
                     .map(|b| [b.min[0], b.min[1], b.min[2], b.max[0], b.max[1], b.max[2]])
                     .collect()
             };
-            let collision = if !s.hitbox.is_empty() {
+            for bx in &s.hitbox {
+                if bx.iter().any(|v| !(-1.0..=2.0).contains(v)) {
+                    errors.push(format!("{}: hitbox {:?} reaches more than a block out of its cell (it is in sixteenths)", b.name, bx.map(|v| v * 16.0)));
+                }
+            }
+            // What stops a walker: nothing at all unless it is solid, decided here once for
+            // whoever asks.
+            let collision = if s.flags & abi::block_flags::SOLID == 0 {
+                Vec::new()
+            } else if !s.hitbox.is_empty() {
                 s.hitbox.clone()
             } else if s.model == Model::Boxes {
                 of_model()
             } else {
-                Vec::new()
+                vec![[0.0, 0.0, 0.0, 1.0, 1.0, 1.0]]
             };
             let selection: Vec<[f32; 6]> = if !s.hitbox.is_empty() {
                 s.hitbox.clone()
@@ -1951,6 +2015,7 @@ fn number_blocks(mods: &[ModMeta], blocks: Vec<(ModId, RawBlock)>, textures: &mu
                 opacity: s.opacity,
                 tint: 0,
                 tint_faces: 0x3F,
+                grow: None,
                 layer: s.layer,
                 level: 0,
                 model: s.model,
@@ -2009,14 +2074,6 @@ fn number_blocks(mods: &[ModMeta], blocks: Vec<(ModId, RawBlock)>, textures: &mu
         if stride != count {
             errors.push(format!(
                 "{}: block {} has {count} states, its properties make {stride}",
-                mods.get(owner.0 as usize)
-                    .map_or("engine", |m| m.id.as_str()),
-                b.name
-            ));
-        }
-        if b.cb.grow.is_some() && b.cb.on_grow.is_none() && !b.props.iter().any(|p| p.0 == "age") {
-            errors.push(format!(
-                "{}: block {} grows, but has no `age` property and no on_grow",
                 mods.get(owner.0 as usize)
                     .map_or("engine", |m| m.id.as_str()),
                 b.name
@@ -2500,6 +2557,9 @@ fn flatten_components(states: &mut [StateInfo], item_defs: &mut [ItemDef], compo
             .conductor
             .is_some_and(|c| components.has(comps::BLOCK, st, c));
         s.hardness = f32_of(st, abi::comp::HARDNESS).unwrap_or(s.hardness);
+        s.grow = f32_of(st, abi::comp::GROW_TIME)
+            .filter(|&t| t > 0.0)
+            .map(|t| (t as f64 * crate::world::TPS as f64, u32_of(st, abi::comp::GROW_LIGHT).unwrap_or(0)));
         s.friction = f32_of(st, abi::comp::FRICTION).unwrap_or(s.friction);
         s.drag = f32_of(st, abi::comp::DRAG).unwrap_or(s.drag);
         if let Some(l) = get(st, abi::comp::LIGHT) {
@@ -3202,6 +3262,8 @@ fn freeze_liquids(
             st.liquid = Some(id);
             st.level = if s < 8 { s as u8 } else { 0 };
             st.flags = abi::block_flags::LIQUID | abi::block_flags::REPLACEABLE | abi::block_flags::NOT_TARGETABLE;
+            // No longer the solid block it was registered as.
+            st.collision.clear();
         }
         liquids.push(LiquidDef {
             name: name.clone(),

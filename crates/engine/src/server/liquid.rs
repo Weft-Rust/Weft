@@ -271,9 +271,8 @@ impl Dim {
             .get(player)
             .is_some_and(|e| e.mode == crate::world::GameMode::Creative);
         if let Some(&(l, empty)) = c.item_liquid.get(&held.item) {
-            let reach = self.attribute(c, player, super::extend::BLOCK_REACH, false);
             let hit = self
-                .look_ray(c, player, reach, false)
+                .look_ray(c, player, self.block_reach(c, player), false)
                 .filter(|h| h.frame == 0)?;
             let source = c.liquids[l as usize].first_state;
             // Into what holds liquid, with the same say as placing a block.
@@ -307,9 +306,8 @@ impl Dim {
             }
             return Some(if creative || empty == 0 { held } else { ItemStack::new(empty, 1) });
         }
-        let reach = self.attribute(c, player, super::extend::BLOCK_REACH, false);
         let hit = self
-            .look_ray(c, player, reach, true)
+            .look_ray(c, player, self.block_reach(c, player), true)
             .filter(|h| h.frame == 0)?;
         let f = decode(c, hit.state).filter(|f| f.source)?;
         let filled = *c.containers.get(&(held.item, f.id))?;
@@ -339,9 +337,7 @@ impl Dim {
     pub fn look_ray(&self, c: &Content, id: u64, max: f64, liquids: bool) -> Option<crate::physics::Hit> {
         let e = self.entities.get(id)?;
         let eye = e.pos + DVec3::Y * e.eye(c);
-        let (sy, cy) = (e.yaw as f64).sin_cos();
-        let (sp, cp) = (e.pitch as f64).sin_cos();
-        let dir = DVec3::new(-sy * cp, sp, -cy * cp);
+        let dir = crate::physics::look_dir(e.yaw, e.pitch);
         let structures: Vec<(u64, crate::physics::Transform, &dyn crate::physics::Blocks)> = self
             .bodies
             .iter()
@@ -359,5 +355,4 @@ impl Dim {
     }
 }
 
-/// Liquids from this hot burn what touches them.
-pub const BURNING: u32 = 1000;
+

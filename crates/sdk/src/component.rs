@@ -369,6 +369,10 @@ impl<T: Value> Component<T> {
     pub fn on_stack(&self, stack: &ItemStack) -> Option<T> {
         self.stack_only(stack).or_else(|| self.on_item(stack.item))
     }
+    /// What a stack's item has, nothing for an empty stack: fuel in a fuel slot.
+    pub fn on_filled(&self, stack: &ItemStack) -> Option<T> {
+        if stack.is_empty() { None } else { self.on_item(stack.item) }
+    }
     /// Only what the stack itself carries.
     pub fn stack_only(&self, stack: &ItemStack) -> Option<T> {
         if stack.data == 0 {
@@ -474,6 +478,12 @@ pub trait StackData: Sized {
     /// Damage taken (the `damage` stack component).
     fn damage(&self) -> u32;
     fn with_damage(self, d: u32) -> Self;
+    /// `amount` more damage, nothing left when that uses it up; what has no durability stays.
+    fn worn(self, amount: u32) -> Self;
+    /// How many more results of `out` this output slot takes.
+    fn room_for(&self, out: ItemStack) -> u32;
+    /// This output slot with `n` results of `out` more.
+    fn merged(self, out: ItemStack, n: u32) -> Self;
 }
 
 impl StackData for ItemStack {
@@ -495,6 +505,27 @@ impl StackData for ItemStack {
     }
     fn with_damage(self, d: u32) -> Self {
         if d == 0 { self.without(&DAMAGE) } else { self.with(&DAMAGE, d) }
+    }
+    fn worn(self, amount: u32) -> Self {
+        let durability = DURABILITY.on_item(self.item).unwrap_or(0);
+        if durability == 0 {
+            return self;
+        }
+        let damage = self.damage() + amount;
+        if damage >= durability { ItemStack::EMPTY } else { self.with_damage(damage) }
+    }
+    fn room_for(&self, out: ItemStack) -> u32 {
+        let room = if self.is_empty() {
+            max_stack(out.item)
+        } else if self.stacks_with(&out) {
+            max_stack(out.item).saturating_sub(self.count)
+        } else {
+            0
+        };
+        room / out.count.max(1)
+    }
+    fn merged(self, out: ItemStack, n: u32) -> Self {
+        if self.is_empty() { ItemStack { count: out.count * n, ..out } } else { self.grow(out.count * n) }
     }
 }
 
@@ -519,6 +550,8 @@ pub static SUPPORT_FACE: Component<u8> = Component::named(abi::comp::SUPPORT_FAC
 pub static SUPPORT: Component<TagRef> = Component::named(abi::comp::SUPPORT);
 pub static SUPPORT_NEAR: Component<TagRef> = Component::named(abi::comp::SUPPORT_NEAR);
 pub static SPREADS_TO: Component<TagRef> = Component::named(abi::comp::SPREADS_TO);
+pub static GROW_TIME: Component<f32> = Component::named(abi::comp::GROW_TIME);
+pub static GROW_LIGHT: Component<u32> = Component::named(abi::comp::GROW_LIGHT);
 pub static SPREAD_TIME: Component<f32> = Component::named(abi::comp::SPREAD_TIME);
 pub static SPREAD_LIGHT: Component<u32> = Component::named(abi::comp::SPREAD_LIGHT);
 pub static SMOTHERED_INTO: Component<BlockRef> = Component::named(abi::comp::SMOTHERED_INTO);

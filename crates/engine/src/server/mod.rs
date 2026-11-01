@@ -37,7 +37,7 @@ use rayon::prelude::*;
 use rustc_hash::FxHashSet;
 use weft_abi::{self as abi, ItemStack, component_flags as cf, damage};
 
-pub use dim::{Dim, DimEvent, mining_time};
+pub use dim::{Dim, DimEvent, mining_rate};
 
 use crate::commands::{Origin, Selector};
 use crate::content::{Content, content};
@@ -53,7 +53,7 @@ pub use crate::world::TPS;
 const AUTOSAVE_TICKS: u64 = TPS as u64 * 30;
 /// What the server accepts past a player's reach: room for a turn on the way there, and for what
 /// moved meanwhile.
-const BLOCK_SLACK: f64 = 1.5;
+pub(crate) const BLOCK_SLACK: f64 = 1.5;
 const ENTITY_SLACK: f64 = 3.0;
 /// Players further away than vanilla's particle distance get no particles.
 const PARTICLE_RANGE: f64 = 32.0;
@@ -88,12 +88,16 @@ pub struct Player {
     using: Option<(u32, u64)>,
     /// That tick came: this `UseItem` is the one to carry out.
     use_finishing: bool,
-    /// What it is mining: (frame, block, server tick it started).
-    mining: Option<(u64, IVec3, u64)>,
-    sent_cracks: Vec<(u64, IVec3, f32)>,
+    mining: Option<Mining>,
+    sent_cracks: Vec<crate::net::Crack>,
+    /// The tick rate its client has.
+    sent_rate: u32,
+    /// Its client has what bodies' lights give the cells of this dimension.
+    glow_sent: bool,
     menu: Option<OpenMenu>,
     window: u32,
-    last_y: f64,
+    /// The frame its last move was in and where in that: walking and falls are measured there.
+    last_place: (Option<u64>, DVec3),
 
     first_sync: bool,
     /// View (dim, center, radius, height) whose cubes were all present at the last check, and the
@@ -115,6 +119,15 @@ pub struct Player {
     sent_attributes: Vec<f32>,
     /// The view distance the client has (`ToServer::View`).
     view_radius: i32,
+}
+
+/// What a player is mining, and how far along by what it held and where it was each tick.
+#[derive(Clone, Copy)]
+pub(crate) struct Mining {
+    frame: u64,
+    pos: IVec3,
+    part: u32,
+    progress: f32,
 }
 
 pub struct Generated {
@@ -173,6 +186,8 @@ pub struct Server {
     /// `/tick`: ticks per second, the world held still (players still move), ticks left to step
     /// while frozen, and a sprint (ticks left, ticks in all, started) run without waiting.
     pub tick_rate: u32,
+    /// The tick mining last went on at: its sync also runs between ticks.
+    mining_tick: u64,
     pub frozen: bool,
     pub steps: u32,
     pub sprint: Option<(u32, u32, Instant)>,
@@ -395,6 +410,7 @@ impl Server {
             next_id,
             online: Vec::new(),
             tick_rate: TPS,
+            mining_tick: 0,
             frozen: false,
             steps: 0,
             sprint: None,
@@ -463,10 +479,12 @@ impl Server {
                 using: None,
                 use_finishing: false,
                 mining: None,
+                sent_rate: 0,
+                glow_sent: false,
                 sent_cracks: Vec::new(),
                 menu: None,
                 window: 0,
-                last_y: 0.0,
+                last_place: (None, DVec3::ZERO),
 
                 first_sync: true,
                 gen_done: None,
@@ -821,7 +839,7 @@ impl Server {
                     r.entities
                         .list
                         .iter()
-                        .filter(|e| !e.removed && !e.player && e.kind != c.game.virtual_kind)
+                        .filter(|e| e.saved_with_cube(c))
                         .map(|e| cube_of(e.pos.floor().as_ivec3())),
                 );
                 cubes.sort_unstable_by_key(|p| (p.x, p.y, p.z));
@@ -832,7 +850,7 @@ impl Server {
                         let ticks = r.ticks_in(pos);
                         let holds =
                             r.entities.list.iter().any(|e| {
-                                !e.removed && !e.player && e.kind != c.game.virtual_kind && cube_of(e.pos.floor().as_ivec3()) == pos
+                                e.saved_with_cube(c) && cube_of(e.pos.floor().as_ivec3()) == pos
                             });
                         persist::append_ticks(&mut bytes, &ticks);
                         s.save(c, r.id, pos, cube, &bytes);
@@ -955,6 +973,7 @@ impl Server {
         }
         if p.dim != to {
             p.dim = to;
+            p.glow_sent = false;
             p.sent.clear();
             p.announced.clear();
             p.to_send_far.clear();
@@ -964,7 +983,7 @@ impl Server {
             p.vis = None;
             p.known.clear();
         }
-        p.last_y = pos.y;
+        p.last_place = (None, pos);
         p.teleported = Some(pos);
         p.conn.send(ToClient::Teleport { dim: to, pos, frame });
         p.conn
@@ -1052,7 +1071,7 @@ impl Server {
         let mut found: Vec<(u32, u64, f64)> = Vec::new();
         let mut consider = |dim: u32, e: &Entity| {
             // Block entities and virtual ones are parts of things, not things to point at.
-            if e.anchor.is_some() || e.kind == content().game.virtual_kind {
+            if !e.in_world(content()) {
                 return;
             }
             if let Some((kind, neg)) = s.kind {
@@ -1248,11 +1267,10 @@ fn serialize(c: &Content, d: &Dim, ids: &[u64]) -> Vec<u8> {
     let list: Vec<persist::ToSave> = ids
         .iter()
         .filter_map(|&id| {
-            // Virtual inventories are never saved.
             let e = d
                 .entities
                 .get(id)
-                .filter(|e| e.kind != c.game.virtual_kind)?;
+                .filter(|e| !c.game.entities[e.kind as usize].is(abi::entity_flags::NOT_IN_WORLD))?;
             let comps = d
                 .entities
                 .comps
@@ -1274,7 +1292,7 @@ fn entities_in(c: &Content, d: &Dim, cube: IVec3) -> Vec<u8> {
         .list
         .iter()
         .filter(|e| {
-            !e.removed && !e.player && e.kind != c.game.virtual_kind && e.block_frame() == 0 && cube_of(e.pos.floor().as_ivec3()) == cube
+            e.saved_with_cube(c) && cube_of(e.pos.floor().as_ivec3()) == cube
         })
         .map(|e| e.id)
         .collect();

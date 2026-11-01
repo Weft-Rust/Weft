@@ -124,9 +124,7 @@ pub struct Camera {
 
 impl Camera {
     pub fn forward(&self) -> Vec3 {
-        let (sy, cy) = self.yaw.sin_cos();
-        let (sp, cp) = self.pitch.sin_cos();
-        Vec3::new(-sy * cp, sp, -cy * cp)
+        crate::physics::look_dir(self.yaw, self.pitch).as_vec3()
     }
 
     /// The walking sway alone, in view space: the world moves by it, and so does the hand.

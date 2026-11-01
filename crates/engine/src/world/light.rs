@@ -26,7 +26,7 @@ pub trait CubeMap {
     }
 }
 
-const DIRS: [IVec3; 6] = [IVec3::NEG_X, IVec3::X, IVec3::NEG_Y, IVec3::Y, IVec3::NEG_Z, IVec3::Z];
+use super::DIRS;
 pub const SKY_FULL: u8 = 15;
 
 /// The one rule light moves by: from a block at `v` into one taking `op` (its opacity, or the
@@ -63,9 +63,9 @@ pub enum SkyBelow {
 /// What comes down from `above` (`None`: not loaded; `open`: open sky is there, `open_above`).
 pub fn sky_below(above: Option<&Cube>, open: bool) -> SkyBelow {
     let Some(a) = above else { return if open { SkyBelow::Full } else { SkyBelow::Dark } };
-    let sky = |i: usize| a.light(crate::world::cube::index(i % 16, 0, i / 16)) & 0xFF;
+    let sky = |i: usize| weft_abi::light::sky(a.light(crate::world::cube::index(i % 16, 0, i / 16)));
     let v = match a.uniform_light() {
-        Some(l) => l & 0xFF,
+        Some(l) => weft_abi::light::sky(l),
         None if (1..256).all(|i| sky(i) == sky(0)) => sky(0),
         None => return SkyBelow::Partial,
     };
@@ -81,7 +81,15 @@ const SKY: usize = 0;
 #[inline]
 /// The sky's level in a light value as cubes store it.
 pub fn sky_of(v: u32) -> u8 {
-    ch(v, SKY)
+    weft_abi::light::sky(v) as u8
+}
+
+/// What a block changing at `p` from `old` does to the light around it, what bodies' lights give
+/// included, on the server and in a client's guess alike. Returns the cubes that changed.
+pub fn block_changed(map: &mut impl CubeMap, c: &crate::content::Content, sky: bool, glow: &rustc_hash::FxHashMap<IVec3, [u8; 3]>, p: IVec3, old: u32) -> Vec<IVec3> {
+    let mut lighter = Lighter::new(map, c, sky).with_extra(glow);
+    lighter.block_changed(p, old);
+    std::mem::take(&mut lighter.changed).into_iter().collect()
 }
 
 fn ch(v: u32, c: usize) -> u8 {

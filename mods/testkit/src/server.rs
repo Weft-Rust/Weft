@@ -45,6 +45,7 @@ static DRIVEN: std::sync::Mutex<Vec<(u64, [f32; 2], u32)>> = std::sync::Mutex::n
 /// A key whose presses reach the server: the test counts them there.
 pub static PING: Key = Key::named("ping");
 static PINGS: AtomicU32 = AtomicU32::new(0);
+static JUMPS: AtomicU32 = AtomicU32::new(0);
 
 fn count(i: usize, n: usize) {
     COUNTS[i].fetch_add(n as u32, Ordering::Relaxed);
@@ -80,6 +81,10 @@ pub fn register(r: &mut Registry) {
     // A mod's own redstone: a gate on when both its rear and a side have power, another wire.
     static AND_GATE: Block = Block::named("and_gate");
     static BLUE_WIRE: Block = Block::named("blue_wire");
+    static UNBREAKABLE: Block = Block::named("unbreakable");
+    r.block(&UNBREAKABLE).texture("varied").unbreakable().no_item();
+    static TINTED_PLANT: Block = Block::named("tinted_plant");
+    r.block(&TINTED_PLANT).texture("base:tallgrass").plant().tint(&tints::GRASS);
     r.block(&DRILL)
         .on_pass(|_| {
             PASSES.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
@@ -87,7 +92,7 @@ pub fn register(r: &mut Registry) {
         .texture("varied")
         .no_item();
     r.block(&AND_GATE)
-        .signal_logic(2, |s| if s.rear() > 0 && s.sides().iter().any(|v| *v > 0) { 15 } else { 0 })
+        .signal_logic(1, |s| if s.rear() > 0 && s.sides().iter().any(|v| *v > 0) { 15 } else { 0 })
         .model_box([0.0, 0.0, 0.0], [16.0, 2.0, 16.0])
         .not_solid()
         .texture("varied")
@@ -126,6 +131,10 @@ pub fn register(r: &mut Registry) {
     let player = |w: &World, id: u64| w.each_player().any(|p| p == id);
     r.intercept(&question::HURT, move |q| if player(&q.world(), q.entity()) && NO_HURT.get() { Verdict::Deny } else { Verdict::Abstain });
     r.intercept(&question::USE_ITEM, |_| if NO_USE.get() { Verdict::Deny } else { Verdict::Abstain });
+    r.world_tick(|w| {
+        let jumped = w.each_player().filter(|&p| w.entity(p).is_some_and(|s| s.jumped != 0)).count();
+        JUMPS.fetch_add(jumped as u32, Ordering::Relaxed);
+    });
     r.on(&RANG, |b| {
         RINGS.fetch_add(b.len() as u32, Ordering::Relaxed);
     });
@@ -198,8 +207,7 @@ pub fn register_ops(r: &mut Registry) {
 }
 
 fn pos(cmd: &Command, name: &str) -> Result<[i32; 3], String> {
-    let p = cmd.pos(name).ok_or_else(|| format!("missing {name}"))?;
-    Ok([p[0].floor() as i32, p[1].floor() as i32, p[2].floor() as i32])
+    Ok(block_at(cmd.pos(name).ok_or_else(|| format!("missing {name}"))?))
 }
 
 fn int<T: TryFrom<i64>>(cmd: &Command, name: &str) -> Result<T, String> {
@@ -412,7 +420,7 @@ const OPS: &[(&str, &str, Run)] = &[
     ("crater_fast", "<r:int>", |w, cmd, _, me| {
         // The same through the area edit: one call, done at the end of the tick.
         let r: i32 = int(cmd, "r")?;
-        w.fill_sphere([me[0] as f64 + 0.5, me[1] as f64 + 0.5, me[2] as f64 + 0.5], r as f64, 0, true);
+        w.fill_sphere([me[0] as f64 + 0.5, me[1] as f64 + 0.5, me[2] as f64 + 0.5], r as f64, 0).keep_unbreakable();
         Ok(String::new())
     }),
     ("group", "@owner <name:word>", |w, cmd, _, _| {
@@ -420,6 +428,13 @@ const OPS: &[(&str, &str, Run)] = &[
         Ok(format!("{} {}", g.len(), (0..g.len()).filter(|&i| !g.get(i).is_empty()).count()))
     }),
     ("pings", "", |_, _, _, _| Ok(PINGS.load(Ordering::Relaxed).to_string())),
+    ("jumps", "", |_, _, _, _| Ok(JUMPS.load(Ordering::Relaxed).to_string())),
+    ("modes", "", |w, _, player, _| Ok(format!("{} {} {}", w.game_mode(player), w.creative(player) as u32, w.exempt(player) as u32))),
+    ("bad_item", "", |w, _, player, _| {
+        let at = w.entity(player).map_or([0.0; 3], |e| e.pos);
+        w.spawn_item(at, ItemStack::new(u32::MAX - 1, 1));
+        Ok(String::new())
+    }),
     ("setprop", "<pos:pos> <prop:word> <value:word>", |w, cmd, _, _| {
         Ok((w.set_prop(pos(cmd, "pos")?, word(cmd, "prop")?, word(cmd, "value")?) as u32).to_string())
     }),
@@ -492,13 +507,14 @@ const OPS: &[(&str, &str, Run)] = &[
     }),
     ("spawn", "<kind:entity> <pos:pos>", |w, cmd, _, _| {
         let p = pos(cmd, "pos")?;
-        Ok(w.spawn_kind(id(cmd, "kind")?, [p[0] as f64 + 0.5, p[1] as f64, p[2] as f64 + 0.5])
+        Ok(w.spawn(id(cmd, "kind")?, [p[0] as f64 + 0.5, p[1] as f64, p[2] as f64 + 0.5])
             .to_string())
     }),
     ("entity", "@entity", |w, cmd, _, _| {
         let e = w.entity(owner(w, cmd)?).ok_or("no such entity")?;
         Ok(format!("{} {:.2} {:.2} {:.2} {}", name_of(ek::ENTITY, e.kind), e.pos[0], e.pos[1], e.pos[2], e.health))
     }),
+    ("vel_y", "@entity", |w, cmd, _, _| Ok(w.entity(owner(w, cmd)?).ok_or("no such entity")?.vel[1].to_string())),
     ("size", "@entity", |w, cmd, _, _| {
         let s = w.entity(owner(w, cmd)?).ok_or("no such entity")?.size;
         Ok(format!("{:.3} {:.3} {:.3}", s[0], s[1], s[2]))
@@ -666,9 +682,7 @@ const OPS: &[(&str, &str, Run)] = &[
         Ok((w.place(&Template::generated(word(cmd, "template")?.to_string()), pos(cmd, "pos")?) as u32).to_string())
     }),
     ("heal", "", |w, _, player, _| {
-        let mut st = w.entity(player).ok_or("no player")?;
-        st.health = st.max_health;
-        w.set_entity(player, &st);
+        w.heal(player, f32::MAX);
         Ok(String::new())
     }),
     ("push", "<x:float> <y:float> <z:float> [id:int]", |w, cmd, player, _| {
@@ -705,7 +719,7 @@ const OPS: &[(&str, &str, Run)] = &[
         let name = word(cmd, "which")?;
         let m = Menu::lookup(name).ok_or_else(|| format!("no menu {name}"))?;
         let p = pos(cmd, "pos")?;
-        if !w.open_menu_kind_at(player, m, p) {
+        if !w.open_menu_at(player, m, p) {
             return Err(format!("no block entity at {p:?} ({})", block_name(w.get(p))));
         }
         Ok(String::new())
@@ -723,7 +737,7 @@ const OPS: &[(&str, &str, Run)] = &[
                 inv.set(i as u32, ItemStack::new(item(n)?, c.parse().map_err(|_| format!("bad count {c}"))?));
             }
         }
-        w.open_menu_kind(player, m, id);
+        w.open_menu(player, m, id);
         Ok(id.to_string())
     }),
     ("remove", "<id:int>", |w, cmd, _, _| {
@@ -825,7 +839,7 @@ const OPS: &[(&str, &str, Run)] = &[
     }),
     ("near_bodies", "<pos:pos> <r:float>", |w, cmd, _, _| {
         let p = pos(cmd, "pos")?;
-        let ids = w.near_bodies([p[0] as f64 + 0.5, p[1] as f64, p[2] as f64 + 0.5], cmd.float("r").ok_or("missing r")?);
+        let ids = w.near_targets([p[0] as f64 + 0.5, p[1] as f64, p[2] as f64 + 0.5], cmd.float("r").ok_or("missing r")?, None);
         Ok(ids
             .iter()
             .filter_map(|&id| {

@@ -3,49 +3,26 @@
 //! one has never heard of. `.tab(..)` and the rest go on what they return, as on any block.
 
 use crate::component::Tag;
+use crate::Dir;
 use crate::content::{Block, BlockBuilder, Place, Props, Registry, WithComponents};
 use crate::world::state_prop;
 
 /// How neighboring stairs find each other: every stair has it.
 static STAIRS: Tag = Tag::named("stairs");
 
-const SIDES: [&str; 4] = ["north", "east", "south", "west"];
-
-fn turned(side: &str, by: usize) -> &'static str {
-    let at = SIDES.iter().position(|s| *s == side).unwrap_or(0);
-    SIDES[(at + by) % 4]
-}
-
-fn clockwise(side: &str) -> &'static str {
-    turned(side, 1)
-}
-
-fn opposite(side: &str) -> &'static str {
-    turned(side, 2)
-}
-
-fn counter(side: &str) -> &'static str {
-    turned(side, 3)
-}
-
-fn step(pos: [i32; 3], side: &str) -> [i32; 3] {
-    let [x, y, z] = pos;
-    match side {
-        "north" => [x, y, z - 1],
-        "south" => [x, y, z + 1],
-        "east" => [x + 1, y, z],
-        _ => [x - 1, y, z],
-    }
+fn step(pos: [i32; 3], side: Dir) -> [i32; 3] {
+    let o = side.offset();
+    [pos[0] + o[0], pos[1] + o[1], pos[2] + o[2]]
 }
 
 /// The part of a layer towards `a` (and `b`, for a corner), in 1/16 of a block: (x, z) ranges.
-fn towards(a: &str, b: Option<&str>) -> ([f32; 2], [f32; 2]) {
+fn towards(a: Dir, b: Option<Dir>) -> ([f32; 2], [f32; 2]) {
     let (mut x, mut z) = ([0.0, 16.0], [0.0, 16.0]);
     for side in std::iter::once(a).chain(b) {
         match side {
-            "north" => z = [0.0, 8.0],
-            "south" => z = [8.0, 16.0],
-            "east" => x = [8.0, 16.0],
+            Dir::North => z = [0.0, 8.0],
+            Dir::South => z = [8.0, 16.0],
+            Dir::East => x = [8.0, 16.0],
             _ => x = [0.0, 8.0],
         }
     }
@@ -59,21 +36,21 @@ fn upper_half(p: &Place) -> bool {
 
 /// A stair's shape from the stairs around it, as vanilla has it.
 fn stair_shape(w: &crate::World, pos: [i32; 3]) -> &'static str {
-    let (Some(facing), Some(half)) = (w.prop(pos, "facing"), w.prop(pos, "half")) else { return "straight" };
+    let (Some(facing), Some(half)) = (w.prop(pos, "facing").and_then(Dir::from_name), w.prop(pos, "half")) else { return "straight" };
     let stair_at = |at: [i32; 3]| {
         let s = w.get(at);
         (STAIRS.on_block(s) && state_prop(s, "half") == Some(half))
-            .then(|| state_prop(s, "facing"))
+            .then(|| state_prop(s, "facing").and_then(Dir::from_name))
             .flatten()
     };
-    let across = |side: &str| side != facing && side != opposite(facing);
+    let across = |side: Dir| side != facing && side != facing.opposite();
     // Nothing the same way on that side to keep in line with.
-    let free = |side: &str| stair_at(step(pos, side)) != Some(facing);
-    if let Some(back) = stair_at(step(pos, facing)).filter(|b| across(b) && free(opposite(b))) {
-        return if back == counter(facing) { "outer_left" } else { "outer_right" };
+    let free = |side: Dir| stair_at(step(pos, side)) != Some(facing);
+    if let Some(back) = stair_at(step(pos, facing)).filter(|&b| across(b) && free(b.opposite())) {
+        return if back == facing.counter_clockwise() { "outer_left" } else { "outer_right" };
     }
-    if let Some(front) = stair_at(step(pos, opposite(facing))).filter(|f| across(f) && free(f)) {
-        return if front == counter(facing) { "inner_left" } else { "inner_right" };
+    if let Some(front) = stair_at(step(pos, facing.opposite())).filter(|&f| across(f) && free(f)) {
+        return if front == facing.counter_clockwise() { "inner_left" } else { "inner_right" };
     }
     "straight"
 }
@@ -96,18 +73,18 @@ impl Registry {
             .tag("stairs")
             .redstone_blocker()
             .holds_liquids()
-            .prop("facing", SIDES.as_slice())
+            .prop("facing", ["north", "east", "south", "west"])
             .prop("half", ["bottom", "top"])
             .prop("shape", ["straight", "inner_left", "inner_right", "outer_left", "outer_right"])
             .states(|p: &Props, mut s| {
                 let (low, high) = if p.is("half", "top") { ([8.0, 16.0], [0.0, 8.0]) } else { ([0.0, 8.0], [8.0, 16.0]) };
                 s = s.model_box([0.0, low[0], 0.0], [16.0, low[1], 16.0]);
-                let f = p.get("facing");
+                let f = p.facing();
                 let parts = match p.get("shape") {
-                    "outer_left" => vec![towards(f, Some(counter(f)))],
-                    "outer_right" => vec![towards(f, Some(clockwise(f)))],
-                    "inner_left" => vec![towards(f, None), towards(counter(f), Some(opposite(f)))],
-                    "inner_right" => vec![towards(f, None), towards(clockwise(f), Some(opposite(f)))],
+                    "outer_left" => vec![towards(f, Some(f.counter_clockwise()))],
+                    "outer_right" => vec![towards(f, Some(f.clockwise()))],
+                    "inner_left" => vec![towards(f, None), towards(f.counter_clockwise(), Some(f.opposite()))],
+                    "inner_right" => vec![towards(f, None), towards(f.clockwise(), Some(f.opposite()))],
                     _ => vec![towards(f, None)],
                 };
                 for (x, z) in parts {
@@ -116,7 +93,7 @@ impl Registry {
                 s
             })
             .placement(|p, props| {
-                props.set("facing", SIDES[p.horizontal() as usize]);
+                props.set("facing", p.looking().name());
                 props.set("half", if upper_half(p) { "top" } else { "bottom" });
             })
             .on_neighbor(|e| {
@@ -163,7 +140,7 @@ impl Registry {
             .states(|p: &Props, s| match p.get("side") {
                 "double" => s.loot_rolls(2),
                 side => {
-                    let (x, z) = towards(side, None);
+                    let (x, z) = towards(Dir::from_name(side).unwrap_or(Dir::North), None);
                     s.model_box([x[0], 0.0, z[0]], [x[1], 16.0, z[1]])
                         .redstone_blocker()
                         .holds_liquids()
@@ -172,8 +149,8 @@ impl Registry {
             .placement(|p, props| {
                 let [x, _, z] = p.hit().map(|v| v - 0.5);
                 let along_x = match p.face() {
-                    0 | 1 => true,
-                    4 | 5 => false,
+                    Dir::West | Dir::East => true,
+                    Dir::North | Dir::South => false,
                     _ => x.abs() > z.abs(),
                 };
                 let side = match along_x {
@@ -195,7 +172,8 @@ impl Registry {
                 props.set("side", side);
             })
             .merge(|p, props| {
-                if p.placed("side").is_some_and(|side| side != "double" && side == opposite(props.get("side"))) {
+                let there = Dir::from_name(props.get("side"));
+                if p.placed("side").and_then(Dir::from_name).is_some_and(|side| Some(side.opposite()) == there) {
                     props.set("side", "double");
                 }
             })

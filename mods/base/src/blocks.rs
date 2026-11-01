@@ -59,8 +59,8 @@ fn axis_placement(p: &Place, props: &mut Props) {
     props.set(
         "axis",
         match p.face() {
-            0 | 1 => "x",
-            4 | 5 => "z",
+            Dir::West | Dir::East => "x",
+            Dir::North | Dir::South => "z",
             _ => "y",
         },
     );
@@ -117,7 +117,7 @@ fn plant(r: &mut Registry, handle: &'static Block, tex: &str) {
         .sound_group("grass")
         .texture(tex)
         .plant()
-        .hitbox([0.3125, 0.0, 0.3125], [0.6875, 0.625, 0.6875])
+        .hitbox([5.0, 0.0, 5.0], [11.0, 10.0, 11.0])
         .needs_below("#plant_soil")
         .tab(&crate::tabs::NATURAL);
 }
@@ -307,7 +307,6 @@ pub fn register(r: &mut Registry) {
         .fog(0x991A00, 1.0)
         .no_overlay()
         .tag("lava")
-        .tag("hot")
         .bucket(Item::generated("lava_bucket".into()), &crate::items::BUCKET, &crate::tabs::TOOLS);
     r.liquid_reaction("#hot", "#water")
         .source_block("obsidian")
@@ -346,7 +345,7 @@ pub fn register(r: &mut Registry) {
         .sound_group("cloth")
         .textures("cactus_top", "cactus_side", "cactus_top")
         .model_box([1.0, 0.0, 1.0], [15.0, 16.0, 15.0])
-        .hitbox([0.0625, 0.0, 0.0625], [0.9375, 1.0, 0.9375])
+        .hitbox([1.0, 0.0, 1.0], [15.0, 16.0, 15.0])
         .hardness(0.4)
         .needs_below("#cactus_soil")
         .growth(270.0, 0)
@@ -373,7 +372,6 @@ pub fn register(r: &mut Registry) {
         .sound_group("gravel")
         .textures("farmland", "dirt", "dirt")
         .model_box([0.0, 0.0, 0.0], [16.0, 15.0, 16.0])
-        .flags(0, 0)
         .hardness(0.6)
         .mineable("shovel")
         .drops("dirt", 1)
@@ -439,13 +437,10 @@ pub fn register(r: &mut Registry) {
         .facing(Facings::HORIZONTAL, Toward::Face)
         .states(|p, s| {
             let d = p.facing();
-            let (min, max) = match d {
-                Dir::South => ([0.0, 0.0, 0.0], [16.0, 16.0, 1.0]),
-                Dir::North => ([0.0, 0.0, 15.0], [16.0, 16.0, 16.0]),
-                Dir::East => ([0.0, 0.0, 0.0], [1.0, 16.0, 16.0]),
-                _ => ([15.0, 0.0, 0.0], [16.0, 16.0, 16.0]),
-            };
-            s.model_box(min, max).needs(d.opposite().face(), "")
+            // Against the wall to the north when it faces south.
+            s.frame(weft_sdk::signal::Frame::new(Dir::Down, d.opposite()))
+                .model_box([0.0, 0.0, 0.0], [16.0, 16.0, 1.0])
+                .needs(d.opposite(), "")
         })
         .climbable()
         .not_solid()
@@ -529,20 +524,26 @@ pub fn register(r: &mut Registry) {
 /// Torches stand on the floor or hang on a wall, facing away from it.
 pub const TORCH_FACINGS: Facings = Facings::only(&[Dir::Up, Dir::North, Dir::East, Dir::South, Dir::West]);
 
+/// A stick's picture on a post, as a torch's: the middle of it from the side, its tip on top.
+pub fn stick_faces(t: &str) -> [(&str, [f32; 4]); 6] {
+    let side = [7.0, 6.0, 9.0, 16.0];
+    [(t, side), (t, side), (t, [7.0, 13.0, 9.0, 15.0]), (t, [7.0, 6.0, 9.0, 8.0]), (t, side), (t, side)]
+}
+
 /// A torch facing `d`: on the floor (`Up`), hanging (`Down`), or leaning out from the wall behind
 /// it, by vanilla's numbers.
 pub fn torch_state<'a>(d: Dir, s: State<'a>, texture: &str) -> State<'a> {
-    let side = (texture, [7.0, 6.0, 9.0, 16.0]);
-    let faces = [side, side, (texture, [7.0, 13.0, 9.0, 15.0]), (texture, [7.0, 6.0, 9.0, 8.0]), side, side];
-    let s = s.texture(texture).needs(d.opposite().face(), "");
+    let faces = stick_faces(texture);
+    let s = s.texture(texture).needs(d.opposite(), "");
     if d.horizontal() {
-        let frame = weft_sdk::signal::Frame::leaning(d.opposite());
-        s.framed_box_with(frame, [-1.0, 3.5, 7.0], [1.0, 13.5, 9.0], faces, [0; 6], Some(([0.0, 3.5, 8.0], Dir::South, -22.5)))
-            .framed_hitbox(frame, [0.0, 0.1875, 0.34375], [0.3125, 0.8125, 0.65625])
+        s.frame(weft_sdk::signal::Frame::leaning(d.opposite()))
+            .model_box_faces([-1.0, 3.5, 7.0], [1.0, 13.5, 9.0], faces)
+            .tilted([0.0, 3.5, 8.0], Dir::South, -22.5)
+            .hitbox([0.0, 3.0, 5.5], [5.0, 13.0, 10.5])
     } else {
-        let frame = weft_sdk::signal::Frame::new(d.opposite(), Dir::North);
-        s.framed_box(frame, [7.0, 0.0, 7.0], [9.0, 10.0, 9.0], faces)
-            .framed_hitbox(frame, [0.375, 0.0, 0.375], [0.625, 0.625, 0.625])
+        s.frame(weft_sdk::signal::Frame::new(d.opposite(), Dir::North))
+            .model_box_faces([7.0, 0.0, 7.0], [9.0, 10.0, 9.0], faces)
+            .hitbox([6.0, 0.0, 6.0], [10.0, 10.0, 10.0])
     }
 }
 

@@ -76,9 +76,9 @@ r.block(&ALARM).signal_sink().on_signal(|e| {
 });
 
 // A gate with your own logic, on the clicked face. Runs only when something around it changes,
-// and what it returns comes out of the front after the delay (in game ticks).
+// and what it returns comes out of the front after the delay (in redstone ticks, like a repeater's).
 r.block(&AND_GATE)
-    .signal_logic(2, |s| if s.rear() > 0 && s.sides().iter().any(|v| *v > 0) { 15 } else { 0 })
+    .signal_logic(1, |s| if s.rear() > 0 && s.sides().iter().any(|v| *v > 0) { 15 } else { 0 })
     .model_box([0.0, 0.0, 0.0], [16.0, 2.0, 16.0])
     .not_solid();
 
@@ -100,14 +100,14 @@ The rest of the set, each with the properties it needs added for you:
 - `w.lift(center, &cells)` takes blocks out of the world into a moving structure, with chests and what is in them, circuits going on. Move it with `set_entity` (a speed) or `w.body_go(id, pos, ticks)`, and `w.put_down(id)` makes it blocks again, on the nearest whole block.
 - `.signal_observer()` and `.signal_piston(head, sticky)`, `.signal_piston_head()`: after `.facing(..)`.
 
-**A model on any face:** those blocks have `attach` and `front` properties. Write the model once for a floor with the front to the north, and `framed_box` turns it, pictures included:
+**A model on any face:** those blocks have `attach` and `front` properties. Write the model once for a floor with the front to the north, and `frame` turns it, pictures included:
 
 ```rust
 r.block(&GATE).signal_repeater().states(|p, s| {
     let top = if p.is("power", "on") { "gate_on" } else { "gate" };
-    let mut faces = [("smooth_stone", [-1.0, 0.0, 0.0, 0.0]); 6];   // negative: from the box
+    let mut faces = [("smooth_stone", UV_FROM_BOX); 6];
     faces[3].0 = top;
-    s.framed_box(p.frame(), [0.0, 0.0, 0.0], [16.0, 2.0, 16.0], faces)
+    s.frame(p.frame()).model_box_faces([0.0, 0.0, 0.0], [16.0, 2.0, 16.0], faces)
 });
 ```
 

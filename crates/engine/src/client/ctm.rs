@@ -782,7 +782,7 @@ mod tests {
         assert!(!off_cube(&boxes, 7, sides_only), "not on the faces the rule is for");
         // A face the file leaves out holds a texture only to fill the field.
         let mut gone = ModelBox::whole([7; 6]);
-        gone.uv = [[crate::block_model::NO_FACE, 0.0, 0.0, 0.0]; 6];
+        gone.uv = [weft_abi::UV_NO_FACE; 6];
         let gone = [gone];
         assert!(!off_cube(&Drawn { model: Model::Boxes, boxes: &gone, textures: [0; 6] }, 7, 0b111111));
     }

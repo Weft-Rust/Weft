@@ -20,7 +20,7 @@
 //! join ticket.txt     # join with the ticket from that file (waits for it)
 //! origin              # later via points are relative to where the player stands now
 //! where label        # logs the player's position
-//! rec start|stop     # logs a marker; tools/rec.ps1 presses the OBS hotkeys on it
+//! rec start|stop     # logs a marker for a screen recorder to go by
 //! via x y z yaw pitch # a camera waypoint (eye position), or: via x y z @ tx ty tz (look at a point)
 //! travel 8            # fly through the waypoints in 8 s: spline, eased, a little hand shake
 //! glide yaw pitch 3   # turn smoothly in place over 3 s

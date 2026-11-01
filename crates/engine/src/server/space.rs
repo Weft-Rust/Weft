@@ -5,11 +5,10 @@ use std::cmp::Reverse;
 use std::collections::{BinaryHeap, VecDeque};
 use std::sync::Arc;
 
-use glam::{DVec3, IVec3};
+use glam::IVec3;
 use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::content::{AIR, Content};
-use crate::physics::Transform;
 use crate::world::{Cube, cube_of, local_index};
 
 #[derive(Default)]
@@ -55,6 +54,8 @@ pub struct Space {
     /// Light from bodies going through here: the cells they light from, each body's and in all.
     pub(super) body_lights: FxHashMap<u64, Vec<(IVec3, [u8; 3])>>,
     pub(super) body_light: FxHashMap<IVec3, [u8; 3]>,
+    /// Cells of that which changed, for clients.
+    pub(super) body_light_changes: Vec<(IVec3, [u8; 3])>,
     /// The world's light where a body's blocks are, by its cubes, and whether that is news.
     pub world_light: FxHashMap<IVec3, u32>,
     pub(super) world_light_changed: bool,
@@ -76,6 +77,9 @@ pub struct Space {
 impl crate::physics::Blocks for Space {
     fn block(&self, p: IVec3) -> u32 {
         self.get(p).unwrap_or(AIR)
+    }
+    fn bounds(&self) -> Option<(IVec3, IVec3)> {
+        self.bounds
     }
     fn extras(&self, p: IVec3) -> &[u32] {
         self.extras(p)
@@ -240,11 +244,6 @@ impl Space {
         }
     }
 
-    /// Box around a structure's blocks in the world, for its entity at `pos`.
-    pub fn structure_box(&self, pos: DVec3) -> Option<crate::physics::Aabb> {
-        let (lo, hi) = self.bounds?;
-        Some(Transform::of(pos).box_to_world(crate::physics::Aabb { min: lo.as_dvec3(), max: (hi + IVec3::ONE).as_dvec3() }))
-    }
 
     /// The blocks of a structure for saving: (position, state name), air left out.
     pub fn structure_blocks(&self, c: &Content) -> Vec<(IVec3, String)> {

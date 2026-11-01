@@ -380,7 +380,7 @@ fn bed_spawn(t: &T) -> Option<[i32; 3]> {
 
 /// Clears room around the player and places a bed two blocks north the way a player does: gives
 /// its foot.
-async fn place_bed(t: &T) -> Result<[i32; 3], String> {
+pub(super) async fn place_bed(t: &T) -> Result<[i32; 3], String> {
     let f = t.feet();
     t.fill(add(f, [-3, -1, -6]), add(f, [3, -1, 2]), "stone")
         .await?;
@@ -1627,7 +1627,7 @@ async fn creative_clicks_fast(t: &T) -> R {
 }
 
 /// Food: eating raises hunger, and another mod's component on the base game's food plus the
-/// engine's `item_used` event heals (the owner's example).
+/// engine's `item_used` event heals.
 pub async fn food(t: T) -> R {
     t.flat().await?;
     let s = t.state();

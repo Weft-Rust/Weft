@@ -143,25 +143,39 @@ pub fn to_names(data: u32) -> Vec<(String, Vec<u8>)> {
         .collect()
 }
 
+/// `amount` more damage, nothing left when that uses it up; what has no durability stays.
+pub fn worn(c: &crate::content::Content, stack: ItemStack, amount: u32) -> ItemStack {
+    let Some(def) = c.items.get(stack.item as usize).filter(|d| d.durability != 0 && !stack.is_empty()) else { return stack };
+    let total = damage(&stack) + amount;
+    if total >= def.durability { ItemStack::EMPTY } else { with_damage(stack, total) }
+}
+
+/// Stack data by component name, for what outlasts the handles of one process: saves and the
+/// network alike.
+pub fn put_named(w: &mut crate::net::codec::W, data: u32) {
+    use crate::net::codec::Wire;
+    if data == 0 { Vec::<(String, Vec<u8>)>::new() } else { to_names(data) }.put(w);
+}
+
+pub fn get_named(r: &mut crate::net::codec::R) -> Option<u32> {
+    use crate::net::codec::Wire;
+    Some(from_names(Wire::get(r)?))
+}
+
 /// `damage=05000000,mymod:charge=10270000` for text files; empty for plain stacks.
 pub fn to_text(data: u32) -> String {
     to_names(data)
         .iter()
-        .map(|(n, b)| format!("{n}={}", b.iter().map(|x| format!("{x:02x}")).collect::<String>()))
+        .map(|(n, b)| format!("{n}={}", crate::kv::hex(b)))
         .collect::<Vec<_>>()
         .join(",")
 }
 
 pub fn from_text(s: &str) -> u32 {
-    let unhex = |h: &str| {
-        (0..h.len() / 2)
-            .filter_map(|i| u8::from_str_radix(&h[i * 2..i * 2 + 2], 16).ok())
-            .collect::<Vec<u8>>()
-    };
     from_names(
         s.split(',')
             .filter_map(|kv| kv.split_once('='))
-            .map(|(k, v)| (k.to_string(), unhex(v)))
+            .map(|(k, v)| (k.to_string(), crate::kv::unhex(v)))
             .collect(),
     )
 }

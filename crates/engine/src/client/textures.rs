@@ -155,12 +155,22 @@ impl GameTextures {
 
     /// First frame of texture `id` (a block's face, an item's icon, a particle's frame).
     pub fn texture(&self, id: u32) -> u32 {
-        self.frame_of(id, 0)
+        let e = self.inner.borrow().ids.get(id as usize).copied();
+        self.frame(e, 0)
     }
 
-    pub fn frame_of(&self, id: u32, n: u32) -> u32 {
+    /// The frame of texture `id` at `ticks`, as its `.anim` plays it.
+    pub fn frame_now(&self, id: u32, ticks: f32) -> u32 {
         let e = self.inner.borrow().ids.get(id as usize).copied();
-        self.frame(e, n)
+        self.frame(e, self.strip_frame(id, ticks))
+    }
+
+    /// Which frame of its strip that is, for what draws the file's own picture. Nothing while it
+    /// isn't loaded.
+    pub fn strip_frame(&self, id: u32, ticks: f32) -> u32 {
+        let i = self.inner.borrow();
+        let en = i.ids.get(id as usize).and_then(|&e| i.entries.get(e as usize));
+        en.and_then(|en| en.anim.as_ref()).map_or(0, |a| a.frame_at(ticks).0)
     }
 
     /// Texture ids there are: the content's and the connected texture tiles.

@@ -10,7 +10,7 @@ CTM is created without code and works from both mods and resource packs, a pack'
 It works on blocks only, so no CTM on items or entities.\
 Every method works on every block except for liquids: a method looks at neighbors, not at what is drawn. A plant is one west face, so `vertical` and `top` are what it has most use for, and `horizontal` looks along z. The one exception is `compact`. Its tiles are cut for a cube's face: on a texture a plant or a model shows it logs `compact ctm doesn't support custom models` and stops the game. Use full `ctm`, or keep it off them with `blocks =`.\
 A tile can also [be a model](#models-as-tiles).\
-Examples to copy from are in `mods/base/assets/textures/block/`: `glass.ctm`, `log_oak.ctm`, `stone.ctm`.
+Examples to copy from are in `mods/base/assets/textures/block/`: `glass.ctm`, `stone.ctm`, `iron_ore.ctm`.
 
 Check [textures guide](textures.md) for more texturing options like overlays, glow and animation.
 
@@ -264,7 +264,7 @@ inner_seams = true
 with `glass/0.png` ... `glass/4.png` next to it.
 
 ### Logs that look like one trunk
-`log_oak.ctm`:
+A pack's `log_oak.ctm`:
 ```
 method = vertical
 tiles = log_oak/0-3

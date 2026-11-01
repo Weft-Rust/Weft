@@ -146,8 +146,8 @@ pub struct UiRenderer {
     font_tex: TextureId,
     font_idx: u32,
     textures: FxHashMap<String, Option<(u32, u32, u32)>>,
-    /// Animated GUI textures by bindless index: `Quad::layer` for them.
-    strips: FxHashMap<u32, u32>,
+    /// Animated GUI textures by bindless index.
+    strips: FxHashMap<u32, crate::assets::Anim>,
     /// Slicing a texture declares for itself, and how far it reaches outside the box it is
     /// drawn for (`outset` in its `.gui`: shadows, frames drawn around the content).
     slicing: FxHashMap<String, Option<Slicing>>,
@@ -370,17 +370,11 @@ impl UiRenderer {
                 gpu.write_texture(t, 0, &img.rgba);
                 self.owned.push(t);
                 let idx = gpu.texture_index(t);
-                // Animated like a block texture: frames stacked down (square, or `frame_height` pixels
-                // high), `frametime` ticks each.
-                let num = |src: &str, k: &str| crate::kv::get(src, k).and_then(|v| v.parse::<u32>().ok());
-                let frame = anim
-                    .as_deref()
-                    .map(|src| num(src, "frame_height").unwrap_or(img.width).max(1));
-                match (anim.as_deref(), frame) {
-                    (Some(src), Some(fh)) if img.height > fh && img.height % fh == 0 => {
-                        let ticks = num(src, "frametime").unwrap_or(1);
-                        self.strips
-                            .insert(idx, (img.height / fh).min(0xFFFF) | ticks.clamp(1, 0xFFFF) << 16);
+                // Animated like a block texture, with frames stacked down that needn't be square.
+                match anim.map(|src| crate::assets::parse_anim(&src, [img.width, img.height], 0)) {
+                    Some(a) if img.height > a.frame_height && img.height % a.frame_height == 0 => {
+                        let fh = a.frame_height;
+                        self.strips.insert(idx, a);
                         (idx, img.width, fh)
                     }
                     _ => (idx, img.width, img.height),
@@ -706,7 +700,7 @@ impl UiRenderer {
         let Some(s) = c.states.get(state as usize) else { return };
         let looks = crate::client::looks::current();
         if let Some(t) = looks.block_sprite(state, s) {
-            let tint = if s.tint == 0 || s.tint_faces & 1 == 0 { 0xFFFFFFFF } else { crate::content::item_tint(s.tint) << 8 | 0xFF };
+            let tint = if crate::content::face_paint(s, 0, false).base_tinted { crate::content::item_tint(s.tint) << 8 | 0xFF } else { 0xFFFFFFFF };
             self.quads.push(Quad {
                 p0: [x, y],
                 u: [size, 0.0],
@@ -732,12 +726,8 @@ impl UiRenderer {
         boxes: &[crate::content::ModelBox],
         s: &crate::content::StateInfo,
     ) {
-        let tint = |face: usize| -> u32 {
-            if s.tint == 0 || s.tint_faces & (1 << face) == 0 {
-                return 0xFFFFFFFF;
-            }
-            crate::content::item_tint(s.tint) << 8 | 0xFF
-        };
+        let grass = crate::content::item_tint(s.tint) << 8 | 0xFF;
+        let color_of = |tinted: bool| if tinted { grass } else { 0xFFFFFFFF };
         let shade = |c: u32, k: f32| {
             let ch = |s: u32| (((c >> s) & 255) as f32 * k) as u32;
             ch(24) << 24 | ch(16) << 16 | ch(8) << 8 | 0xFF
@@ -750,7 +740,6 @@ impl UiRenderer {
         let at = |p: [f32; 3]| [o[0] + (p[0] - p[2]) * h, o[1] + (p[0] + p[2] - 1.0) * q - (p[1] - 0.5) * up];
         // Toward the one looking, from that same turn.
         let toward = glam::Vec3::new(0.612_372_4, 0.5, 0.612_372_4);
-        let grass = crate::content::item_tint(s.tint) << 8 | 0xFF;
         let mut shape = boxes.to_vec();
         // Back to front.
         shape.sort_by(|a, b| (a.min[0] + a.min[1] + a.min[2]).total_cmp(&(b.min[0] + b.min[1] + b.min[2])));
@@ -767,23 +756,21 @@ impl UiRenderer {
                 let u = [top_right[0] - p0[0], top_right[1] - p0[1]];
                 let v = [bottom_left[0] - p0[0], bottom_left[1] - p0[1]];
                 let uv = uv.map(|t| t / 16.0);
+                let overlay = tex.overlays.get(b.textures[face] as usize).filter(|&&ov| ov != 0);
+                let paint = crate::content::face_paint(s, face, overlay.is_some());
                 self.quads.push(Quad {
                     p0,
                     u,
                     v,
                     uv,
-                    color: shade(tint(face), k),
+                    color: shade(color_of(paint.base_tinted), k),
                     tex: tex.texture(b.textures[face]),
                     mode: ui_mode::ICON,
                     ..Default::default()
                 });
-                // Tinted overlay on top of its face.
-                if let Some(&ov) = tex
-                    .overlays
-                    .get(b.textures[face] as usize)
-                    .filter(|&&ov| ov != 0)
-                {
-                    let color = shade(if s.tint == 0 { 0xFFFFFFFF } else { grass }, k);
+                // The part of a face over it.
+                if let Some(&ov) = overlay {
+                    let color = shade(color_of(paint.overlay_tinted), k);
                     self.quads
                         .push(Quad { p0, u, v, uv, color, tex: tex.texture(ov - 1), mode: ui_mode::ICON, ..Default::default() });
                 }
@@ -1199,10 +1186,16 @@ impl UiRenderer {
         if self.quads.is_empty() {
             return;
         }
+        // Written every frame anyway, so which frame shows is decided here, by one reading of a
+        // `.anim` for all textures.
         if !self.strips.is_empty() {
+            let ticks = crate::shaders::time() * crate::world::TPS as f32;
             for q in &mut self.quads {
                 if q.mode != ui_mode::FONT {
-                    q.layer = self.strips.get(&q.tex).copied().unwrap_or(0);
+                    let strip = self.strips.get(&q.tex).map(|a| (a.frame_at(ticks), a.frame_count));
+                    (q.layer, q.index) = strip.map_or((0, 0.0), |((frame, next, blend), count)| {
+                        (crate::gpu_layout::ui_strip_record(frame, next, count), blend)
+                    });
                 }
             }
         }

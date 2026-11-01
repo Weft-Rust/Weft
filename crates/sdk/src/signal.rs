@@ -68,7 +68,7 @@ impl Frame {
     }
 
     /// Which face a face of its own (-X, +X, -Y, +Y, -Z, +Z) becomes.
-    fn face(&self, face: usize) -> usize {
+    pub(crate) fn face(&self, face: usize) -> usize {
         let d = Dir::from_face(face as u32).offset();
         let w = self.vector(d);
         Dir::ALL
@@ -101,19 +101,6 @@ impl Frame {
     }
 }
 
-/// The texels a box shows on a face when it says nothing: as a cube's face would, on the floor.
-pub(crate) fn box_uv(face: usize, min: [f32; 3], max: [f32; 3]) -> [f32; 4] {
-    match face {
-        0 => [min[2], 16.0 - max[1], max[2], 16.0 - min[1]],
-        1 => [16.0 - max[2], 16.0 - max[1], 16.0 - min[2], 16.0 - min[1]],
-        2 | 3 => [min[0], min[2], max[0], max[2]],
-        4 => [16.0 - max[0], 16.0 - max[1], 16.0 - min[0], 16.0 - min[1]],
-        _ => [min[0], 16.0 - max[1], max[0], 16.0 - min[1]],
-    }
-}
-
-/// Marks a face a box doesn't have.
-pub const NO_FACE: [f32; 4] = [-2.0, 0.0, 0.0, 0.0];
 
 /// The direction along a face closest to where a player looks.
 pub(crate) fn along(attach: Dir, look: [f32; 3]) -> Dir {
@@ -162,6 +149,16 @@ mod tests {
                 let at = if attach.offset()[axis] < 0 { lo[axis] } else { hi[axis] };
                 assert!(at == 0.0 || at == 16.0, "{attach:?} {front:?}");
             }
+        }
+    }
+
+    #[test]
+    fn a_box_out_of_its_cell_keeps_its_faces() {
+        // Three texels out: as a texel rectangle that must not read as "no face".
+        for face in 0..6 {
+            let uv = abi::box_face_uv(face, [-3.0, 0.0, -3.0], [2.0, 19.0, 2.0]);
+            assert!(uv.iter().all(|v| (0.0..=16.0).contains(v)), "{face}: {uv:?}");
+            assert!(uv != abi::UV_NO_FACE);
         }
     }
 

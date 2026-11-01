@@ -95,3 +95,25 @@ mod tests {
         assert_eq!(super::number::<f32>("t", 5, "border", "4 # px"), None);
     }
 }
+
+/// Bytes as text in these files.
+pub fn hex(bytes: &[u8]) -> String {
+    bytes.iter().map(|b| format!("{b:02x}")).collect()
+}
+
+pub fn unhex(s: &str) -> Vec<u8> {
+    (0..s.len() / 2)
+        .filter_map(|i| u8::from_str_radix(s.get(i * 2..i * 2 + 2)?, 16).ok())
+        .collect()
+}
+
+#[cfg(test)]
+mod hex_tests {
+    #[test]
+    fn hex_reads_back() {
+        let b = [0u8, 15, 16, 255];
+        assert_eq!(super::hex(&b), "000f10ff");
+        assert_eq!(super::unhex(&super::hex(&b)), b);
+        assert!(super::unhex("zz").is_empty());
+    }
+}

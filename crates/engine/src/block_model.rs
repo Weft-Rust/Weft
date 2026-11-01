@@ -38,8 +38,6 @@ impl FileBox {
     }
 }
 
-/// A face the element leaves out.
-pub const NO_FACE: f32 = -2.0;
 
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct FileModel {
@@ -51,8 +49,7 @@ pub struct FileModel {
     pub sprite: Option<String>,
 }
 
-/// Faces in the engine's order and their names in the files.
-const FACES: [&str; 6] = ["west", "east", "down", "up", "north", "south"];
+use weft_abi::FACE_NAMES as FACES;
 
 /// Reads the model `name` (`ns:block/lamp`) through `read` (file text by asset name), following
 /// parents. Errors name the file.
@@ -127,7 +124,7 @@ pub fn load(name: &str, read: &dyn Fn(&str) -> Option<String>) -> Result<Option<
                 min: std::array::from_fn(|j| from[j].min(to[j])),
                 max: std::array::from_fn(|j| from[j].max(to[j])),
                 textures: Default::default(),
-                uv: [[NO_FACE, 0.0, 0.0, 0.0]; 6],
+                uv: [weft_abi::UV_NO_FACE; 6],
                 turn: [0; 6],
                 tilt: tilt(e),
             };
@@ -144,7 +141,7 @@ pub fn load(name: &str, read: &dyn Fn(&str) -> Option<String>) -> Result<Option<
                     .filter(|a| a.len() == 4)
                 {
                     Some(a) => std::array::from_fn(|j| a[j].as_f64().unwrap_or(0.0) as f32),
-                    None => [-1.0; 4],
+                    None => weft_abi::UV_FROM_BOX,
                 };
                 // Files turn a picture clockwise, `ModelBox::turn` goes the other way round.
                 let quarters = f
@@ -218,7 +215,7 @@ mod tests {
         assert_eq!((b.turn[3], b.turn[4]), (3, 0));
         assert_eq!((b.tilt.origin, b.tilt.axis, b.tilt.degrees), ([8.0, 0.0, 8.0], [0.0, 1.0, 0.0], 22.5));
         assert_eq!((b.textures[4].as_str(), b.uv[4][0]), ("m:block/lamp_side", -1.0));
-        assert_eq!((b.textures[5].as_str(), b.uv[0][0]), ("", NO_FACE));
+        assert_eq!((b.textures[5].as_str(), b.uv[0]), ("", weft_abi::UV_NO_FACE));
         let log = load("m:block/log", &read).unwrap().unwrap();
         assert_eq!(log.cube.unwrap()[3], "m:block/log_top");
         assert_eq!(

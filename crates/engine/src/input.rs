@@ -84,14 +84,19 @@ impl From<Key> for Chord {
     }
 }
 
+/// The modifiers: its `Chord` bit, what it is called, and the two keys that are it.
+pub const MODIFIERS: [(u8, &str, KeyCode, KeyCode); 3] = [
+    (CTRL, "ctrl", KeyCode::ControlLeft, KeyCode::ControlRight),
+    (SHIFT, "shift", KeyCode::ShiftLeft, KeyCode::ShiftRight),
+    (ALT, "alt", KeyCode::AltLeft, KeyCode::AltRight),
+];
+
 /// The `Chord` bit of a modifier key, 0 for others.
 pub fn modifier(k: Key) -> u8 {
-    match k {
-        Key::Code(KeyCode::ControlLeft | KeyCode::ControlRight) => CTRL,
-        Key::Code(KeyCode::ShiftLeft | KeyCode::ShiftRight) => SHIFT,
-        Key::Code(KeyCode::AltLeft | KeyCode::AltRight) => ALT,
-        _ => 0,
-    }
+    MODIFIERS
+        .iter()
+        .find(|m| k == Key::Code(m.2) || k == Key::Code(m.3))
+        .map_or(0, |m| m.0)
 }
 
 pub struct Bind {
@@ -270,6 +275,192 @@ impl Input {
     }
 }
 
+impl Key {
+    /// What it is called in settings and to mods: `KeyR`, `Enter`, `mouse0`. `key_name` is what a
+    /// player reads.
+    pub fn id(self) -> String {
+        match self {
+            Key::Mouse(b) => format!("mouse{b}"),
+            Key::Code(c) => format!("{c:?}"),
+        }
+    }
+
+    pub fn parse(s: &str) -> Option<Key> {
+        if let Some(b) = s.strip_prefix("mouse") {
+            return b.parse().ok().map(Key::Mouse);
+        }
+        use winit::keyboard::KeyCode::*;
+        const ALL: &[winit::keyboard::KeyCode] = &[
+            KeyA,
+            KeyB,
+            KeyC,
+            KeyD,
+            KeyE,
+            KeyF,
+            KeyG,
+            KeyH,
+            KeyI,
+            KeyJ,
+            KeyK,
+            KeyL,
+            KeyM,
+            KeyN,
+            KeyO,
+            KeyP,
+            KeyQ,
+            KeyR,
+            KeyS,
+            KeyT,
+            KeyU,
+            KeyV,
+            KeyW,
+            KeyX,
+            KeyY,
+            KeyZ,
+            Digit0,
+            Digit1,
+            Digit2,
+            Digit3,
+            Digit4,
+            Digit5,
+            Digit6,
+            Digit7,
+            Digit8,
+            Digit9,
+            F1,
+            F2,
+            F3,
+            F4,
+            F5,
+            F6,
+            F7,
+            F8,
+            F9,
+            F10,
+            F11,
+            F12,
+            Space,
+            Enter,
+            Tab,
+            Backspace,
+            Escape,
+            ShiftLeft,
+            ShiftRight,
+            ControlLeft,
+            ControlRight,
+            AltLeft,
+            AltRight,
+            ArrowUp,
+            ArrowDown,
+            ArrowLeft,
+            ArrowRight,
+            Minus,
+            Equal,
+            BracketLeft,
+            BracketRight,
+            Backslash,
+            Semicolon,
+            Quote,
+            Comma,
+            Period,
+            Slash,
+            Backquote,
+            CapsLock,
+            Insert,
+            Delete,
+            Home,
+            End,
+            PageUp,
+            PageDown,
+            Numpad0,
+            Numpad1,
+            Numpad2,
+            Numpad3,
+            Numpad4,
+            Numpad5,
+            Numpad6,
+            Numpad7,
+            Numpad8,
+            Numpad9,
+            NumpadAdd,
+            NumpadSubtract,
+            NumpadMultiply,
+            NumpadDivide,
+            NumpadDecimal,
+            NumpadEnter,
+            NumpadEqual,
+            NumLock,
+            ScrollLock,
+            PrintScreen,
+            Pause,
+            ContextMenu,
+            IntlBackslash,
+            F13,
+            F14,
+            F15,
+            F16,
+            F17,
+            F18,
+            F19,
+            F20,
+            F21,
+            F22,
+            F23,
+            F24,
+            SuperLeft,
+            SuperRight,
+        ];
+        // Short names ("R", "5", "space", "lshift") as well as winit's ("KeyR", "Digit5", "ShiftLeft").
+        let short = match s.to_ascii_lowercase().as_str() {
+            l if l.len() == 1 && l.as_bytes()[0].is_ascii_alphabetic() => format!("Key{}", l.to_ascii_uppercase()),
+            l if l.len() == 1 && l.as_bytes()[0].is_ascii_digit() => format!("Digit{l}"),
+            "lshift" | "shift" => "ShiftLeft".into(),
+            "rshift" => "ShiftRight".into(),
+            "lctrl" | "ctrl" | "control" => "ControlLeft".into(),
+            "rctrl" => "ControlRight".into(),
+            "lalt" | "alt" => "AltLeft".into(),
+            "ralt" => "AltRight".into(),
+            "esc" => "Escape".into(),
+            "up" => "ArrowUp".into(),
+            "down" => "ArrowDown".into(),
+            "left" => "ArrowLeft".into(),
+            "right" => "ArrowRight".into(),
+            _ => s.into(),
+        };
+        ALL.iter()
+            .find(|c| format!("{c:?}").eq_ignore_ascii_case(&short))
+            .map(|c| Key::Code(*c))
+    }
+}
+
+impl Chord {
+    /// `ctrl+shift+KeyT`: the modifiers, then the key.
+    pub fn id(self) -> String {
+        let mut out = String::new();
+        for (bit, name, ..) in MODIFIERS {
+            if self.mods & bit != 0 {
+                out += name;
+                out.push('+');
+            }
+        }
+        out + &self.key.id()
+    }
+
+    /// A key with modifiers in front (`ctrl+T`, `shift+alt+F6`), or a key alone.
+    pub fn parse(s: &str) -> Option<Chord> {
+        let mut parts: Vec<&str> = s.split('+').map(str::trim).collect();
+        let key = Key::parse(parts.pop()?)?;
+        let mut mods = 0;
+        for p in parts {
+            mods |= MODIFIERS
+                .iter()
+                .find(|m| m.1.eq_ignore_ascii_case(p) || (m.1 == "ctrl" && p.eq_ignore_ascii_case("control")))?
+                .0;
+        }
+        Some(Chord { key, mods })
+    }
+}
+
 pub fn key_name(k: Key) -> String {
     match k {
         Key::Mouse(0) => "LMB".into(),
@@ -282,6 +473,39 @@ pub fn key_name(k: Key) -> String {
                 .or_else(|| s.strip_prefix("Digit"))
                 .unwrap_or(&s)
                 .to_string()
+        }
+    }
+}
+
+#[cfg(test)]
+mod key_tests {
+    use super::*;
+
+    #[test]
+    fn key_names() {
+        assert_eq!(Key::parse("R"), Some(Key::Code(KeyCode::KeyR)));
+        assert_eq!(Key::parse("KeyR"), Some(Key::Code(KeyCode::KeyR)));
+        assert_eq!(Key::parse("5"), Some(Key::Code(KeyCode::Digit5)));
+        assert_eq!(Key::parse("space"), Some(Key::Code(KeyCode::Space)));
+        assert_eq!(Key::parse("LShift"), Some(Key::Code(KeyCode::ShiftLeft)));
+        assert_eq!(Key::parse("F6"), Some(Key::Code(KeyCode::F6)));
+        assert_eq!(Key::parse("mouse3"), Some(Key::Mouse(3)));
+        assert_eq!(Key::parse("Rr"), None);
+        assert_eq!(Chord::parse("ctrl+T"), Some(Chord { key: Key::Code(KeyCode::KeyT), mods: crate::input::CTRL }));
+        assert_eq!(
+            Chord::parse("Shift + Alt + F6"),
+            Some(Chord { key: Key::Code(KeyCode::F6), mods: crate::input::SHIFT | crate::input::ALT })
+        );
+        assert_eq!(Chord::parse("LShift"), Some(Chord { key: Key::Code(KeyCode::ShiftLeft), mods: 0 }));
+        assert_eq!(Chord::parse("meta+T"), None);
+        let c = Chord::parse("ctrl+shift+R").unwrap();
+        assert_eq!(Chord::parse(&Chord::id(c)), Some(c));
+    }
+
+    #[test]
+    fn what_a_key_is_called_reads_back() {
+        for k in [Key::Mouse(0), Key::Mouse(3), Key::Code(KeyCode::KeyR), Key::Code(KeyCode::Digit5), Key::Code(KeyCode::Enter)] {
+            assert_eq!(Key::parse(&k.id()), Some(k));
         }
     }
 }

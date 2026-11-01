@@ -24,18 +24,10 @@ pub static ANCHOR: Block = Block::named("anchor");
 pub static FLOATER: Block = Block::named("floater");
 pub static COPPER_LAMP: Block = Block::named("copper_lamp");
 
-/// What a box shows when it says nothing: the same picture on every face, cut by its place.
-const FROM_BOX: [f32; 4] = [-1.0, 0.0, 0.0, 0.0];
 const BUTTON_TICKS: u32 = 20;
 
 fn all(t: &str) -> [(&str, [f32; 4]); 6] {
-    [(t, FROM_BOX); 6]
-}
-
-/// A stick's picture on a post, as a torch's: the middle of it from the side, its tip on top.
-fn post(t: &str) -> [(&str, [f32; 4]); 6] {
-    let side = [7.0, 6.0, 9.0, 16.0];
-    [(t, side), (t, side), (t, [7.0, 13.0, 9.0, 15.0]), (t, [7.0, 6.0, 9.0, 8.0]), (t, side), (t, side)]
+    [(t, UV_FROM_BOX); 6]
 }
 
 /// The post's lower end cut away, on a gate where only its top shows.
@@ -52,9 +44,7 @@ fn slab(top: &str) -> [(&str, [f32; 4]); 6] {
 }
 
 fn toggle(u: &mut Use) -> bool {
-    let (w, p) = (u.world(), u.pos());
-    let on = w.prop(p, "power") == Some("on");
-    w.set_prop(p, "power", if on { "off" } else { "on" });
+    u.world().cycle_prop(u.pos(), "power");
     true
 }
 
@@ -116,19 +106,13 @@ pub fn register(r: &mut Registry) {
             let (top, torch) = if on { ("repeater_on", "redstone_torch") } else { ("repeater", "redstone_torch_off") };
             // The second post moves back with the delay.
             let z = 4.0 + p.int("delay") as f32 * 2.0;
-            s.framed_box(p.frame(), [0.0, 0.0, 0.0], [16.0, 2.0, 16.0], slab(top))
-                .framed_box(p.frame(), [7.0, 2.0, 2.0], [9.0, 7.0, 4.0], short_post(torch))
-                .framed_box(p.frame(), [7.0, 2.0, z], [9.0, 7.0, z + 2.0], short_post(torch))
+            s.frame(p.frame())
+                .model_box_faces([0.0, 0.0, 0.0], [16.0, 2.0, 16.0], slab(top))
+                .model_box_faces([7.0, 2.0, 2.0], [9.0, 7.0, 4.0], short_post(torch))
+                .model_box_faces([7.0, 2.0, z], [9.0, 7.0, z + 2.0], short_post(torch))
         })
         .on_use(|u| {
-            let (w, p) = (u.world(), u.pos());
-            let next = w
-                .prop(p, "delay")
-                .and_then(|d| d.parse::<u32>().ok())
-                .unwrap_or(1)
-                % 4
-                + 1;
-            w.set_prop(p, "delay", &next.to_string());
+            u.world().cycle_prop(u.pos(), "delay");
             true
         })
         .not_solid()
@@ -143,20 +127,14 @@ pub fn register(r: &mut Registry) {
             let on = p.int("power") > 0;
             let subtract = p.is("mode", "subtract");
             let (top, torch) = if on { ("comparator_on", "redstone_torch") } else { ("comparator", "redstone_torch_off") };
-            s.framed_box(p.frame(), [0.0, 0.0, 0.0], [16.0, 2.0, 16.0], slab(top))
-                .framed_box(p.frame(), [4.0, 2.0, 11.0], [6.0, 7.0, 13.0], short_post(torch))
-                .framed_box(p.frame(), [10.0, 2.0, 11.0], [12.0, 7.0, 13.0], short_post(torch))
-                .framed_box(
-                    p.frame(),
-                    [7.0, 2.0, 2.0],
-                    [9.0, 5.0, 4.0],
-                    short_post(if subtract { "redstone_torch" } else { "redstone_torch_off" }),
-                )
+            s.frame(p.frame())
+                .model_box_faces([0.0, 0.0, 0.0], [16.0, 2.0, 16.0], slab(top))
+                .model_box_faces([4.0, 2.0, 11.0], [6.0, 7.0, 13.0], short_post(torch))
+                .model_box_faces([10.0, 2.0, 11.0], [12.0, 7.0, 13.0], short_post(torch))
+                .model_box_faces([7.0, 2.0, 2.0], [9.0, 5.0, 4.0], short_post(if subtract { "redstone_torch" } else { "redstone_torch_off" }))
         })
         .on_use(|u| {
-            let (w, p) = (u.world(), u.pos());
-            let subtract = w.prop(p, "mode") == Some("subtract");
-            w.set_prop(p, "mode", if subtract { "compare" } else { "subtract" });
+            u.world().cycle_prop(u.pos(), "mode");
             true
         })
         .not_solid()
@@ -179,16 +157,11 @@ pub fn register(r: &mut Registry) {
                 ("cobblestone", side),
                 ("cobblestone", side),
             ];
-            s.framed_box(p.frame(), [5.0, 0.0, 4.0], [11.0, 3.0, 12.0], base)
-                .framed_box_with(
-                    p.frame(),
-                    [7.0, 1.0, 7.0],
-                    [9.0, 11.0, 9.0],
-                    post("lever"),
-                    [0; 6],
-                    Some(([8.0, 1.0, 8.0], Dir::East, lean)),
-                )
-                .framed_hitbox(p.frame(), [0.3125, 0.0, 0.25], [0.6875, 0.375, 0.75])
+            s.frame(p.frame())
+                .model_box_faces([5.0, 0.0, 4.0], [11.0, 3.0, 12.0], base)
+                .model_box_faces([7.0, 1.0, 7.0], [9.0, 11.0, 9.0], crate::blocks::stick_faces("lever"))
+                .tilted([8.0, 1.0, 8.0], Dir::East, lean)
+                .hitbox([5.0, 0.0, 4.0], [11.0, 6.0, 12.0])
         })
         .on_use(|u| toggle(u))
         .not_solid()
@@ -201,7 +174,7 @@ pub fn register(r: &mut Registry) {
         .signal_switch()
         .states(|p, s| {
             let height = if p.is("power", "on") { 1.0 } else { 2.0 };
-            s.framed_box(p.frame(), [5.0, 0.0, 6.0], [11.0, height, 10.0], all("button"))
+            s.frame(p.frame()).model_box_faces([5.0, 0.0, 6.0], [11.0, height, 10.0], all("button"))
         })
         .on_use(|u| {
             let (w, p) = (u.world(), u.pos());
@@ -232,13 +205,13 @@ pub fn register(r: &mut Registry) {
             .states(move |p, s| {
                 let mut f = all("piston_side");
                 f[2].0 = "piston_bottom";
+                let s = s.frame(p.frame_up());
                 if p.is("power", "on") {
                     f[3].0 = "piston_inner";
-                    s.framed_box(p.frame_up(), [0.0, 0.0, 0.0], [16.0, 12.0, 16.0], f)
+                    s.model_box_faces([0.0, 0.0, 0.0], [16.0, 12.0, 16.0], f)
                 } else {
                     f[3].0 = top;
-                    s.framed_box(p.frame_up(), [0.0, 0.0, 0.0], [16.0, 16.0, 16.0], f)
-                        .opacity(15)
+                    s.model_box_faces([0.0, 0.0, 0.0], [16.0, 16.0, 16.0], f).opacity(15)
                 }
             })
             .sound_group("stone")
@@ -253,15 +226,16 @@ pub fn register(r: &mut Registry) {
             .states(move |p, s| {
                 // Vanilla's: a plate, and a rod reaching back into the piston.
                 let strip = ("piston_side", [0.0, 0.0, 16.0, 4.0]);
-                let plate = [strip, strip, ("piston_top", FROM_BOX), (top, FROM_BOX), strip, strip];
-                let none = ("piston_side", weft_sdk::signal::NO_FACE);
+                let plate = [strip, strip, ("piston_top", UV_FROM_BOX), (top, UV_FROM_BOX), strip, strip];
+                let none = ("piston_side", UV_NO_FACE);
                 let rod = [strip, strip, none, none, strip, strip];
-                let frame = p.frame_up();
                 let from = if p.is("short", "true") { 0.0 } else { -4.0 };
-                s.framed_box(frame, [0.0, 12.0, 0.0], [16.0, 16.0, 16.0], plate)
-                    .framed_box_with(frame, [6.0, from, 6.0], [10.0, 12.0, 10.0], rod, [1, 1, 0, 0, 1, 1], None)
-                    .framed_hitbox(frame, [0.0, 0.75, 0.0], [1.0, 1.0, 1.0])
-                    .framed_hitbox(frame, [0.375, 0.0, 0.375], [0.625, 0.75, 0.625])
+                s.frame(p.frame_up())
+                    .model_box_faces([0.0, 12.0, 0.0], [16.0, 16.0, 16.0], plate)
+                    .model_box_faces([6.0, from, 6.0], [10.0, 12.0, 10.0], rod)
+                    .turned([1, 1, 0, 0, 1, 1])
+                    .hitbox([0.0, 12.0, 0.0], [16.0, 16.0, 16.0])
+                    .hitbox([6.0, 0.0, 6.0], [10.0, 12.0, 10.0])
             })
             .sound_group("stone")
             .hardness(1.5)
@@ -292,12 +266,8 @@ pub fn register(r: &mut Registry) {
         .tab(&crate::tabs::REDSTONE);
 
     r.block(&FLOATER)
-        .facing(Facings::ALL, Toward::Player)
         // It goes where the player looks, and what it was placed against is what it takes along.
-        .placement(|_, props| {
-            let looked_at = props.facing().opposite();
-            props.set("facing", looked_at.name());
-        })
+        .facing(Facings::ALL, Toward::Away)
         .signal_floater(false)
         .states(|p, s| {
             // Arrows on the sides, toward the sticky front, in the color of how it is doing.
@@ -308,7 +278,9 @@ pub fn register(r: &mut Registry) {
             };
             let whole = [0.0, 0.0, 16.0, 16.0];
             let faces = [(side, whole), (side, whole), (side, whole), (side, whole), ("floater_front", whole), ("floater_back", whole)];
-            s.framed_box_with(p.frame_front(), [0.0, 0.0, 0.0], [16.0, 16.0, 16.0], faces, [1, 3, 2, 0, 0, 0], None)
+            s.frame(p.frame_front())
+                .model_box_faces([0.0, 0.0, 0.0], [16.0, 16.0, 16.0], faces)
+                .turned([1, 3, 2, 0, 0, 0])
                 .opacity(15)
         })
         .signal_read(|w, p| match w.prop(p, "power") {
@@ -341,12 +313,8 @@ pub fn register(r: &mut Registry) {
         .tab(&crate::tabs::REDSTONE);
 
     r.block(&OBSERVER)
-        .facing(Facings::ALL, Toward::Player)
         // It looks where the player looks, the way it was placed.
-        .placement(|_, props| {
-            let looked_at = props.facing().opposite();
-            props.set("facing", looked_at.name());
-        })
+        .facing(Facings::ALL, Toward::Away)
         .signal_observer()
         .states(|p, s| {
             let back = if p.is("power", "on") { "observer_back_on" } else { "observer_back" };
@@ -359,7 +327,8 @@ pub fn register(r: &mut Registry) {
                 ("observer_front", whole),
                 (back, whole),
             ];
-            s.framed_box(p.frame_front(), [0.0, 0.0, 0.0], [16.0, 16.0, 16.0], faces)
+            s.frame(p.frame_front())
+                .model_box_faces([0.0, 0.0, 0.0], [16.0, 16.0, 16.0], faces)
                 .opacity(15)
         })
         .sound_group("stone")
@@ -375,12 +344,9 @@ pub fn register(r: &mut Registry) {
                 .states(|p, s| {
                     // Vanilla's: a furnace's sides, or all its top with the front up or down.
                     let d = p.facing();
-                    let mut f = if d.horizontal() { ["furnace_side"; 6] } else { ["furnace_top"; 6] };
-                    if d.horizontal() {
-                        (f[2], f[3]) = ("furnace_top", "furnace_top");
-                    }
-                    f[d.face() as usize] = if d.horizontal() { "dispenser_front" } else { "dispenser_front_vertical" };
-                    s.faces(f)
+                    let side = if d.horizontal() { "furnace_side" } else { "furnace_top" };
+                    let front = if d.horizontal() { "dispenser_front" } else { "dispenser_front_vertical" };
+                    s.front_faces(d, side, "furnace_top", front)
                 })
                 // With each new pulse, out of the front.
                 .on_signal(|e| {
@@ -398,7 +364,8 @@ pub fn register(r: &mut Registry) {
                         let stack = items.get(i);
                         if !stack.is_empty() {
                             items.set(i, ItemStack { count: stack.count - 1, ..stack });
-                            let at = [0, 1, 2].map(|a| p[a] as f64 + 0.5 + dir[a] as f64 * 0.8);
+                            let center = block_center(p);
+                            let at = [0, 1, 2].map(|a| center[a] + dir[a] as f64 * 0.8);
                             w.spawn_item(at, ItemStack { count: 1, ..stack });
                             break;
                         }
@@ -409,13 +376,7 @@ pub fn register(r: &mut Registry) {
                 .tab(&crate::tabs::REDSTONE)
         })
         .group("dispenser", Slots::chest(1))
-        .screen(|ui| {
-            ui.panel("panel", S::col().pad(7.0).gap(4.0), |ui| {
-                ui.title();
-                ui.group("dispenser");
-                ui.player_inventory(true);
-            });
-        });
+        .plain_screen();
 
     const C: &RecipeKind = &base_api::CRAFTING;
     r.shaped(C, "redstone_block", 1, &["rrr", "rrr", "rrr"], &[('r', "redstone")]);

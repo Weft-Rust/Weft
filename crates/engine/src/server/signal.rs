@@ -228,14 +228,7 @@ impl View<'_> {
 
 /// What a device gives what is next to it in direction `dir`, wire and devices.
 fn direct(s: &Signal, dir: u8) -> u8 {
-    let reaches = match s.kind {
-        sk::SOURCE => true,
-        sk::TORCH => dir != s.attach,
-        sk::REPEATER | sk::COMPARATOR | sk::LOGIC => dir == s.front,
-        sk::OBSERVER => dir ^ 1 == s.front,
-        _ => false,
-    };
-    if reaches { s.level } else { 0 }
+    if wire::gives(s, dir) { s.level } else { 0 }
 }
 
 /// What a device gives a block in direction `dir`, strongly: its power goes on through that block.
@@ -253,9 +246,7 @@ fn can_give(s: &Signal) -> bool {
     matches!(s.kind, sk::SOURCE | sk::TORCH | sk::REPEATER | sk::COMPARATOR | sk::LOGIC | sk::OBSERVER)
 }
 
-fn is_device(kind: u32) -> bool {
-    !matches!(kind, sk::NONE | sk::WIRE)
-}
+use wire::is_device;
 
 /// What a comparator with `mode` makes of what is behind it and at its sides.
 fn compared(mode: u8, rear: u8, side: u8) -> u8 {
@@ -750,12 +741,7 @@ impl Signals {
                     continue;
                 }
             }
-            if is_device(ka)
-                && is_device(kb)
-                && a.block == b.block
-                && a.signal.front == b.signal.front
-                && a.signal.attach == b.signal.attach
-            {
+            if wire::same_device(a, b) {
                 if let Some(d) = self.devices.get_mut(&p) {
                     let was = c.states[d.state as usize].signal.level;
                     d.state = new;
@@ -1102,12 +1088,6 @@ impl Signals {
     }
 
     /// The two sides of a gate, left and right of the way it faces, seen from above what holds it.
-    fn sides(s: &Signal) -> [u8; 2] {
-        let up = if s.attach < 6 { -DIRS[s.attach as usize] } else { IVec3::Y };
-        let right = DIRS.get(s.front as usize).map_or(IVec3::X, |f| f.cross(up));
-        let r = DIRS.iter().position(|d| *d == right).unwrap_or(0) as u8;
-        [r ^ 1, r]
-    }
 
     /// What a device should do, from what is around it now.
     fn evaluate(&mut self, c: &'static Content, d: &Dim, p: IVec3, now: u64, effects: &mut Vec<Effect>) {
@@ -1146,7 +1126,7 @@ impl Signals {
             }
             sk::REPEATER => {
                 // A gate pointing into its side holds it where it is.
-                let sides = Self::sides(&s);
+                let sides = wire::sides(&s);
                 if sides
                     .iter()
                     .any(|&side| d.signal_view().state(p + DIRS[side as usize]).is_none())
@@ -1176,7 +1156,7 @@ impl Signals {
                 } else {
                     self.readers.remove(&p);
                 }
-                let [a, b] = Self::sides(&s);
+                let [a, b] = wire::sides(&s);
                 let side = read!(a).max(read!(b));
                 if reads_itself {
                     effects.push(Effect::Compare { p, behind, side });
@@ -1200,13 +1180,13 @@ impl Signals {
                 }
             }
             sk::LOGIC => {
-                let [a, b] = Self::sides(&s);
+                let [a, b] = wire::sides(&s);
                 // Not the front: that is where its own output goes.
                 effects.push(Effect::Logic { p, inputs: [read!(s.front ^ 1), read!(a), read!(b)] });
             }
             sk::SINK => {
                 let mut most = 0;
-                for dir in 0..6u8 {
+                for dir in (0..6u8).filter(|&dir| wire::reads(&s, dir)) {
                     most = most.max(read!(dir));
                 }
                 if self.devices[&p].input != most {
@@ -1215,9 +1195,8 @@ impl Signals {
             }
             sk::FLOATER => {
                 self.polled.remove(&p);
-                // From any side but its front, which is stuck to what it takes along.
                 let mut most = 0;
-                for dir in (0..6u8).filter(|dir| *dir != s.front) {
+                for dir in (0..6u8).filter(|&dir| wire::reads(&s, dir)) {
                     most = most.max(read!(dir));
                 }
                 effects.push(Effect::Floater { p, level: most });
@@ -1225,10 +1204,8 @@ impl Signals {
             sk::PISTON => {
                 self.polled.remove(&p);
                 let mut most = 0;
-                for dir in 0..6u8 {
-                    if dir != s.front {
-                        most = most.max(read!(dir));
-                    }
+                for dir in (0..6u8).filter(|&dir| wire::reads(&s, dir)) {
+                    most = most.max(read!(dir));
                 }
                 if (most > 0) != (s.level > 0) {
                     effects.push(Effect::Piston { p, extend: most > 0 });
@@ -1268,23 +1245,13 @@ impl Signals {
     /// Wire power in a cube, for a client getting it: (cell, face, level).
     pub fn levels_in(&self, c: &Content, pos: IVec3, cube: &Cube) -> Vec<(IVec3, u8, u8)> {
         let mut out = Vec::new();
-        if !cube
-            .palette()
-            .iter()
-            .any(|&s| c.states[s as usize].signal.kind == sk::WIRE)
-        {
-            return out;
-        }
-        for i in 0..4096usize {
-            if c.states[cube.get(i) as usize].signal.kind == sk::WIRE {
-                let p = pos * 16 + crate::world::cube::offset(i);
-                if let Some(w) = self.wires.get(&p) {
-                    out.extend(
-                        (0..6u8)
-                            .filter(|f| w.level[*f as usize] > 0)
-                            .map(|f| (p, f, w.level[f as usize])),
-                    );
-                }
+        for p in wire::cells(c, pos, cube) {
+            if let Some(w) = self.wires.get(&p) {
+                out.extend(
+                    (0..6u8)
+                        .filter(|f| w.level[*f as usize] > 0)
+                        .map(|f| (p, f, w.level[f as usize])),
+                );
             }
         }
         out
@@ -1897,7 +1864,7 @@ impl Dim {
             .signals
             .moving
             .push(Moving { body, piston: plan.p, head, blocks, retracting: !plan.extend, head_turns });
-        self.sound(c.states[state as usize].sounds[1], plan.p.as_dvec3() + DVec3::splat(0.5), 0.5, 0.0);
+        self.sound(c.states[state as usize].sounds[crate::content::block_sound::PLACE], plan.p.as_dvec3() + DVec3::splat(0.5), 0.5, 0.0);
     }
 
     /// Bodies of pistons that got there turn back into blocks.

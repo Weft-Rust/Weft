@@ -460,12 +460,13 @@ impl Cube {
     }
 
     pub fn read(data: &mut &[u8], map: impl Fn(u32) -> u32) -> Option<Cube> {
-        let n = u16::from_le_bytes(take_bytes(data, 2)?.try_into().ok()?) as usize;
+        let mut r = crate::net::codec::R(*data);
+        let n = u16::from_le_bytes(r.take(2)?.try_into().ok()?) as usize;
         let mut palette = Vec::with_capacity(n);
         for _ in 0..n {
-            palette.push(map(u32::from_le_bytes(take_bytes(data, 4)?.try_into().ok()?)));
+            palette.push(map(u32::from_le_bytes(r.take(4)?.try_into().ok()?)));
         }
-        let bits = take_bytes(data, 1)?[0] as u32;
+        let bits = r.take(1)?[0] as u32;
         let blocks = if bits == 0 {
             Blocks::Uniform(*palette.first()?)
         } else {
@@ -473,17 +474,17 @@ impl Cube {
                 return None;
             }
             let count = VOLUME * bits as usize / 64;
-            let raw = take_bytes(data, count * 8)?;
+            let raw = r.take(count * 8)?;
             let words: Box<[u64]> = raw
                 .chunks_exact(8)
                 .map(|c| u64::from_le_bytes(c.try_into().unwrap()))
                 .collect();
             Blocks::Packed { palette, bits, words }
         };
-        let light = match take_bytes(data, 1)?[0] {
-            0 => Light::Uniform(u32::from_le_bytes(take_bytes(data, 4)?.try_into().ok()?)),
+        let light = match r.take(1)?[0] {
+            0 => Light::Uniform(u32::from_le_bytes(r.take(4)?.try_into().ok()?)),
             _ => {
-                let raw = take_bytes(data, VOLUME * 4)?;
+                let raw = r.take(VOLUME * 4)?;
                 let mut l = Box::new([0u32; VOLUME]);
                 for (d, c) in l.iter_mut().zip(raw.chunks_exact(4)) {
                     *d = u32::from_le_bytes(c.try_into().unwrap());
@@ -491,27 +492,27 @@ impl Cube {
                 Light::Full(l)
             }
         };
-        let flags = take_bytes(data, 1)?[0];
+        let flags = r.take(1)?[0];
         let biomes = if flags & 1 != 0 {
             let mut b = Box::new([0u16; 256]);
-            for (d, c) in b.iter_mut().zip(take_bytes(data, 512)?.chunks_exact(2)) {
+            for (d, c) in b.iter_mut().zip(r.take(512)?.chunks_exact(2)) {
                 *d = u16::from_le_bytes([c[0], c[1]]);
             }
             Some(b)
         } else {
             None
         };
-        let ticked = if flags & 2 != 0 { u64::from_le_bytes(take_bytes(data, 8)?.try_into().ok()?) } else { 0 };
-        let edits = if flags & 4 != 0 { u32::from_le_bytes(take_bytes(data, 4)?.try_into().ok()?) } else { 0 };
+        let ticked = if flags & 2 != 0 { u64::from_le_bytes(r.take(8)?.try_into().ok()?) } else { 0 };
+        let edits = if flags & 4 != 0 { u32::from_le_bytes(r.take(4)?.try_into().ok()?) } else { 0 };
         let mut extras = std::collections::BTreeMap::new();
         if flags & 8 != 0 {
-            let cells = u16::from_le_bytes(take_bytes(data, 2)?.try_into().ok()?);
+            let cells = u16::from_le_bytes(r.take(2)?.try_into().ok()?);
             for _ in 0..cells {
-                let i = u16::from_le_bytes(take_bytes(data, 2)?.try_into().ok()?);
-                let n = u16::from_le_bytes(take_bytes(data, 2)?.try_into().ok()?);
+                let i = u16::from_le_bytes(r.take(2)?.try_into().ok()?);
+                let n = u16::from_le_bytes(r.take(2)?.try_into().ok()?);
                 let mut parts = Vec::with_capacity(n as usize);
                 for _ in 0..n {
-                    parts.push(map(u32::from_le_bytes(take_bytes(data, 4)?.try_into().ok()?)));
+                    parts.push(map(u32::from_le_bytes(r.take(4)?.try_into().ok()?)));
                 }
                 if i as usize >= VOLUME {
                     return None;
@@ -519,17 +520,9 @@ impl Cube {
                 extras.insert(i, parts);
             }
         }
+        *data = r.0;
         Some(Cube { blocks, extras, light, biomes, ticked, edits })
     }
-}
-
-fn take_bytes<'a>(data: &mut &'a [u8], n: usize) -> Option<&'a [u8]> {
-    if data.len() < n {
-        return None;
-    }
-    let (a, b) = data.split_at(n);
-    *data = b;
-    Some(a)
 }
 
 fn bits_for(n: usize) -> u32 {

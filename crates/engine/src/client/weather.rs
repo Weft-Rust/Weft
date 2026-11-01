@@ -126,7 +126,7 @@ impl Weather {
                 let (x, z) = (eye.x + dx, eye.z + dz);
                 let top = eye.y + REACH;
                 // A roof over it, or nothing loaded there.
-                if crate::world::light::sky_of(world.light(IVec3::new(x, top, z))) < 15 {
+                if world.light_loaded(IVec3::new(x, top, z)).is_none_or(|l| weft_abi::light::sky(l) < 15) {
                     continue;
                 }
                 let floor = (eye.y - REACH..top).rev().find(|&y| {

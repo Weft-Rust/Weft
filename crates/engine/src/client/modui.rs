@@ -443,8 +443,8 @@ pub unsafe extern "C" fn ui_open(u: *mut abi::UiCtx, node: *const abi::UiNode) {
                         count: n.count,
                         bind,
                         value: -1.0,
-                        dir: if n.data == 1 { weft_abi::ui_dir::LEFT } else { n.dir },
-                        shake: n.data == 2,
+                        dir: n.dir,
+                        shake: n.data != 0,
                     },
                     style,
                 )
@@ -637,6 +637,6 @@ pub unsafe extern "C" fn client_entity(c: *mut abi::ClientCtx, id: u64, out: *mu
     }
 }
 
-pub unsafe extern "C" fn client_creative(c: *mut abi::ClientCtx) -> u32 {
-    unsafe { view(c).is_some_and(|cl| cl.mode.invulnerable()) as u32 }
+pub unsafe extern "C" fn client_game_mode(c: *mut abi::ClientCtx) -> u32 {
+    unsafe { view(c).map_or(0, |cl| cl.mode as u32) }
 }

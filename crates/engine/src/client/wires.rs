@@ -4,7 +4,6 @@
 
 use glam::{DVec3, IVec3};
 use rustc_hash::FxHashMap;
-use weft_abi::signal_kind as sk;
 use weft_render::*;
 
 use super::Camera;
@@ -75,18 +74,11 @@ struct WireSet {
     stale: bool,
 }
 
-/// Whether wire reaches out to a device next to it, and looks like it: toward what it feeds or
-/// what feeds it.
+/// Whether wire reaches out to a device next to it, in direction `e` from it, and looks like it:
+/// toward what it feeds or what feeds it, by the rules of the simulation.
 fn reaches_device(c: &Content, state: u32, e: u8) -> bool {
     let s = &c.states[state as usize].signal;
-    match s.kind {
-        sk::NONE | sk::WIRE | sk::PISTON_HEAD => false,
-        sk::REPEATER | sk::LOGIC => s.front / 2 == e / 2,
-        // Its sides as well, which aren't what holds it.
-        sk::COMPARATOR => s.attach / 2 != e / 2,
-        sk::OBSERVER => s.front == e,
-        _ => true,
-    }
+    wire::reads(s, e ^ 1) || wire::gives(s, e ^ 1)
 }
 
 /// The axes a face's quad goes along: u, v.
@@ -229,20 +221,7 @@ impl WireSet {
     fn rescan(&mut self, c: &Content, world: &mut ClientWorld) -> bool {
         let dirty = world.take_wire_dirty();
         for &cp in &dirty {
-            let mut cells = Vec::new();
-            if let Some((cube, _)) = world.cube_rev(cp) {
-                if cube
-                    .palette()
-                    .iter()
-                    .any(|&s| c.states[s as usize].signal.kind == sk::WIRE)
-                {
-                    for i in 0..4096usize {
-                        if c.states[cube.get(i) as usize].signal.kind == sk::WIRE {
-                            cells.push(cp * 16 + crate::world::cube::offset(i));
-                        }
-                    }
-                }
-            }
+            let cells = world.cube_rev(cp).map_or(Vec::new(), |(cube, _)| wire::cells(c, cp, cube));
             if cells.is_empty() {
                 self.cubes.remove(&cp);
             } else {
@@ -276,15 +255,22 @@ impl WireSet {
         self.index.clear();
         self.numbers.clear();
         self.changed.clear();
+        let looks = super::looks::current();
         let mut quads: Vec<GpuWireQuad> = Vec::new();
         let get = |p: IVec3| world.block_or_air(p);
         for cell in self.cubes.values().flatten().copied() {
             let Some(state) = get(cell) else { continue };
             let m = wire::mask(c, state);
             let info = &c.states[state as usize];
+            // A pack may have given it a model of its own, which the mesher draws.
+            let drawn = looks.drawn(state, info);
+            if drawn.model != weft_abi::Model::Wire {
+                continue;
+            }
+            let (dot_tex, line_tex) = (drawn.textures[3], drawn.textures[0]);
             // Not in any mesh, so nothing else asks for these to be loaded.
-            textures.ensure_blocks(gpu, [info.textures[3], info.textures[0]]);
-            let (dot, line) = (textures.texture(info.textures[3]), textures.texture(info.textures[0]));
+            textures.ensure_blocks(gpu, [dot_tex, line_tex]);
+            let (dot, line) = (textures.texture(dot_tex), textures.texture(line_tex));
             let light = world.light(cell);
             let power = self.power.get(&cell).copied().unwrap_or([0; 6]);
             for f in (0..6u8).filter(|f| m & (1 << f) != 0) {

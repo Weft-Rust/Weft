@@ -89,8 +89,9 @@ impl Server {
         p.joined = true;
         p.dim = dim;
         p.entity = id;
-        p.last_y = pos.y;
+        p.last_place = (None, pos);
         p.first_sync = true;
+        p.glow_sent = false;
         log::info!("{} joined", p.name);
         let line = Msg::new("multiplayer.joined", vec![Arg::Text(p.name.clone())]);
         for q in self.players.iter_mut().filter(|q| q.joined) {
@@ -164,7 +165,7 @@ pub(super) fn save_player(s: &Storage, p: &Player, d: &Dim) {
     }
     for ((id, comp), bytes) in &d.entities.comps {
         if *id == p.entity && c.game.components[*comp as usize].flags & cf::SAVE != 0 {
-            text.push_str(&format!("comp.{} = {}\n", c.game.components[*comp as usize].name, persist::hex(bytes)));
+            text.push_str(&format!("comp.{} = {}\n", c.game.components[*comp as usize].name, crate::kv::hex(bytes)));
         }
     }
     // Whole or not at all: a crash in the middle must not leave half a player.
@@ -252,12 +253,7 @@ pub(super) fn load_player(c: &Content, s: &Storage, key: &str) -> Option<PlayerD
                         log::warn!("player {key}: dropped component {name} (not registered now)");
                     }
                     if let Some(id) = id {
-                        let mut b = persist::unhex(v);
-                        let size = c.game.components[id as usize].size as usize;
-                        if size > 0 {
-                            b.resize(size, 0);
-                        }
-                        comps.push((id, b.into_boxed_slice()));
+                        comps.push((id, c.game.fit_component(id, crate::kv::unhex(v))));
                     }
                 }
             }

@@ -912,9 +912,9 @@ pub fn layout_with(spans: &[Span], font: &Font, max_width: Option<f32>, line_hei
 /// `Ctrl+T`: the modifiers (`keyname.ctrl` ..., either side's key), then the key.
 pub fn display_chord(lang: &Lang, c: crate::input::Chord) -> String {
     let mut out = String::new();
-    for (bit, name) in [(crate::input::CTRL, "keyname.ctrl"), (crate::input::SHIFT, "keyname.shift"), (crate::input::ALT, "keyname.alt")] {
+    for (bit, name, ..) in crate::input::MODIFIERS {
         if c.mods & bit != 0 {
-            out += lang.get(name);
+            out += lang.get(&format!("keyname.{name}"));
             out.push('+');
         }
     }

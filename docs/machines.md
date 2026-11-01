@@ -105,7 +105,7 @@ The third value is how many ticks the call stands for. It's 1 almost always. Whe
 })
 ```
 `ui.title()` is the block's name, so the window says "Furnace" without a translation of its own; a chest a player renamed (`/rename Loot` on the item, the anvil's job) shows that name instead, and keeps it when it's broken and picked up again. A menu opened from code has `menu.<ns>.<name>` as its title.
-The arrow reads the machine's component through `menu_component`, which is why it needs `SYNC_MENU`. The screen belongs to the menu and not to a single block, so every machine of one kind shows the same window. Parts, layout and themes are in the [UI guide](ui.md). Using the block already opens the menu, and `world.open_menu(player, &MENU, owner)` does the same from code.
+The arrow reads the machine's component through `menu_component`, which is why it needs `SYNC_MENU`. The screen belongs to the menu and not to a single block, so every machine of one kind shows the same window. Parts, layout and themes are in the [UI guide](ui.md). `.plain_screen()` instead of `.screen(..)` is the usual one: the title, the groups in order, the player's inventory. Using the block already opens the menu, and `world.open_menu(player, &MENU, owner)` does the same from code.
 
 ## Recipes
 Anything where inputs turn into outputs over time is a recipe kind, and a machine can use the base game's or one of its own:
@@ -118,7 +118,7 @@ r.machine(&ELECTRIC_FURNACE, &FURNACE_MENU)
 // in the tick:
 if let Some((output, time)) = recipe_process(&SMELTING_RECIPES, input.item) { .. }
 ```
-`recipe_process` gives the output and the time in ticks for one input. Recipes are added the usual way, `r.shapeless(&SMELTING, "ruby", 1, &["ruby_ore"], 200)`, so every machine that uses the kind smelts it, whichever mod it comes from. `recipes(..)` makes the machine's `ui.recipe_arrow_bind(..)` (or `ui.recipe_arrow()` without progress) open the kind in the recipe viewer, with "Recipes" over it, and shows the machine there as where those recipes are made.
+`recipe_process` gives the output and the time in ticks for one input. Recipes are added the usual way, `r.shapeless(&SMELTING_RECIPES, "ruby", 1, &["ruby_ore"], 200)`, so every machine that uses the kind smelts it, whichever mod it comes from. `recipes(..)` makes the machine's `ui.recipe_arrow_bind(..)` (or `ui.recipe_arrow()` without progress) open the kind in the recipe viewer, with "Recipes" over it, and shows the machine there as where those recipes are made.
 An ordinary menu works the same way: `r.menu(&CRAFTING).recipes(&CRAFTING_RECIPES)`, and a block with `.opens(&CRAFTING)` opens it and becomes a station of those recipes (that's the whole crafting table). The grid's size comes from its group, `m.group("grid").cols()`.
 
 A recipe can say more than one output and a time:
@@ -156,7 +156,7 @@ let Some(e) = w.energy_mut(id) else { continue };
 e.stored = (e.stored + 40).min(e.capacity);      // a generator, per tick
 // a machine: if e.stored >= COST { e.stored -= COST; work }
 ```
-`w.energy(id)` reads it, and `energy_insert` and `energy_extract` move energy with the limits respected (`simulate = true` only reports how much would move). Networks are rebuilt when a cable or a machine next to one is placed or broken, not every tick.
+`w.energy(id)` reads it, and `w.insert_energy` and `w.extract_energy` move energy with the limits respected (`simulate = true` only reports how much would move). Networks are rebuilt when a cable or a machine next to one is placed or broken, not every tick.
 
 There are no units, conversion or losses along the way. Testmod uses 40 per tick and capacities in the tens of thousands, so if your mod should play along with others, stay in that range.
 

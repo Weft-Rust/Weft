@@ -95,9 +95,7 @@ pub fn register(r: &mut Registry) {
             for slot in 0..worn.len() {
                 let s = worn.get(slot);
                 if ARMOR.on_item(s.item).is_some() {
-                    let durability = DURABILITY.on_item(s.item).unwrap_or(0);
-                    let damage = s.damage() + wear;
-                    worn.set(slot, if durability > 0 && damage >= durability { ItemStack::EMPTY } else { s.with_damage(damage) });
+                    worn.set(slot, s.worn(wear));
                 }
             }
         }
@@ -125,7 +123,7 @@ pub fn register(r: &mut Registry) {
 
     // Survival bars; a negative value hides them (creative).
     r.hud_element(&HUD_HEALTH, hud_anchor::HOTBAR_LEFT, 0, |ui| {
-        ui.icons_shaking("heart", 10, |c| if c.creative() { -1.0 } else { c.me().map_or(20.0, |s| s.health.ceil()) })
+        ui.icons("heart", 10, |c| if c.exempt() { -1.0 } else { c.me().map_or(20.0, |s| s.health.ceil()) }).shaking();
     });
     r.hud_element(&HUD_ARMOR, hud_anchor::HOTBAR_LEFT, 1, |ui| {
         ui.icons("armor", 10, |c| {
@@ -136,14 +134,14 @@ pub fn register(r: &mut Registry) {
                 .filter_map(|s| ARMOR.on_item(s.item))
                 .map(|a| a.points)
                 .sum();
-            if points > 0 && !c.creative() { points as f32 } else { -1.0 }
-        })
+            if points > 0 && !c.exempt() { points as f32 } else { -1.0 }
+        });
     });
     r.hud_element(&HUD_FOOD, hud_anchor::HOTBAR_RIGHT, 0, |ui| {
-        ui.icons_rtl("food", 10, |c| if c.creative() { -1.0 } else { c.component(&HUNGER).map_or(20.0, |h| h.food.ceil()) })
+        ui.icons("food", 10, |c| if c.exempt() { -1.0 } else { c.component(&HUNGER).map_or(20.0, |h| h.food.ceil()) }).rtl();
     });
     r.hud_element(&HUD_AIR, hud_anchor::HOTBAR_RIGHT, 1, |ui| {
-        ui.icons_rtl("air", 10, |c| if c.creative() { -1.0 } else { c.component(&HUNGER).map_or(-1.0, |h| air_bubbles(h.air)) })
+        ui.icons("air", 10, |c| if c.exempt() { -1.0 } else { c.component(&HUNGER).map_or(-1.0, |h| air_bubbles(h.air)) }).rtl();
     });
 
     // While a swing charges.
@@ -231,7 +229,7 @@ fn consume_grid(m: &MenuCtx) {
 fn tire(w: &World, player: u64, amount: f32) {
     if let Some(h) = w
         .component_mut(player, &HUNGER)
-        .filter(|_| !w.creative(player))
+        .filter(|_| !w.exempt(player))
     {
         h.exhaustion += amount;
     }
@@ -262,8 +260,7 @@ fn heal_or_starve(w: &World, id: u64, st: &mut EntityState) {
     } else {
         let spent = if every == 10 { h.saturation.min(6.0) } else { 6.0 };
         h.exhaustion += spent;
-        st.health = (st.health + spent / 6.0).min(st.max_health);
-        w.set_entity(id, st);
+        w.heal(id, spent / 6.0);
     }
 }
 
@@ -275,7 +272,7 @@ fn air_bubbles(air: f32) -> f32 {
 fn tick_players(w: &World) {
     for id in w.players() {
         let Some(mut st) = w.entity(id) else { continue };
-        if w.creative(id) {
+        if w.exempt(id) {
             // Nothing takes the breath here, and what was used comes back.
             if w.component(id, &HUNGER).is_some_and(|h| h.air < MAX_AIR) {
                 if let Some(h) = w.component_mut(id, &HUNGER) {
@@ -312,9 +309,8 @@ fn tick_players(w: &World) {
                 h.food = (h.food - 1.0).max(0.0);
             }
         }
-        let eye = [st.pos[0].floor() as i32, (st.pos[1] + st.size[2] as f64).floor() as i32, st.pos[2].floor() as i32];
         // Only water takes the breath, whatever else burns or drags.
-        let underwater = WATER_LIKE.on_block(w.get(eye)) && w.in_liquid([st.pos[0], st.pos[1] + st.size[2] as f64, st.pos[2]]);
+        let underwater = WATER_LIKE.on_block(w.get(block_at(st.eye()))) && w.in_liquid(st.eye());
         let Some(h) = w.component_mut(id, &HUNGER) else { continue };
         if underwater {
             h.air -= 1.0;

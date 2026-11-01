@@ -69,9 +69,10 @@ impl Client {
             ToClient::Saved { dim, cubes } if dim == self.world.dim => fwd.push(terrain::In::Saved(cubes)),
             ToClient::Edits { dim, specs, all } if dim == self.world.dim => fwd.push(terrain::In::Edits { specs, all }),
             ToClient::Signals { dim, frame, changes } if dim == self.world.dim => self.wires.power_changed(frame, &changes),
+            ToClient::BodyGlow { dim, cells } if dim == self.world.dim => self.world.body_glow_changed(cells),
             ToClient::Time { dim, time } if dim == self.world.dim => {
                 self.world.time = time;
-                self.since_time = 0;
+                self.since_time = 0.0;
             }
             ToClient::Teleport { dim, pos, frame } => self.teleported(dim, pos, frame, fwd),
             ToClient::Spawn(list) => self.spawn_entities(list),
@@ -186,21 +187,17 @@ impl Client {
             }
             ToClient::EntitySwing(id) => {
                 if let Some(e) = self.entities.get_mut(&id) {
-                    if e.arm_swing.is_none_or(|p| p >= 0.5) {
-                        e.arm_swing = Some(0.0);
-                    }
+                    restart_swing(&mut e.arm_swing);
                 }
             }
             ToClient::Cracks(list) => self.others_mining = list,
             ToClient::StopSprint => self.controls.stop_sprint(),
-            ToClient::Push((add, halve)) => {
-                let v = &mut self.player.vel;
-                if halve {
-                    *v /= 2.0;
-                }
-                *v += DVec3::new(add[0] as f64, add[1] as f64, add[2] as f64);
-                v.y = (v.y + 0.4).min(0.4);
+            ToClient::Knock { away } => {
+                let away = glam::Vec3::from_array(away).as_dvec3();
+                self.player.vel = physics::knock(self.player.vel, away, self.player.on_ground);
             }
+            ToClient::Velocity { add } => self.player.vel += glam::Vec3::from_array(add).as_dvec3(),
+            ToClient::TickRate(rate) => self.tick_rate = rate.max(1) as f64,
             ToClient::Died => {
                 self.dead = true;
                 self.events.push(ClientEvent::Died);
@@ -315,12 +312,14 @@ impl Client {
 
     fn receive_moves(&mut self, tick: u64, list: Vec<crate::net::Move>) {
         // A long stall (or the first move) starts the timeline over.
-        let sample = self.body_clock - STEP + self.accum - tick as f64 * STEP;
+        let sample = self.body_clock - STEP + self.accum - tick as f64 / self.tick_rate;
         match self.tick_offset {
             Some(o) if (sample - o).abs() < 0.25 => self.offset_target += (sample - self.offset_target) * 0.1,
             _ => (self.tick_offset, self.offset_target) = (Some(sample), sample),
         }
         let solid = |k: u32| content().game.entities[k as usize].is(weft_abi::entity_flags::SOLID);
+        // Physics looks a step of its own back, many ticks at a high `/tick rate`.
+        let keep = ((self.tick_rate * STEP).ceil() as usize * 2 + 4).max(8);
         for &(id, pos, yaw, pitch, pose, frame) in &list {
             if let Some(e) = self.entities.get_mut(&id) {
                 e.pose = pose;
@@ -345,7 +344,7 @@ impl Client {
                         }
                         _ => e.track.push_back((t, pos)),
                     }
-                    while e.track.len() > 8 {
+                    while e.track.len() > keep {
                         e.track.pop_front();
                     }
                 }

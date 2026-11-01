@@ -329,9 +329,7 @@ pub fn click(m: &mut OpenMenu, dim: &mut Dim, c: &'static Content, player: u64, 
             if m.cursor.count == 0 {
                 m.cursor = ItemStack::EMPTY;
             }
-            if let Some(p) = dim.entities.get(player).map(|e| e.drop_point(c)) {
-                dim.spawn_item(c, p, drop);
-            }
+            dim.throw(c, player, drop);
         }
         return;
     }

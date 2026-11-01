@@ -6,6 +6,7 @@ use weft_abi::{ItemStack, component_flags as cf};
 
 use super::entity::Entity;
 use crate::content::Content;
+use crate::net::codec::{self, R};
 
 /// An entity read back: itself, its inventory, components and, for a moving structure, its
 /// blocks.
@@ -44,45 +45,13 @@ impl W<'_> {
         }
         self.str(&c.items[s.item as usize].name);
         self.u32(s.count);
-        let data = crate::stack::to_names(crate::stack::for_save(s.data));
-        self.u32(data.len() as u32);
-        for (name, bytes) in &data {
-            self.str(name);
-            self.u32(bytes.len() as u32);
-            self.0.extend_from_slice(bytes);
-        }
+        let mut named = codec::W::default();
+        crate::stack::put_named(&mut named, crate::stack::for_save(s.data));
+        self.0.extend_from_slice(&named.0);
     }
 }
 
-struct R<'a>(&'a [u8]);
-
 impl R<'_> {
-    fn take(&mut self, n: usize) -> Option<&[u8]> {
-        if self.0.len() < n {
-            return None;
-        }
-        let (a, b) = self.0.split_at(n);
-        self.0 = b;
-        Some(a)
-    }
-    fn u8(&mut self) -> Option<u8> {
-        Some(self.take(1)?[0])
-    }
-    fn u16(&mut self) -> Option<u16> {
-        Some(u16::from_le_bytes(self.take(2)?.try_into().ok()?))
-    }
-    fn u32(&mut self) -> Option<u32> {
-        Some(u32::from_le_bytes(self.take(4)?.try_into().ok()?))
-    }
-    fn u64(&mut self) -> Option<u64> {
-        Some(u64::from_le_bytes(self.take(8)?.try_into().ok()?))
-    }
-    fn f32(&mut self) -> Option<f32> {
-        Some(f32::from_le_bytes(self.take(4)?.try_into().ok()?))
-    }
-    fn f64(&mut self) -> Option<f64> {
-        Some(f64::from_le_bytes(self.take(8)?.try_into().ok()?))
-    }
     fn str(&mut self) -> Option<String> {
         let n = self.u16()? as usize;
         Some(String::from_utf8_lossy(self.take(n)?).into_owned())
@@ -93,14 +62,7 @@ impl R<'_> {
             return Some(ItemStack::EMPTY);
         }
         let count = self.u32()?;
-        let n = self.u32()?;
-        let mut list = Vec::new();
-        for _ in 0..n.min(64) {
-            let name = self.str()?;
-            let len = self.u32()? as usize;
-            list.push((name, self.take(len)?.to_vec()));
-        }
-        let data = crate::stack::from_names(list);
+        let data = crate::stack::get_named(self)?;
         // Items of removed mods are dropped rather than turned into something else.
         Some(
             c.item_names
@@ -253,13 +215,7 @@ fn read_one(c: &Content, r: &mut R) -> Option<Option<Saved>> {
         let len = if len == u16::MAX as usize { r.u32()? as usize } else { len };
         let bytes = r.take(len)?.to_vec();
         if let Some(id) = c.game.component(&name) {
-            let mut b = bytes;
-            // Size 0: variable length (attribute modifiers).
-            let size = c.game.components[id as usize].size as usize;
-            if size > 0 {
-                b.resize(size, 0);
-            }
-            comps.push((id, b.into_boxed_slice()));
+            comps.push((id, c.game.fit_component(id, bytes)));
         }
     }
     let nb = r.u32()?;
@@ -289,14 +245,4 @@ fn read_one(c: &Content, r: &mut R) -> Option<Option<Saved>> {
         return Some(None);
     }
     Some(Some((e, inv, comps, blocks)))
-}
-
-pub fn hex(bytes: &[u8]) -> String {
-    bytes.iter().map(|b| format!("{b:02x}")).collect()
-}
-
-pub fn unhex(s: &str) -> Vec<u8> {
-    (0..s.len() / 2)
-        .filter_map(|i| u8::from_str_radix(&s[i * 2..i * 2 + 2], 16).ok())
-        .collect()
 }

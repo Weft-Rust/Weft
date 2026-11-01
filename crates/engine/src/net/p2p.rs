@@ -17,7 +17,6 @@ use crate::settings::Settings;
 
 const ALPN: &[u8] = b"weft/1";
 const PROTOCOL: u32 = 2;
-const MAX_FRAME: usize = 64 << 20;
 
 fn runtime() -> &'static tokio::runtime::Runtime {
     static RT: OnceLock<tokio::runtime::Runtime> = OnceLock::new();
@@ -47,7 +46,7 @@ pub fn identity(run_dir: &Path) -> Result<SecretKey, String> {
         Err(_) => {}
     }
     let key = SecretKey::generate();
-    let hex: String = key.to_bytes().iter().map(|b| format!("{b:02x}")).collect();
+    let hex = crate::kv::hex(&key.to_bytes());
     if let Some(d) = path.parent() {
         let _ = std::fs::create_dir_all(d);
     }
@@ -167,7 +166,7 @@ async fn read_frame(recv: &mut iroh::endpoint::RecvStream) -> Result<Vec<u8>, St
     recv.read_exact(&mut h).await.map_err(|e| e.to_string())?;
     let header = u32::from_le_bytes(h);
     let len = (header >> 1) as usize;
-    if len > MAX_FRAME {
+    if len > super::MAX_MESSAGE {
         return Err("frame too large".into());
     }
     let mut buf = vec![0u8; len];

@@ -19,6 +19,15 @@ use crate::gpu_layout::{GpuBox, Scene};
 use crate::physics::Hit;
 
 /// What the first person view holds: the item (or the bare arm) and how it moves.
+/// Cracks to draw: how far along, on `state`'s shape at `pos`, of what is at `at`.
+#[derive(Clone, Copy)]
+pub struct Crack {
+    pub pos: IVec3,
+    pub progress: f32,
+    pub at: DVec3,
+    pub state: u32,
+}
+
 pub struct Hand {
     pub stack: weft_abi::ItemStack,
     pub swing: Option<f32>,
@@ -448,6 +457,7 @@ impl EntityRenderer {
         let first = self.item_boxes.len();
         let white = Vec4::new(1.0, 1.0, 1.0, 0.0);
         let looks = super::looks::current();
+        let mut sprite_color = white;
         let sprite = match looks.item_draw(c, item) {
             ItemDraw::Model(model) => {
                 boxes_shape(&mut self.item_boxes, textures, Mat4::IDENTITY, model, &c.states[0], white);
@@ -459,6 +469,10 @@ impl EntityRenderer {
                 let sprite = looks.block_sprite(state, s);
                 if sprite.is_none() {
                     boxes_shape(&mut self.item_boxes, textures, Mat4::IDENTITY, &looks.block_shape(state, s), s, white);
+                }
+                if crate::content::face_paint(s, 0, false).base_tinted {
+                    let [r, g, b, _] = (crate::content::item_tint(s.tint) << 8).to_be_bytes().map(|v| v as f32 / 255.0);
+                    sprite_color = Vec4::new(r, g, b, 0.0);
                 }
                 sprite
             }
@@ -480,7 +494,7 @@ impl EntityRenderer {
                         self.item_boxes.push(GpuBox {
                             rows: rows(m),
                             uvo: [(x as f32 + 0.5) / n, (y as f32 + 0.5) / n, 0.0, 0.0],
-                            color: white.to_array(),
+                            color: sprite_color.to_array(),
                             ids: [0, box_mode::TEXEL, l, hidden],
                             ..Default::default()
                         });
@@ -490,7 +504,7 @@ impl EntityRenderer {
                     let m = Mat4::from_translation(Vec3::new(0.0, 0.0, 0.5)) * Mat4::from_scale(Vec3::new(1.0, 1.0, 0.0));
                     self.item_boxes.push(GpuBox {
                         rows: rows(m),
-                        color: white.to_array(),
+                        color: sprite_color.to_array(),
                         ids: [0, box_mode::FACES, l | l << 16, l | l << 16],
                         ids2: [l | l << 16, 0, 0, 0],
                         ..Default::default()
@@ -678,7 +692,7 @@ impl EntityRenderer {
         scene: &Scene,
         scene_buf: BufferId,
         target: Option<(Hit, DVec3)>,
-        breaking: &[(IVec3, f32, DVec3)],
+        breaking: &[Crack],
         gizmo_lines: &[super::gizmo::Line],
         gizmo_fills: &[super::gizmo::Fill],
         late: &mut CommandList,
@@ -910,25 +924,16 @@ impl EntityRenderer {
                 ..Default::default()
             });
         }
-        for &(p, progress, at) in breaking {
+        for &Crack { pos: p, progress, at, state } in breaking {
             if progress > 0.0 {
                 // Over the faces of the block's model (a ladder's board, not its whole cube),
                 // textured like the block's own faces there.
                 let stage = ((progress * 10.0) as usize).min(9);
                 let l = textures.texture(c.crack_textures[stage]);
                 let lit = shade(p.as_dvec3() + at + DVec3::splat(0.5));
-                let state = target
-                    .filter(|h| h.0.block == p)
-                    .map(|h| &c.states[h.0.state as usize]);
-                let shape: Vec<(Vec3, Vec3)> = match state {
-                    Some(s) => s
-                        .selection
-                        .iter()
-                        .map(|b| (Vec3::new(b[0], b[1], b[2]), Vec3::new(b[3], b[4], b[5])))
-                        .collect(),
-                    None => vec![(Vec3::ZERO, Vec3::ONE)],
-                };
-                for (mn, mx) in shape {
+                let shape = c.states.get(state as usize).map_or(&[][..], |s| &s.selection[..]);
+                for b in shape {
+                    let (mn, mx) = (Vec3::new(b[0], b[1], b[2]), Vec3::new(b[3], b[4], b[5]));
                     let (a, b) = (mn - Vec3::splat(0.004), mx + Vec3::splat(0.004));
                     let m = Mat4::from_translation(rel(p.as_dvec3() + at) + a) * Mat4::from_scale(b - a);
                     boxes.push(GpuBox {
@@ -1079,7 +1084,7 @@ impl EntityRenderer {
 /// Two layers of flames facing the camera, the inner one smaller, like vanilla's burning mobs.
 fn fire_boxes(out: &mut Vec<GpuBox>, textures: &GameTextures, base: Vec3, width: f32, height: f32, cam_yaw: f32, age: f32) {
     let c = content();
-    let frame = |offset: f32| textures.frame_of(c.fire_texture, (age * crate::world::TPS as f32 + offset) as u32);
+    let frame = |offset: f32| textures.frame_now(c.fire_texture, age * crate::world::TPS as f32 + offset);
     for (i, (scale, back)) in [(1.4, 0.0), (1.0, 0.2)].into_iter().enumerate() {
         let l = frame(i as f32 * 11.0);
         let w = width * scale;
@@ -1234,12 +1239,13 @@ fn boxes_shape(
                     ids2: [0, 0, tinted as u32, tint],
                 });
             };
+            let paint = crate::content::face_paint(s, d, overlay.is_some());
             // Faces the block tints take the tint here, not from a tinted copy drawn on top (the
             // untinted faces would show through cutout holes and at the edges).
-            face(b.textures[d], s.tint != 0 && s.tint_faces & (1 << d) != 0 && overlay.is_none(), 0.0);
-            // The tinted part of a face (a grass side), just outside it.
-            if let Some(o) = overlay.filter(|_| s.tint != 0) {
-                face(o, true, 0.002);
+            face(b.textures[d], paint.base_tinted, 0.0);
+            // The part of a face over it (a grass side's green), just outside it.
+            if let Some(o) = overlay {
+                face(o, paint.overlay_tinted, 0.002);
             }
         }
     }

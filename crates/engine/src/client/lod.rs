@@ -118,7 +118,8 @@ pub fn mesh(c: &Content, key: TileKey, words: &[u32]) -> (Vec<[u32; 4]>, (i32, i
     let looks = super::looks::current();
     let face_of = |state: u32, dir: usize| {
         let info = &c.states[state as usize];
-        let tint = if info.tint_faces & (1 << dir) != 0 { info.tint as u32 } else { 0 };
+        // No overlays out there.
+        let tint = if crate::content::face_paint(info, dir, false).base_tinted { info.tint as u32 } else { 0 };
         (looks.drawn(state, info).textures[dir] & face::TEX_MASK, tint)
     };
     let mut out = Vec::new();

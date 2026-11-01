@@ -116,19 +116,10 @@ const CUBES_PER_FRAME: usize = 16;
 /// What is solid of a block, as `particle_sim.wgsl` reads it: bottom and top in sixteenths. The
 /// lowest and highest of its boxes, over the whole block: a particle needs no more.
 fn span_of(s: &crate::content::StateInfo) -> u32 {
-    use weft_abi::block_flags as bf;
-    if s.flags & bf::SOLID == 0 {
+    if s.collision.is_empty() {
         return 0;
     }
-    let (lo, hi) = if !s.collision.is_empty() {
-        s.collision
-            .iter()
-            .fold((1.0f32, 0.0f32), |(l, h), b| (l.min(b[1]), h.max(b[4])))
-    } else if s.model != weft_abi::Model::Boxes {
-        (0.0, 1.0)
-    } else {
-        return 0;
-    };
+    let (lo, hi) = s.collision.iter().fold((1.0f32, 0.0f32), |(l, h), b| (l.min(b[1]), h.max(b[4])));
     let sixteenths = |v: f32| (v.clamp(0.0, 1.0) * 16.0).round() as u32;
     sixteenths(lo) << 16 | sixteenths(hi) << 21
 }

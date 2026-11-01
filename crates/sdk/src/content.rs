@@ -184,6 +184,30 @@ pub type Particle = Handle<kind::Particle>;
 pub type SkyObject = Handle<kind::SkyObject>;
 pub type Sound = Handle<kind::Sound>;
 pub type Entity = Handle<kind::Entity>;
+
+/// A thing by its handle, or by the id that handle gives: what takes this takes either.
+pub struct Id<H> {
+    raw: u32,
+    _p: std::marker::PhantomData<fn() -> H>,
+}
+
+impl<H> Id<H> {
+    pub fn raw(&self) -> u32 {
+        self.raw
+    }
+}
+
+impl<H> From<u32> for Id<H> {
+    fn from(raw: u32) -> Self {
+        Id { raw, _p: std::marker::PhantomData }
+    }
+}
+
+impl<K: kind::HasId> From<&Handle<K>> for Id<Handle<K>> {
+    fn from(h: &Handle<K>) -> Self {
+        h.id().into()
+    }
+}
 pub type Menu = Handle<kind::Menu>;
 pub type Key = Handle<kind::Key>;
 
@@ -522,12 +546,16 @@ impl Registry {
 struct StateDef {
     flags: u32,
     filter: [u8; 3],
-    opacity: u8,
+    /// `None`: what its flags say, whatever came before or after.
+    opacity: Option<u8>,
     layer: Layer,
     model: Model,
     textures: [String; 6],
     boxes: Vec<([f32; 3], [f32; 3], [String; 6], [[f32; 4]; 6], [u8; 6], abi::BoxTilt)>,
+    /// In sixteenths of a block.
     hitbox: Vec<[f32; 6]>,
+    /// What boxes from here on are turned by.
+    frame: Option<crate::signal::Frame>,
     components: Vec<Pending>,
     signal: SignalSpec,
 }
@@ -561,17 +589,39 @@ impl StateDef {
 }
 
 impl StateDef {
+    /// One more box, turned by the frame if there is one. A model that isn't a cube doesn't hide
+    /// what is behind it, so nothing else about a block says how it is to be drawn.
+    fn add_box(&mut self, min: [f32; 3], max: [f32; 3], textures: [String; 6], uv: [[f32; 4]; 6]) {
+        if self.model != Model::Boxes {
+            self.boxes.clear();
+        }
+        self.model = Model::Boxes;
+        self.flags &= !bf::OPAQUE;
+        if self.layer == Layer::Opaque {
+            self.layer = Layer::Cutout;
+        }
+        let Some(frame) = self.frame else {
+            self.boxes.push((min, max, textures, uv, [0; 6], abi::BoxTilt::NONE));
+            return;
+        };
+        // From where the box is on the floor, before it turns.
+        let uv: [[f32; 4]; 6] = std::array::from_fn(|i| if uv[i] == abi::UV_FROM_BOX { abi::box_face_uv(i, min, max) } else { uv[i] });
+        let (lo, hi, own, turn) = frame.place(min, max, [0usize, 1, 2, 3, 4, 5]);
+        self.boxes.push((lo, hi, std::array::from_fn(|i| textures[own[i]].clone()), own.map(|i| uv[i]), turn, abi::BoxTilt::NONE));
+    }
+
     fn new(tex: &str) -> Self {
         let d = abi::StateDesc::DEFAULT;
         StateDef {
             flags: d.flags,
             filter: d.filter,
-            opacity: d.opacity,
+            opacity: None,
             layer: d.layer,
             model: d.model,
             textures: std::array::from_fn(|_| tex.to_string()),
             boxes: Vec::new(),
             hitbox: Vec::new(),
+            frame: None,
             components: Vec::new(),
             signal: SignalSpec::default(),
         }
@@ -590,8 +640,6 @@ struct BlockCallbacks {
     on_grow: Option<abi::Callback>,
     on_signal: Option<abi::Callback>,
     signal_logic: Option<abi::Callback>,
-    /// (mean seconds per step, light needed).
-    grow: (f32, u32),
 }
 
 /// Per-state settings, used directly and through `BlockBuilder::states`.
@@ -647,7 +695,6 @@ macro_rules! state_setters {
             self.each(|s, _| {
                 s.flags &= !bf::OPAQUE;
                 s.layer = Layer::Cutout;
-                s.opacity = 0;
             });
             self
         }
@@ -656,9 +703,10 @@ macro_rules! state_setters {
             self.each(|s, _| s.flags |= bf::CULL_SAME);
             self
         }
-        /// Like cutout but keeps light partially (leaves).
+        /// Light it takes away, 0..15 (leaves 1, ice 2), when what it looks like isn't enough to
+        /// go by: otherwise 15 for what is opaque and 0 for the rest.
         pub fn opacity(mut self, o: u8) -> Self {
-            self.each(|s, _| s.opacity = o);
+            self.each(|s, _| s.opacity = Some(o));
             self
         }
         pub fn translucent(mut self) -> Self {
@@ -666,20 +714,19 @@ macro_rules! state_setters {
                 s.flags &= !bf::OPAQUE;
                 s.flags |= bf::CULL_SAME;
                 s.layer = Layer::Translucent;
-                s.opacity = 0;
             });
             self
         }
         /// Needs a block with `tag` underneath (`#plant_soil`): placed only there, and breaks
         /// off when it goes.
         pub fn needs_below(self, tag: &str) -> Self {
-            self.needs(2, tag)
+            self.needs(crate::Dir::Down, tag)
         }
-        /// Needs the neighbor on `face` (-X, +X, -Y, +Y, -Z, +Z) to carry `tag` (`#plant_soil`),
-        /// or to be solid if `tag` is empty.
-        pub fn needs(mut self, face: u32, tag: &str) -> Self {
+        /// Needs the neighbor that way to carry `tag` (`#plant_soil`), or to be solid if `tag` is
+        /// empty.
+        pub fn needs(mut self, side: crate::Dir, tag: &str) -> Self {
             self.each(|s, _| {
-                s.put(&c::SUPPORT_FACE, face as u8);
+                s.put(&c::SUPPORT_FACE, side.face() as u8);
                 if !tag.is_empty() {
                     s.put_text(abi::comp::SUPPORT, "tag", tag);
                 }
@@ -695,10 +742,9 @@ macro_rules! state_setters {
         /// A plant: tagged `plantable`, cross model, no collision, replaced by placing a block.
         pub fn plant(mut self) -> Self {
             self.each(|s, _| {
-                s.flags = bf::REPLACEABLE;
+                s.flags = (s.flags & !(bf::SOLID | bf::OPAQUE)) | bf::REPLACEABLE;
                 s.model = Model::Cross;
                 s.layer = Layer::Cutout;
-                s.opacity = 0;
                 s.put(&c::HARDNESS, 0.0);
                 s.components.push(Pending::tag("plantable"));
             });
@@ -753,85 +799,46 @@ macro_rules! state_setters {
         /// stair being one slab and a quarter, unless `hitbox` is set. A
         /// `models/block/<name>.json` (Blockbench's Java block model) does the same from a file.
         pub fn model_box(mut self, min: [f32; 3], max: [f32; 3]) -> Self {
-            self.each(|s, _| {
-                if s.model != Model::Boxes {
-                    s.boxes.clear();
-                }
-                s.model = Model::Boxes;
-                s.flags &= !bf::OPAQUE;
-                s.opacity = 0;
-                s.layer = Layer::Cutout;
-                s.boxes
-                    .push((min, max, Default::default(), [[-1.0; 4]; 6], [0; 6], abi::BoxTilt::NONE));
-            });
+            self.each(|s, _| s.add_box(min, max, Default::default(), [abi::UV_FROM_BOX; 6]));
             self
         }
         /// `model_box` with its own textures and texel rectangles (u0, v0, u1, v1, 0..16) per face
-        /// in -X, +X, -Y, +Y, -Z, +Z order, as a model file's element has.
+        /// in -X, +X, -Y, +Y, -Z, +Z order, as a model file's element has; `UV_FROM_BOX` takes it
+        /// from where the box is, `UV_NO_FACE` leaves a face out.
         pub fn model_box_faces(mut self, min: [f32; 3], max: [f32; 3], faces: [(&str, [f32; 4]); 6]) -> Self {
             self.each(|s, ns| {
-                if s.model != Model::Boxes {
-                    s.boxes.clear();
-                }
-                s.model = Model::Boxes;
-                s.flags &= !bf::OPAQUE;
-                s.opacity = 0;
-                s.layer = Layer::Cutout;
-                s.boxes.push((
-                    min,
-                    max,
-                    std::array::from_fn(|i| block_tex(ns, faces[i].0)),
-                    faces.map(|f| f.1),
-                    [0; 6],
-                    abi::BoxTilt::NONE,
-                ));
+                let textures = std::array::from_fn(|i| block_tex(ns, faces[i].0));
+                s.add_box(min, max, textures, faces.map(|f| f.1));
             });
             self
         }
-        /// `model_box_faces` written for a floor with the front to the north, turned for `frame`
-        /// (`Props::frame`). A texel rectangle with a negative start is taken from the box.
-        pub fn framed_box(self, frame: crate::signal::Frame, min: [f32; 3], max: [f32; 3], faces: [(&str, [f32; 4]); 6]) -> Self {
-            self.framed_box_with(frame, min, max, faces, [0; 6], None)
+        /// `model_box`, `model_box_faces` and `hitbox` from here on are written for a floor with
+        /// the front to the north, and turned as `frame` says (`Props::frame`), pictures included.
+        pub fn frame(mut self, frame: crate::signal::Frame) -> Self {
+            self.each(|s, _| s.frame = Some(frame));
+            self
         }
-        /// `framed_box` with its pictures given quarter turns of their own, per face, and the box
-        /// tilted: around a point (texels) about an axis (own -X, +X ... as a `Dir`) by degrees,
-        /// right-handed, like a model file's element. `FramedBox::NO_FACE` leaves a face out.
-        pub fn framed_box_with(
-            mut self,
-            frame: crate::signal::Frame,
-            min: [f32; 3],
-            max: [f32; 3],
-            faces: [(&str, [f32; 4]); 6],
-            turns: [u8; 6],
-            tilt: Option<([f32; 3], crate::Dir, f32)>,
-        ) -> Self {
-            let local: [(&str, [f32; 4], u8); 6] = std::array::from_fn(|i| {
-                (faces[i].0, if faces[i].1[0] == -1.0 { crate::signal::box_uv(i, min, max) } else { faces[i].1 }, turns[i])
-            });
-            let (lo, hi, placed, turn) = frame.place(min, max, local);
-            let turn: [u8; 6] = std::array::from_fn(|i| (turn[i] + placed[i].2) % 4);
-            let tilt = tilt.map_or(abi::BoxTilt::NONE, |(origin, axis, degrees)| abi::BoxTilt {
-                origin: frame.at(origin),
-                axis: frame.along(axis),
-                degrees,
-            });
-            self.each(|s, ns| {
-                if s.model != Model::Boxes {
-                    s.boxes.clear();
+        /// The last box's pictures get quarter turns of their own, per face.
+        pub fn turned(mut self, turns: [u8; 6]) -> Self {
+            self.each(|s, _| {
+                let frame = s.frame;
+                let Some(last) = s.boxes.last_mut() else { return };
+                for (own, t) in turns.iter().enumerate() {
+                    let to = frame.map_or(own, |f| f.face(own));
+                    last.4[to] = (last.4[to] + t) % 4;
                 }
-                s.model = Model::Boxes;
-                s.flags &= !bf::OPAQUE;
-                s.opacity = 0;
-                s.layer = Layer::Cutout;
-                s.boxes
-                    .push((lo, hi, std::array::from_fn(|i| block_tex(ns, placed[i].0)), placed.map(|f| f.1), turn, tilt));
             });
             self
         }
-        /// `hitbox` for a model written for a floor with the front to the north.
-        pub fn framed_hitbox(self, frame: crate::signal::Frame, min: [f32; 3], max: [f32; 3]) -> Self {
-            let (lo, hi) = frame.corners(min.map(|v| v * 16.0), max.map(|v| v * 16.0));
-            self.hitbox(lo.map(|v| v / 16.0), hi.map(|v| v / 16.0))
+        /// The last box is tilted: around a point (texels) about an axis (its own -X, +X ... as a
+        /// `Dir`) by degrees, right-handed, like a model file's element.
+        pub fn tilted(mut self, origin: [f32; 3], axis: crate::Dir, degrees: f32) -> Self {
+            self.each(|s, _| {
+                let frame = s.frame.unwrap_or(crate::signal::Frame::new(crate::Dir::Down, crate::Dir::North));
+                let Some(last) = s.boxes.last_mut() else { return };
+                last.5 = abi::BoxTilt { origin: frame.at(origin), axis: frame.along(axis), degrees };
+            });
+            self
         }
         /// Doesn't carry redstone power, the way glass doesn't. Wire can still lie on it.
         pub fn redstone_blocker(mut self) -> Self {
@@ -849,23 +856,22 @@ macro_rules! state_setters {
             self.each(|s, _| s.flags |= bf::STICKY);
             self
         }
-        /// Its shape, in fractions of the block (a slab: `[0.0; 3]` to `[1.0, 0.5, 1.0]`), one box
-        /// a call: what stops a walker, what the crosshair outlines and cracks. On a block that
+        /// Its shape, in 1/16 units like the model's (a slab: `[0.0; 3]` to `[16.0, 8.0, 16.0]`), one
+        /// box a call: what stops a walker, what the crosshair outlines and cracks. On a block that
         /// isn't solid (`not_solid`, `plant`), only the outline. Without any, the model's boxes,
         /// else a plant's cross, else the whole block.
         pub fn hitbox(mut self, min: [f32; 3], max: [f32; 3]) -> Self {
             self.each(|s, _| {
-                s.hitbox
-                    .push([min[0], min[1], min[2], max[0], max[1], max[2]])
+                let (lo, hi) = s.frame.map_or((min, max), |f| f.corners(min, max));
+                s.hitbox.push([lo[0], lo[1], lo[2], hi[0], hi[1], hi[2]])
             });
             self
         }
         /// Air-like: invisible, no collision, not targetable.
         pub fn air(mut self) -> Self {
             self.each(|s, _| {
-                s.flags = bf::REPLACEABLE | bf::NOT_TARGETABLE;
+                s.flags = (s.flags & !(bf::SOLID | bf::OPAQUE)) | bf::REPLACEABLE | bf::NOT_TARGETABLE;
                 s.model = Model::None;
-                s.opacity = 0;
                 s.layer = Layer::Opaque;
             });
             self
@@ -886,6 +892,14 @@ impl<'a> State<'a> {
         f(self.def, self.ns)
     }
     state_setters!();
+    /// `front` toward `facing`, `side` around it and `top` above and below (a furnace).
+    pub fn front_faces(self, facing: crate::Dir, side: &str, top: &str, front: &str) -> Self {
+        let mut f = [side; 6];
+        f[2] = top;
+        f[3] = top;
+        f[facing.face() as usize] = front;
+        self.faces(f)
+    }
 
     /// A component on this state only (on top of the block's).
     pub fn set<T: Value>(self, comp: &Component<T>, v: T) -> Self {
@@ -970,13 +984,13 @@ impl Props {
         crate::Dir::from_name(self.get("facing")).unwrap_or(crate::Dir::Up)
     }
     /// How the block is turned, from its `attach` and `front` or `facing` properties, for
-    /// `framed_box`.
+    /// `.frame`.
     pub fn frame(&self) -> crate::signal::Frame {
         let attach = crate::Dir::from_name(self.get("attach")).unwrap_or(crate::Dir::Down);
         let front = crate::Dir::from_name(self.get("front")).unwrap_or_else(|| self.facing());
         crate::signal::Frame::new(attach, front)
     }
-    /// A block that faces along `facing`, with its top that way: for `framed_box`.
+    /// A block that faces along `facing`, with its top that way: for `.frame`.
     pub fn frame_up(&self) -> crate::signal::Frame {
         let f = self.facing();
         let north = if f.face() / 2 == 1 { crate::Dir::North } else { crate::Dir::Up };
@@ -1140,7 +1154,10 @@ impl<'a> BlockBuilder<'a> {
     /// the light is at least `min_light`: by default to the next state until the last. Timed by
     /// world time, so unloaded plants catch up when their area loads again.
     pub fn growth(mut self, mean_seconds: f32, min_light: u32) -> Self {
-        self.callbacks.grow = (mean_seconds, min_light);
+        self.each(|s, _| {
+            s.put(&c::GROW_TIME, mean_seconds);
+            s.put(&c::GROW_LIGHT, min_light);
+        });
         self
     }
 
@@ -1239,6 +1256,44 @@ impl<'a> BlockBuilder<'a> {
         self
     }
 
+    /// Two cells long, told apart by a property `prop` of it: it is placed as `parts[0]`, and
+    /// `parts[1]` goes where `way` says from there (given the state), which needs room. Breaking
+    /// one takes the other, whatever took the one (an explosion doesn't break it): `drops` and
+    /// the like are for the two together.
+    pub fn two_part(self, prop: &'static str, parts: [&'static str; 2], way: impl Fn(u32) -> crate::Dir + Copy + Send + Sync + 'static) -> Self {
+        let Some(block) = self.handle else {
+            crate::mistake("two_part needs a block registered by its handle");
+            return self;
+        };
+        let other = move |pos: [i32; 3], state: u32| crate::other_part(pos, state, prop, parts[1], way);
+        self.reg.intercept(&crate::question::PLACE_BLOCK, move |q| {
+            if !block.is(q.state()) {
+                return crate::Verdict::Abstain;
+            }
+            let there = q.world().get(other(q.pos(), q.state()));
+            if there == 0 || crate::state_flags(there) & bf::REPLACEABLE != 0 { crate::Verdict::Abstain } else { crate::Verdict::Deny }
+        });
+        self.prop(prop, parts)
+            .on_neighbor(|e| e.world().schedule(e.pos(), 1))
+            .on_scheduled(move |e| {
+                let w = e.world();
+                if block.is(e.state()) && !block.is(w.get(other(e.pos(), e.state()))) {
+                    w.set(e.pos(), 0);
+                }
+            })
+            .on_placed(move |w, c| {
+                if let Some(s) = crate::state_with(c.state, prop, parts[1]) {
+                    w.set(other(c.pos, c.state), s);
+                }
+            })
+            .on_broken(move |w, c| {
+                let there = other(c.pos, c.state);
+                if block.is(w.get(there)) {
+                    w.set(there, 0);
+                }
+            })
+    }
+
     /// Falls like sand when nothing holds it up: a block next to it changing checks two ticks
     /// later whether below is free, and if so it drops as a moving block (`World::fall`).
     pub fn falling(self) -> Self {
@@ -1287,9 +1342,8 @@ impl<'a> BlockBuilder<'a> {
     /// are the dot on top and the line on the sides. A property `faces` holds where it lies.
     pub fn wire(mut self) -> Self {
         self.each(|s, _| {
-            s.flags = 0;
+            s.flags &= !(bf::SOLID | bf::OPAQUE);
             s.model = Model::Wire;
-            s.opacity = 0;
             s.layer = Layer::Cutout;
             s.put(&c::HARDNESS, 0.0);
         });
@@ -1380,7 +1434,8 @@ impl<'a> BlockBuilder<'a> {
         self.callbacks.signal_logic = Some(callback(move |a: &mut abi::LogicArgs| {
             a.output = f(SignalLogic::wrap(a)) as u32;
         }));
-        self.signal = Some(SignalBuild { delay: Some(delay), ..self.signal.unwrap_or_default() });
+        // In redstone ticks, like a repeater's: two game ticks each.
+        self.signal = Some(SignalBuild { delay: Some(delay * 2), ..self.signal.unwrap_or_default() });
         self.signal_props(abi::signal_kind::LOGIC, 16, true, true)
     }
     /// Called when the power around a `signal_sink` changes.
@@ -1389,7 +1444,6 @@ impl<'a> BlockBuilder<'a> {
         self
     }
 
-    /// Chooses property values when a player places it (after `facing`):
     /// Its own item placed in its cell: `.merge(|p, props| props.set("type", "double"))` takes the
     /// item in, with `props` those of what is there and `p.placed("type")` how the item would go;
     /// leaving them as they are places it as usual.
@@ -1411,7 +1465,8 @@ impl<'a> BlockBuilder<'a> {
         self
     }
 
-    /// `.placement(|p, props| props.set("axis", if p.face() < 2 { "x" } else { "y" }))`.
+    /// Chooses property values when a player places it (after `facing`):
+    /// `.placement(|p, props| props.set("axis", if p.face().horizontal() { "x" } else { "y" }))`.
     pub fn placement(mut self, f: impl Fn(&Place, &mut Props) + Send + Sync + 'static) -> Self {
         self.placement = Some(std::sync::Arc::new(f));
         self
@@ -1529,7 +1584,7 @@ impl Drop for BlockBuilder<'_> {
             .map(|((s, b), v)| abi::StateDesc {
                 flags: s.flags,
                 filter: s.filter,
-                opacity: s.opacity,
+                opacity: s.opacity.unwrap_or(if s.flags & bf::OPAQUE != 0 { 15 } else { 0 }),
                 layer: s.layer,
                 model: s.model,
                 textures: std::array::from_fn(|i| Str::new(&s.textures[i])),
@@ -1573,8 +1628,6 @@ impl Drop for BlockBuilder<'_> {
             shares_cell: Slice::new(&shares_cell),
             placement: cb.placement.unwrap_or(abi::Callback::NONE),
             replace: self.replace as u32,
-            grow_seconds: cb.grow.0,
-            grow_light: cb.grow.1,
             on_grow: cb.on_grow.unwrap_or(abi::Callback::NONE),
             on_signal: cb.on_signal.unwrap_or(abi::Callback::NONE),
             signal_logic: cb.signal_logic.unwrap_or(abi::Callback::NONE),
@@ -1672,8 +1725,8 @@ impl ItemBuilder<'_> {
         self.tag(abi::comp::NO_CREATIVE_BREAK)
     }
     /// Takes effect after holding the use button this long (food 32 ticks), slowing the player down.
-    pub fn use_ticks(self, ticks: u32) -> Self {
-        self.set(&c::USE_TICKS, ticks)
+    pub fn use_time(self, seconds: f32) -> Self {
+        self.set(&c::USE_TICKS, (seconds * 20.0).round() as u32)
     }
     /// Full swings per second: hitting sooner does less (a sword 1.6, an empty hand 4).
     pub fn attack_speed(self, per_second: f32) -> Self {
@@ -1708,7 +1761,7 @@ impl ItemBuilder<'_> {
             .push(Pending::text(abi::comp::SPAWN_EGG, entity.name()));
         self.on_use(move |u| {
             let Some((p, face)) = u.target() else { return false };
-            let (w, side) = (u.world(), [[-1, 0, 0], [1, 0, 0], [0, -1, 0], [0, 1, 0], [0, 0, -1], [0, 0, 1]][face as usize % 6]);
+            let (w, side) = (u.world(), crate::Dir::from_face(face).offset());
             w.spawn(entity, [(p[0] + side[0]) as f64 + 0.5, (p[1] + side[1]) as f64, (p[2] + side[2]) as f64 + 0.5]);
             if !w.creative(u.player()) {
                 u.set_stack(crate::StackData::shrink(u.stack(), 1));
@@ -2169,6 +2222,9 @@ impl SignalBuild {
         let mut s = SignalSpec { kind: self.kind, mode: self.mode, head: self.head, ..SignalSpec::default() };
         if let Some(a) = dir("attach") {
             s.attach = a.face();
+            if self.attaches {
+                let _ = State { def: d, ns }.needs(a, "");
+            }
             // A torch powers the block on the far side of it, as high as it stands.
             if self.kind == abi::signal_kind::TORCH {
                 s.front = a.opposite().face();
@@ -2188,22 +2244,16 @@ impl SignalBuild {
             s.mode = 1;
         }
         d.signal = s;
-        if self.attaches {
-            if let Some(a) = dir("attach") {
-                let _ = State { def: d, ns }.needs(a.face(), "");
-            }
-        }
         if self.kind == abi::signal_kind::WIRE {
             let mask = p.int("faces");
             // A thin plate on each face it lies on.
-            const T: f32 = 1.0 / 16.0;
             const PLATES: [[f32; 6]; 6] = [
-                [0.0, 0.0, 0.0, T, 1.0, 1.0],
-                [1.0 - T, 0.0, 0.0, 1.0, 1.0, 1.0],
-                [0.0, 0.0, 0.0, 1.0, T, 1.0],
-                [0.0, 1.0 - T, 0.0, 1.0, 1.0, 1.0],
-                [0.0, 0.0, 0.0, 1.0, 1.0, T],
-                [0.0, 0.0, 1.0 - T, 1.0, 1.0, 1.0],
+                [0.0, 0.0, 0.0, 1.0, 16.0, 16.0],
+                [15.0, 0.0, 0.0, 16.0, 16.0, 16.0],
+                [0.0, 0.0, 0.0, 16.0, 1.0, 16.0],
+                [0.0, 15.0, 0.0, 16.0, 16.0, 16.0],
+                [0.0, 0.0, 0.0, 16.0, 16.0, 1.0],
+                [0.0, 0.0, 15.0, 16.0, 16.0, 16.0],
             ];
             d.hitbox = (0..6)
                 .filter(|f| mask & (1 << f) != 0)
@@ -2337,9 +2387,9 @@ impl Place {
     pub fn pos(&self) -> [i32; 3] {
         self.args.pos
     }
-    /// Face of the block that was clicked: 0..6 in -X, +X, -Y, +Y, -Z, +Z order.
-    pub fn face(&self) -> u32 {
-        self.args.face
+    /// Face of the block that was clicked.
+    pub fn face(&self) -> crate::Dir {
+        crate::Dir::from_face(self.args.face)
     }
     pub fn look(&self) -> [f32; 3] {
         self.args.look
@@ -2353,16 +2403,9 @@ impl Place {
     pub fn placed(&self, prop: &str) -> Option<&'static str> {
         crate::world::state_prop(self.args.placed, prop)
     }
-    /// Horizontal facing the player looks towards: 0 = -Z (north), 1 = +X, 2 = +Z, 3 = -X.
-    pub fn horizontal(&self) -> u32 {
-        let [x, _, z] = self.args.look;
-        if x.abs() > z.abs() {
-            if x > 0.0 { 1 } else { 3 }
-        } else if z > 0.0 {
-            2
-        } else {
-            0
-        }
+    /// Which way around the player looks.
+    pub fn looking(&self) -> crate::Dir {
+        crate::Dir::nearest(self.args.look, crate::Facings::HORIZONTAL)
     }
 }
 
@@ -2534,7 +2577,7 @@ impl Drop for LiquidBuilder<'_> {
             b = b.tint(kind);
         }
         if self.translucent {
-            b = b.translucent().opacity(opacity);
+            b = b.translucent();
         }
         b.components = std::mem::take(&mut self.components);
         drop(b);
@@ -2673,4 +2716,34 @@ impl Registry {
 pub fn liquid_of(state: u32) -> Option<u32> {
     let l = unsafe { (host().liquid_of)(state) };
     (l != u32::MAX).then_some(l)
+}
+
+#[cfg(test)]
+mod order_tests {
+    use super::*;
+
+    fn built(f: impl FnOnce(State<'_>) -> State<'_>) -> StateDef {
+        let mut d = StateDef::new("x");
+        f(State { def: &mut d, ns: "test" });
+        d
+    }
+
+    #[test]
+    fn what_comes_after_keeps_what_came_before() {
+        let d = built(|s| s.holds_liquids().plant());
+        assert_ne!(d.flags & bf::HOLDS_LIQUID, 0);
+        assert_eq!(d.flags & bf::SOLID, 0);
+        assert_eq!(built(|s| s.opacity(2).translucent()).opacity, Some(2));
+        assert_eq!(built(|s| s.translucent().opacity(2)).opacity, Some(2));
+        assert_eq!(built(|s| s.translucent().model_box([0.0; 3], [16.0; 3])).layer, Layer::Translucent);
+    }
+
+    #[test]
+    fn a_frame_turns_boxes_and_hitboxes() {
+        let f = crate::signal::Frame::new(crate::Dir::Down, crate::Dir::South);
+        let d = built(|s| s.frame(f).model_box([0.0; 3], [16.0, 16.0, 1.0]).hitbox([0.0; 3], [16.0, 16.0, 1.0]));
+        // Its north end comes to the south.
+        assert_eq!((d.boxes[0].0, d.boxes[0].1), ([0.0, 0.0, 15.0], [16.0, 16.0, 16.0]));
+        assert_eq!(d.hitbox[0], [0.0, 0.0, 15.0, 16.0, 16.0, 16.0]);
+    }
 }

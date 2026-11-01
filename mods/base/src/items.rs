@@ -87,7 +87,7 @@ pub fn register(r: &mut Registry) {
         let i = r
             .item(Item::generated(name.into()))
             .set(&FOOD, Food { hunger, saturation })
-            .use_ticks(32)
+            .use_time(1.6)
             .on_use(base_api::eat)
             .tab(&crate::tabs::FOOD);
         let i = if tag.starts_with("cooked_meat/") { i.tag("cooked_meat") } else { i };

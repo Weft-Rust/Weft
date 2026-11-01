@@ -376,7 +376,7 @@ impl Screen for ModScreen {
     fn key(&mut self, key: Key, ctx: &mut Ctx) -> bool {
         if self.0.on_key.is_some() {
             ctx.requests
-                .push(Request::ModKey(self.0.owner, self.0.on_key, crate::input::key_name(key)));
+                .push(Request::ModKey(self.0.owner, self.0.on_key, key.id()));
         }
         false
     }
@@ -950,7 +950,7 @@ impl Screen for Controls {
         let action = self.waiting.take().unwrap_or_default();
         // Only a key the settings file can name: anything else would be back to the default
         // after a restart.
-        let can_save = matches!(key, Key::Mouse(_)) || crate::settings::parse_key(&crate::input::key_name(key)).is_some();
+        let can_save = Key::parse(&key.id()).is_some();
         if key != Key::Code(winit::keyboard::KeyCode::Escape) && can_save {
             ctx.requests
                 .push(Request::Rebind(action, crate::input::Chord { key, mods: ctx.input.mods() }));

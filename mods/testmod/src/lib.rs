@@ -226,11 +226,7 @@ fn init(r: &mut Registry) {
     // May face up, north or east only: three states, not six.
     r.block(&VENT)
         .facing(Facings::only(&[Dir::Up, Dir::North, Dir::East]), Toward::Player)
-        .states(|p, s| {
-            let mut f = ["vent_side"; 6];
-            f[p.facing().face() as usize] = "vent_front";
-            s.faces(f)
-        })
+        .states(|p, s| s.front_faces(p.facing(), "vent_side", "vent_side", "vent_front"))
         .hardness(2.0)
         .mineable("pickaxe")
         .tab(&BASE_BUILDING);
@@ -327,9 +323,8 @@ fn init(r: &mut Registry) {
     r.on(&ITEM_USED, |b| {
         let w = b.world();
         for e in b.iter() {
-            if let (Some(heal), Some(mut st)) = (FOOD_HEAL.on_stack(&e.stack), w.entity(e.player)) {
-                st.health = (st.health + heal).min(st.max_health);
-                w.set_entity(e.player, &st);
+            if let Some(heal) = FOOD_HEAL.on_stack(&e.stack) {
+                w.heal(e.player, heal);
             }
         }
     });
@@ -362,12 +357,12 @@ fn morph(r: &mut Registry) {
                 let own = w.kind_size(&kind).unwrap_or([0.9, 0.9, 0.765]);
                 let (width, height) = (cmd.float("width").map_or(own[0], |v| v as f32), cmd.float("height").map_or(own[1], |v| v as f32));
                 let eye = if cmd.float("height").is_some() { height * 0.85 } else { own[2] };
-                w.set_look(me, Some(&kind));
+                w.set_appearance(me, Some(&kind));
                 w.set_size(me, Some([width, height, eye]));
                 cmd.reply("command.testmod.morph", &[Arg::Text(&kind), Arg::Float(width as f64, 2), Arg::Float(height as f64, 2)]);
             }
             None => {
-                w.set_look(me, None);
+                w.set_appearance(me, None);
                 w.set_size(me, None);
                 cmd.reply("command.testmod.unmorph", &[]);
             }
@@ -446,8 +441,7 @@ fn machine_screen(ui: &mut Ui, slots: impl FnOnce(&mut Ui)) {
                     out.set("testmod.energy", &[Arg::Int(e.stored), Arg::Int(e.capacity)]);
                 });
                 ui.progress_bind("energy", S::default().size(80.0, 8.0), |c| {
-                    c.menu_component(&ENERGY)
-                        .map_or(0.0, |e| if e.capacity > 0 { e.stored as f32 / e.capacity as f32 } else { 0.0 })
+                    c.menu_component(&ENERGY).map_or(0.0, |e| ratio(e.stored as u32, e.capacity as u32))
                 });
             });
             ui.spacer();
@@ -457,9 +451,6 @@ fn machine_screen(ui: &mut Ui, slots: impl FnOnce(&mut Ui)) {
     });
 }
 
-fn ratio(a: u32, b: u32) -> f32 {
-    if b == 0 { 0.0 } else { a as f32 / b as f32 }
-}
 
 /// `/gizmo testmod:energy`: stored energy above every machine, the mod-side use of gizmos.
 fn energy_gizmos(w: &World, ids: &[u64]) {
@@ -500,14 +491,10 @@ fn dynamite(r: &mut Registry) {
         })
         .on_scheduled(|e| {
             let (w, pos) = (e.world(), e.pos());
-            let Some(left) = w
-                .prop(pos, "fuse")
-                .and_then(|v| v.parse::<u32>().ok())
-                .filter(|&f| f > 0)
-            else {
+            let Some(left) = w.prop_int(pos, "fuse").filter(|&f| f > 0) else {
                 return;
             };
-            let center = [pos[0] as f64 + 0.5, pos[1] as f64 + 0.5, pos[2] as f64 + 0.5];
+            let center = block_center(pos);
             if left > 1 {
                 w.set_prop(pos, "fuse", &(left - 1).to_string());
                 w.spawn_particles(&looks::SPARK, [center[0], center[1] + 0.6, center[2]])
@@ -517,7 +504,7 @@ fn dynamite(r: &mut Registry) {
                 w.schedule(pos, 10);
             } else {
                 w.play_sound(&BOOM, center, 4.0);
-                w.fill_sphere(center, DYNAMITE_RADIUS.get() as f64, 0, true);
+                w.fill_sphere(center, DYNAMITE_RADIUS.get() as f64, 0).keep_unbreakable();
             }
         });
 }
@@ -538,7 +525,7 @@ fn tick_generators(b: &mut SystemBatch<Burner>) {
             let slot = w.inventory(id).group("fuel");
             while want > 0 {
                 let fuel = slot.get(0);
-                let Some(t) = FUEL.on_item(fuel.item).filter(|_| !fuel.is_empty()) else { break };
+                let Some(t) = FUEL.on_filled(&fuel) else { break };
                 (m.burn, m.burn_max) = (t, t);
                 slot.set(0, use_one(fuel));
                 let r = want.min(m.burn);
@@ -589,8 +576,7 @@ fn tick_furnaces(b: &mut SystemBatch<Work>) {
         let recipe = (!input.is_empty())
             .then(|| recipe_process(&SMELTING_RECIPES, input.item))
             .flatten();
-        let fits = recipe
-            .is_some_and(|(out, _)| output.is_empty() || (output.stacks_with(&out) && output.count + out.count <= max_stack(out.item)));
+        let fits = recipe.is_some_and(|(out, _)| output.room_for(out) > 0);
         if !fits || stored < FURNACE_USE {
             m.progress = 0;
             continue;
@@ -600,8 +586,7 @@ fn tick_furnaces(b: &mut SystemBatch<Work>) {
         m.progress_max = (time / 2).max(1);
         if ticks > 1 {
             // Catching up: as many steps as the energy, the input and the room allow.
-            let room = if output.is_empty() { max_stack(out.item) } else { max_stack(out.item) - output.count } / out.count.max(1);
-            let work = (input.count.min(room) * m.progress_max).saturating_sub(m.progress) as i64;
+            let work = (input.count.min(output.room_for(out)) * m.progress_max).saturating_sub(m.progress) as i64;
             let steps = (ticks as i64).min(stored / FURNACE_USE).min(work);
             let total = m.progress + steps as u32;
             let done = total / m.progress_max;
@@ -611,8 +596,7 @@ fn tick_furnaces(b: &mut SystemBatch<Work>) {
             }
             if done > 0 {
                 input_slot.set(0, input.shrink(done));
-                output_slot
-                    .set(0, if output.is_empty() { ItemStack { count: out.count * done, ..out } } else { output.grow(out.count * done) });
+                output_slot.set(0, output.merged(out, done));
             }
             continue;
         }
@@ -626,7 +610,7 @@ fn tick_furnaces(b: &mut SystemBatch<Work>) {
         }
         if done {
             input_slot.set(0, input.shrink(1));
-            output_slot.set(0, if output.is_empty() { out } else { output.grow(out.count) });
+            output_slot.set(0, output.merged(out, 1));
         }
     }
 }

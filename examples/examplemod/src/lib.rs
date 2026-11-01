@@ -91,7 +91,7 @@ fn blocks(_r: &mut Registry) {
     // r.block(&CRYSTAL).signal_block();                        // always on
     // r.block(&ALARM).signal_sink().on_signal(|e| { e.rising(); e.world(); });
     // r.block(&AND_GATE)
-    //     .signal_logic(2, |s| if s.rear() > 0 && s.sides().iter().any(|v| *v > 0) { 15 } else { 0 })
+    //     .signal_logic(1, |s| if s.rear() > 0 && s.sides().iter().any(|v| *v > 0) { 15 } else { 0 })
     //     .model_box([0.0, 0.0, 0.0], [16.0, 2.0, 16.0])
     //     .not_solid();
     //

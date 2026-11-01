@@ -225,8 +225,8 @@ impl Args {
     }
 }
 
-/// A full registry name from what the player typed: exact `ns:name`, or a bare name matching
-/// exactly one entry's path (the base game's wins ties).
+/// A full registry name from what the player typed: exact `ns:name`, or a bare name matching an
+/// entry's path, the first loaded mod's when several do.
 pub fn resolve<'a>(names: impl Iterator<Item = &'a String> + Clone, typed: &str) -> Option<String> {
     if typed.contains(':') {
         return names.into_iter().find(|n| n.as_str() == typed).cloned();
@@ -237,10 +237,10 @@ pub fn resolve<'a>(names: impl Iterator<Item = &'a String> + Clone, typed: &str)
     match matches.as_slice() {
         [one] => Some((*one).clone()),
         [] => None,
-        many => many
-            .iter()
-            .find(|n| n.starts_with("base:"))
-            .map(|n| (*n).clone()),
+        many => {
+            let order = |n: &&&String| crate::content::content().mods.iter().position(|m| n.split_once(':').is_some_and(|(ns, _)| ns == m.id));
+            many.iter().min_by_key(|n| order(n).unwrap_or(usize::MAX)).map(|n| (**n).clone())
+        }
     }
 }
 
@@ -258,9 +258,8 @@ fn coordinate(tok: &str, base: f64) -> Option<f64> {
 fn position(t: &[&str], o: Origin) -> Option<DVec3> {
     if t.iter().all(|s| s.starts_with('^')) {
         let num = |s: &str| if s.len() == 1 { Some(0.0) } else { s[1..].parse::<f64>().ok() };
+        let forward = crate::physics::look_dir(o.yaw, o.pitch);
         let (sy, cy) = (o.yaw as f64).sin_cos();
-        let (sp, cp) = (o.pitch as f64).sin_cos();
-        let forward = DVec3::new(-sy * cp, sp, -cy * cp);
         let right = DVec3::new(cy, 0.0, -sy);
         let up = right.cross(forward);
         return Some(o.pos - right * num(t[0])? + up * num(t[1])? + forward * num(t[2])?);

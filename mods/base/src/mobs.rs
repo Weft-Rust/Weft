@@ -57,7 +57,7 @@ fn creeper_model() -> Model {
 
 /// Vanilla's skeleton (`SkeletonModel`): a thin biped, arms held out like a zombie's while aiming.
 fn skeleton_model() -> Model {
-    let forward = std::f32::consts::FRAC_PI_2;
+    let forward = 90.0;
     Model::from(vec![
         vanilla_part("head", [0.0, 0.0, 0.0], &[([-4.0, -8.0, -4.0], [8.0, 8.0, 8.0], [0.0, 0.0])]),
         vanilla_part("body", [0.0, 0.0, 0.0], &[([-4.0, 0.0, -2.0], [8.0, 12.0, 4.0], [16.0, 16.0])]),
@@ -81,7 +81,7 @@ fn sheep_model() -> Model {
     let body = vanilla_part("body", [0.0, 5.0, 2.0], &[([-4.0, -10.0, -7.0], [8.0, 16.0, 6.0], [28.0, 8.0])])
         .cube([-4.0, -6.0, -7.0], [8.0, 16.0, 6.0], wool([28.0, 8.0]))
         .inflated(1.75)
-        .rotation(-std::f32::consts::FRAC_PI_2, 0.0, 0.0);
+        .rotation(-90.0, 0.0, 0.0);
     let mut parts = vec![head, body];
     parts.extend(vanilla_legs(3.0, 12.0).map(|l| {
         l.cube([-2.0, -6.0, -2.0], [4.0, 6.0, 4.0], wool([0.0, 16.0]))
@@ -103,11 +103,7 @@ fn chicken_model() -> Model {
                 ([-1.0, -2.0, -3.0], [2.0, 2.0, 2.0], [14.0, 4.0]),
             ],
         ),
-        vanilla_part("body", [0.0, 16.0, 0.0], &[([-3.0, -4.0, -3.0], [6.0, 8.0, 6.0], [0.0, 9.0])]).rotation(
-            -std::f32::consts::FRAC_PI_2,
-            0.0,
-            0.0,
-        ),
+        vanilla_part("body", [0.0, 16.0, 0.0], &[([-3.0, -4.0, -3.0], [6.0, 8.0, 6.0], [0.0, 9.0])]).rotation(-90.0, 0.0, 0.0),
         vanilla_part("wing0", [-4.0, 13.0, 0.0], &[([0.0, 0.0, -3.0], [1.0, 4.0, 6.0], [24.0, 13.0])]),
         vanilla_part("wing1", [4.0, 13.0, 0.0], &[([-1.0, 0.0, -3.0], [1.0, 4.0, 6.0], [24.0, 13.0])]),
         leg("rightLeg", -2.0),
@@ -138,7 +134,7 @@ fn cow_model() -> Model {
         [0.0, 5.0, 2.0],
         &[([-6.0, -10.0, -7.0], [12.0, 18.0, 10.0], [18.0, 4.0]), ([-2.0, 2.0, -8.0], [4.0, 6.0, 1.0], [52.0, 0.0])],
     )
-    .rotation(-std::f32::consts::FRAC_PI_2, 0.0, 0.0);
+    .rotation(-90.0, 0.0, 0.0);
     let mut parts = vec![head, body];
     parts.extend(vanilla_legs(4.0, 12.0));
     Model::from(parts).uv(64, 64)
@@ -151,11 +147,7 @@ fn pig_model() -> Model {
         [0.0, 12.0, -6.0],
         &[([-4.0, -4.0, -8.0], [8.0, 8.0, 8.0], [0.0, 0.0]), ([-2.0, 0.0, -9.0], [4.0, 3.0, 1.0], [16.0, 16.0])],
     );
-    let body = vanilla_part("body", [0.0, 11.0, 2.0], &[([-5.0, -10.0, -7.0], [10.0, 16.0, 8.0], [28.0, 8.0])]).rotation(
-        -std::f32::consts::FRAC_PI_2,
-        0.0,
-        0.0,
-    );
+    let body = vanilla_part("body", [0.0, 11.0, 2.0], &[([-5.0, -10.0, -7.0], [10.0, 16.0, 8.0], [28.0, 8.0])]).rotation(-90.0, 0.0, 0.0);
     let mut parts = vec![head, body];
     parts.extend(vanilla_legs(3.0, 18.0));
     Model::from(parts).uv(64, 64)
@@ -390,9 +382,8 @@ fn blast(w: &World, id: u64, at: [f64; 3], radius: f64) {
         w.damage(other, damage as f32, id, damage::EXPLOSION);
     }
     // Vanilla's: one going off in a liquid breaks nothing, and liquids don't break at all.
-    let p = [at[0].floor() as i32, at[1].floor() as i32, at[2].floor() as i32];
-    if w.flags(p) & abi::block_flags::LIQUID == 0 {
-        w.fill_sphere_keeping(at, radius, 0, abi::area_flags::KEEP_UNBREAKABLE | abi::area_flags::KEEP_LIQUIDS);
+    if w.flags(block_at(at)) & abi::block_flags::LIQUID == 0 {
+        w.fill_sphere(at, radius, 0).keep_unbreakable().keep_liquids();
     }
     w.spawn_particles(&Particle::named("core:poof"), at)
         .count(40)
@@ -423,7 +414,7 @@ fn skeleton() -> ai::Goals {
 }
 
 fn shoot(w: &World, id: u64, from: &EntityState, at: &EntityState) {
-    let eye = from.pos[1] + from.size[2] as f64;
+    let eye = from.eye()[1];
     let d = [at.pos[0] - from.pos[0], at.pos[1] + at.size[2] as f64 * 0.7 - eye, at.pos[2] - from.pos[2]];
     let flat = (d[0] * d[0] + d[2] * d[2]).sqrt();
     let len = (flat * flat + d[1] * d[1]).sqrt().max(0.1);
@@ -435,7 +426,7 @@ fn shoot(w: &World, id: u64, from: &EntityState, at: &EntityState) {
     }
     if let Some(mut s) = w.entity(arrow) {
         s.vel = [d[0] / len * SPEED, d[1] / len * SPEED + flat * 0.4, d[2] / len * SPEED];
-        s.yaw = (-d[0]).atan2(-d[2]) as f32;
+        s.yaw = yaw_toward([0.0; 3], d);
         w.set_entity(arrow, &s);
     }
 }
@@ -444,7 +435,7 @@ fn shoot(w: &World, id: u64, from: &EntityState, at: &EntityState) {
 fn arrow_flies(w: &World, id: u64, st: &EntityState) -> bool {
     let shooter = w.component(id, &SHOOTER).copied().unwrap_or(0);
     let hit = w
-        .near_bodies(st.pos, 1.0)
+        .near_targets(st.pos, 1.0, None)
         .into_iter()
         .find(|&e| e != id && e != shooter && w.entity(e).is_some_and(|s| s.kind != st.kind));
     if let Some(target) = hit {

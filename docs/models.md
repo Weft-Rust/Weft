@@ -15,7 +15,7 @@ A block or item made of boxes takes Blockbench's **Java Block/Item** model: expo
 
 From a Java model the engine reads `elements` (`from`, `to`, `rotation`, and `faces` with their `texture`, `uv` and `rotation`), `textures` with `#name` references and `parent`, another model file or one of vanilla's cube parents (`block/cube_all`, `block/cube`, `block/cube_column`, `block/cube_bottom_top`) which give a plain cube its face textures. A face whose `#name` no texture sets shows the block's own texture of that face, so a file can bring only the shape and leave the textures to `.texture(..)` / `.textures(..)` in code. Faces the file leaves out aren't drawn. `uv` is 0 to 16 across a picture of any size, fractions included, so a face can be a part of an unwrap.
 
-In code the same is `.model_box(min, max)` (pixels, 0..16), whose faces show the state's textures. A block's model decides its shape for everyone, collision and selection included (box by box, so a stair is one slab and a quarter, unless `.hitbox(min, max)`, in fractions of a block, says otherwise).
+In code the same is `.model_box(min, max)` (pixels, 0..16), whose faces show the state's textures. A block's model decides its shape for everyone, collision and selection included (box by box, so a stair is one slab and a quarter, unless `.hitbox(min, max)`, in the same pixels, says otherwise).
 
 For items, `models/item/<name>.json` with `"parent": "item/generated"` and a `layer0` texture is a flat item showing that texture; with `elements` the item is drawn as those boxes in the hand, on the ground and in slots. A face without a texture shows the item's own icon.
 
@@ -49,22 +49,22 @@ Everything you can do with a part:
 - `cube(origin, size, uv)`: a box. `origin` is relative to the pivot, `uv` the top-left corner of its unwrap on the skin
 - `mirrored()`: mirrors the last box's unwrap, handy for an arm that shares its texture with the other one
 - `child_of(index)`: hangs it from the part at that index in the same list
-- `rotation(x, y, z)`: a resting rotation in radians
+- `rotation(x, y, z)`: a resting rotation in degrees
 - `mesh(triangles)`: loose triangles in model pixels, three corners each. `sphere(center, radius, rings, segments, uv)` builds a ball
 
 This is the orb from testmod, a ball with a ring of stones hanging off it:
 ```rust
 let ring = Part::new("ring", [0.0, 8.0, 0.0]).child_of(0);
-r.entity(&ORB).texture("orb", 32, 16).model(vec![
+r.entity(&ORB).texture("orb").model(Model::from(vec![
     Part::new("core", [0.0, 8.0, 0.0]).mesh(sphere([0.0, 8.0, 0.0], 4.0, 8, 12, [0.0, 0.0, 16.0, 16.0])),
     ring.cube([6.0, -1.0, -1.0], [2.0, 2.0, 2.0], [16.0, 0.0]),
-]);
+]).uv(32, 16));
 ```
 
 ## Model from Blockbench
 Make the model as a Bedrock Entity, export it as `<name>.geo.json` and drop it into `assets/models/`. A file named like the entity is picked up on its own (`idol.geo.json` for `idol`), and `.model_file("name")` points at another one. Either way the file replaces any model written in code. Animations work the same way, from `animations/<name>.animation.json`.
 
-The engine reads bones with their `pivot`, `parent` and resting `rotation`, boxes with `origin` (absolute, the way Blockbench writes it), `size`, `uv` (a pair or per face), `mirror` and `inflate`, and `poly_mesh` bones, triangles and quads alike, with normalized uvs if you use them. The geometry's `texture_width` and `texture_height` override the numbers you gave to `.texture(..)`, so the skin can be any size.
+The engine reads bones with their `pivot`, `parent` and resting `rotation`, boxes with `origin` (absolute, the way Blockbench writes it), `size`, `uv` (a pair or per face), `mirror` and `inflate`, and `poly_mesh` bones, triangles and quads alike, with normalized uvs if you use them. The geometry's `texture_width` and `texture_height` override the numbers you gave to `Model::uv`, so the skin can be any size.
 
 Two things trip people up. A rotated box is drawn unrotated (the log warns about it), so put it in its own bone and rotate the bone. And list parent bones before their children, as Blockbench does. Molang expressions aren't evaluated, only plain numbers.
 
@@ -131,4 +131,4 @@ r.item(&RUBY_HELMET).wearable(&HEAD, 1.0, "armor/ruby_1")
 `worn_parts` are `HEAD`, `BODY`, `ARMS`, `LEGS`, combined with `|`. `wearable` takes how far the piece sticks out from the body in pixels (vanilla armor uses 1.0, and 0.5 for the leggings layer) and its texture.
 The slot then takes the item in the inventory, shift-clicks put it there, and a new slot of any mod shows up in the inventory screen by itself (`.equipment()` on the menu, `ui.equipment()` on its screen). That texture is drawn on the same boxes as the wearer's, so it follows the wearer's skin layout, and the 64x32 files in `mods/base/assets/textures/entity/armor/` show how (the name is under `entity/`). It works on any model with the right roles, mobs made with `biped` included.
 
-Items in the world and in the hand are flat sprites with some thickness, or the boxes of a block, so there are no custom item models. `F3+T` reloads models and animations along with textures while the game runs.
+Items in the world and in the hand are flat sprites with some thickness, the boxes of a block, or [a model of their own](#blocks-and-items). `F3+T` reloads models and animations along with textures while the game runs.

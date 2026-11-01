@@ -138,9 +138,8 @@ impl T {
         let s = self.state();
         let eye_y = self.c().entity(0).map_or(1.62, |e| e.size[2] as f64);
         let eye = [s.shown[0], s.shown[1] + eye_y, s.shown[2]];
+        let fwd = look_dir(s.yaw, s.pitch);
         let (sy, cy) = (s.yaw as f64).sin_cos();
-        let (sp, cp) = (s.pitch as f64).sin_cos();
-        let fwd = [-sy * cp, sp, -cy * cp];
         let right = [cy, 0.0, -sy];
         let up = [right[1] * fwd[2] - right[2] * fwd[1], right[2] * fwd[0] - right[0] * fwd[2], right[0] * fwd[1] - right[1] * fwd[0]];
         let d = [p[0] - eye[0], p[1] - eye[1], p[2] - eye[2]];
@@ -311,8 +310,7 @@ impl T {
 
     /// Player's block position as the client has it.
     pub fn feet(&self) -> [i32; 3] {
-        let p = self.state().pos;
-        [p[0].floor() as i32, p[1].floor() as i32, p[2].floor() as i32]
+        block_at(self.state().pos)
     }
 
     // ------------------------------------------------ input
