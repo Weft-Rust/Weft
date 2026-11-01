@@ -5,7 +5,7 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/Rust-1.90%2B-B7410E?logo=rust&logoColor=white" alt="Rust 1.90+">
+  <img src="https://img.shields.io/badge/Rust-1.95%2B-B7410E?logo=rust&logoColor=white" alt="Rust 1.95+">
   <img src="https://img.shields.io/badge/graphics-Vulkan-A41E22?logo=vulkan&logoColor=white" alt="Vulkan">
   <img src="https://img.shields.io/badge/platform-Windows%20%7C%20Linux%20%7C%20macOS-2A6CB0" alt="Windows, Linux and macOS">
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MPL--2.0-3B2F7E" alt="MPL-2.0"></a>
@@ -47,7 +47,7 @@ Weft ships with its own textures. If Minecraft is installed through the official
 
 ## Build from source
 
-Requires Rust 1.90 or newer.
+Requires Rust 1.95 or newer.
 
 ```sh
 git clone https://github.com/VortexSo4/Weft.git
