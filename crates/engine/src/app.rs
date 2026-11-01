@@ -674,7 +674,7 @@ impl Running {
                 }
                 Request::Quit => self.quit = true,
                 Request::Restart => {
-                    match std::env::current_exe().and_then(|exe| {
+                    match crate::paths::own_program().and_then(|exe| {
                         std::process::Command::new(exe)
                             .args(std::env::args().skip(1))
                             .spawn()
