@@ -17,6 +17,9 @@ pub use crate::gpu_layout::Globals;
 const FACE_WORDS: u32 = 4;
 const QUAD_WORDS: u32 = 8;
 const PAGE_BYTES: u64 = 64 << 20;
+/// How far from the camera, in blocks, translucent quads are kept sorted far to near. Past that
+/// overlaps are too small to tell.
+const SORT_REACH: f64 = 48.0;
 /// A cube holds at most 6 * 4096 faces; plants and boxes add a few quads per block.
 const MAX_QUADS_PER_DRAW: u32 = 6 * 4096 * 2;
 
@@ -214,6 +217,15 @@ fn mesh_draws(m: &GpuMesh, key: MeshKey, lo: Vec3, k: i32, cam_cube: IVec3, out:
 /// A mesh's place: the structure (entity) it belongs to, 0 for the world, and its cube.
 pub type MeshKey = (u64, IVec3);
 
+/// A cube's translucent quads and where they are on the GPU.
+struct SortedQuads {
+    page: u32,
+    offset: u32,
+    quads: Vec<[u32; 8]>,
+    /// The block the camera was in when they were put in order, in the cube's own coordinates.
+    seen_from: Option<IVec3>,
+}
+
 /// Which blocks around the camera cast shadows, kept on the GPU for shader packs (`solid_at`
 /// in the world shader's prelude); only while the chosen pack's world shader uses it. 16^3 cube
 /// slots addressed by cube position modulo 16: first a tag per slot (cube x y z, 1 when
@@ -282,6 +294,10 @@ pub struct WorldRenderer {
     /// translucent draws, sorted far to near.
     runs: Vec<(u8, u8, u32, u32, u32)>,
     trans: Vec<DrawRecord>,
+    /// Translucent quads by cube, to keep them in order.
+    sorted: FxHashMap<MeshKey, SortedQuads>,
+    /// The block the camera was in at the last sort, unless there is more to sort since.
+    sorted_from: Option<IVec3>,
     /// Draws of each region seen, kept between frames.
     parts: Vec<Vec<DrawRecord>>,
     /// Of the last `draw`: where its translucent draws start in `scratch.2`, and the buffers
@@ -394,6 +410,8 @@ impl WorldRenderer {
             indirect: Vec::new(),
             runs: Vec::new(),
             trans: Vec::new(),
+            sorted: FxHashMap::default(),
+            sorted_from: None,
             translucent: 0,
             buffers: None,
             biomes,
@@ -509,6 +527,7 @@ impl WorldRenderer {
 
     pub fn remove(&mut self, key: MeshKey) {
         let Some(i) = self.meshes.remove(&key) else { return };
+        self.sorted.remove(&key);
         let r = region_of(key);
         let list = self.regions.get_mut(&r).unwrap();
         let (_, m) = list.swap_remove(i);
@@ -642,6 +661,49 @@ impl WorldRenderer {
         }
     }
 
+    /// Translucent quads near the camera go far to near again when it has come into another block
+    /// of their cube, as vanilla does. `frames`: where the structures drawn are.
+    fn sort_translucent(&mut self, gpu: &mut dyn Backend, cam: DVec3, frames: &[(u64, DVec3)]) {
+        let at = cam.floor().as_ivec3();
+        if self.sorted_from == Some(at) && frames.is_empty() {
+            return;
+        }
+        self.sorted_from = Some(at);
+        let began = std::time::Instant::now();
+        let redone: Vec<MeshKey> = self
+            .sorted
+            .par_iter_mut()
+            .filter_map(|(key, s)| {
+                let origin = if key.0 == 0 { DVec3::ZERO } else { frames.iter().find(|f| f.0 == key.0)?.1 };
+                let here = cam - origin - (key.1 * 16).as_dvec3();
+                if (here - DVec3::splat(8.0)).length() > SORT_REACH + 14.0 {
+                    return None;
+                }
+                let block = here.floor().as_ivec3();
+                if s.seen_from == Some(block) {
+                    return None;
+                }
+                s.seen_from = Some(block);
+                let eye = (here * 32.0).as_ivec3();
+                s.quads.sort_unstable_by_key(|q| {
+                    let m = crate::gpu_layout::quad_middle(q);
+                    let d = [m[0] - eye.x, m[1] - eye.y, m[2] - eye.z].map(|v| v as i64);
+                    std::cmp::Reverse(d[0] * d[0] + d[1] * d[1] + d[2] * d[2])
+                });
+                Some(*key)
+            })
+            .collect();
+        let mut quads = 0;
+        for key in &redone {
+            let s = &self.sorted[key];
+            quads += s.quads.len();
+            gpu.write_buffer(self.quads.pages[s.page as usize].0, s.offset as u64 * 32, bytemuck::cast_slice(&s.quads));
+        }
+        if !redone.is_empty() {
+            log::debug!(target: "frame", "translucent: {} cubes, {quads} quads sorted in {:.2} ms", redone.len(), began.elapsed().as_secs_f64() * 1000.0);
+        }
+    }
+
     pub fn upload(&mut self, gpu: &mut dyn Backend, textures: &GameTextures, key: MeshKey, mesh: &Mesh) {
         self.remove(key);
         if mesh.is_empty() {
@@ -672,6 +734,10 @@ impl WorldRenderer {
             let a = self.quads.alloc(gpu, total_q);
             let data: Vec<[u32; 8]> = mesh.quads.concat();
             gpu.write_buffer(self.quads.pages[a.page as usize].0, a.offset as u64 * 32, bytemuck::cast_slice(&data));
+            if !mesh.quads[2].is_empty() {
+                self.sorted.insert(key, SortedQuads { page: a.page, offset: a.offset + quad_counts[0] + quad_counts[1], quads: mesh.quads[2].clone(), seen_from: None });
+                self.sorted_from = None;
+            }
             a
         });
         let list = self.regions.entry(region_of(key)).or_default();
@@ -681,6 +747,7 @@ impl WorldRenderer {
 
     /// `frames`: structures to draw and where their block (0, 0, 0) is in the world.
     pub fn draw(&mut self, gpu: &mut dyn Backend, list: &mut CommandList, frame: &FrameInfo, cam: &Camera, scene: BufferId, frames: &[(u64, DVec3)], lights: &FxHashMap<MeshKey, u32>) {
+        self.sort_translucent(gpu, cam.pos, frames);
         let aspect = frame.width as f32 / frame.height.max(1) as f32;
         let view_proj = cam.proj(aspect) * cam.view();
         let cam_block = cam.pos.floor();
@@ -791,10 +858,9 @@ impl WorldRenderer {
         for p in seen_parts {
             trans.extend(p.iter().filter(|d| d.1 == 2));
         }
-        // Far first; distances are positive, so their bits order like them. In one cube, seen
-        // from above, the quads (liquid surfaces) go first, from below the faces.
-        let rank = |d: &DrawRecord| if d.5.y < 0.0 { d.0 == 0 } else { d.0 == 1 };
-        trans.par_sort_unstable_by_key(|d| (std::cmp::Reverse(d.5.length_squared().to_bits()), rank(d)));
+        // Far first; distances are positive, so their bits order like them. Inside a cube
+        // `sort_translucent` has seen to it.
+        trans.par_sort_unstable_by_key(|d| std::cmp::Reverse(d.5.length_squared().to_bits()));
 
         // Distant terrain after the cubes (nearer, they hide most of it), a run per page.
         let mut lod: Vec<DrawRecord> = self

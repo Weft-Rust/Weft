@@ -456,7 +456,7 @@ pub mod signal_kind {
     pub const PISTON_HEAD: u32 = 10;
     /// With power it takes all it is stuck to and carries it along `front`, faster the more power;
     /// without, that lands. `mode` 1 breaks what is in the way, instead of stopping at it.
-    pub const MOTOR: u32 = 11;
+    pub const FLOATER: u32 = 11;
 }
 
 /// Per state. A property named `power` holds its level: two values are off and full.

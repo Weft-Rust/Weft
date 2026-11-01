@@ -10,7 +10,7 @@ use weft_abi as abi;
 
 use super::dim::Dim;
 use super::entity::Motion;
-use super::signal::Moved;
+use super::signal::{Moved, RiderMeets};
 use super::space::Space;
 use crate::content::{AIR, Content};
 use crate::physics::Transform;
@@ -24,9 +24,9 @@ const REST_TICKS: u8 = 2;
 /// nothing under them for a moment.
 const LINGER_TICKS: u8 = 2;
 
-/// A motor's speed: blocks a second per level of power.
+/// A floater's speed: blocks a second per level of power.
 const SPEED_PER_LEVEL: f64 = 0.5;
-/// However many motors, on each axis: it looks one block ahead for each it comes to, so less
+/// However many floaters, on each axis: it looks one block ahead for each it comes to, so less
 /// than one a tick.
 const MOST_SPEED: f64 = 15.0;
 
@@ -40,9 +40,9 @@ pub struct Carried {
     pub entity: Option<u64>,
 }
 
-/// Motors going together, and what that takes.
-pub struct MotorPlan {
-    pub motors: Vec<IVec3>,
+/// Floaters going together, and what that takes.
+pub struct FloaterPlan {
+    pub floaters: Vec<IVec3>,
     pub cells: FxHashSet<IVec3>,
     pub broken: Vec<IVec3>,
 }
@@ -186,21 +186,21 @@ impl Dim {
         self.lift(c, c.game.platform_kind, center.as_dvec3() + DVec3::new(0.5, 0.0, 0.5), lifted, &[], Liveness::Free).0
     }
 
-    /// Motors with power in the world, to go together: those stuck to each other are one body, and
+    /// Floaters with power in the world, to go together: those stuck to each other are one body, and
     /// can't go if their ways add up to nothing or something is in that way.
-    pub(super) fn motor_plans(&self, c: &Content, motors: Vec<IVec3>) -> (Vec<MotorPlan>, Vec<IVec3>) {
-        let mut plans: Vec<MotorPlan> = Vec::new();
+    pub(super) fn floater_plans(&self, c: &Content, floaters: Vec<IVec3>) -> (Vec<FloaterPlan>, Vec<IVec3>) {
+        let mut plans: Vec<FloaterPlan> = Vec::new();
         let mut held = Vec::new();
-        for p in motors {
-            let Some(cells) = self.stuck_to_motor(c, p) else {
+        for p in floaters {
+            let Some(cells) = self.stuck_to_floater(c, p) else {
                 held.push(p);
                 continue;
             };
-            let mut plan = MotorPlan { motors: vec![p], cells: cells.into_iter().collect(), broken: Vec::new() };
+            let mut plan = FloaterPlan { floaters: vec![p], cells: cells.into_iter().collect(), broken: Vec::new() };
             // It and those it shares a block with are one, whichever came first.
-            let (joined, others): (Vec<MotorPlan>, Vec<MotorPlan>) = plans.into_iter().partition(|o| !o.cells.is_disjoint(&plan.cells));
+            let (joined, others): (Vec<FloaterPlan>, Vec<FloaterPlan>) = plans.into_iter().partition(|o| !o.cells.is_disjoint(&plan.cells));
             for o in joined {
-                plan.motors.extend(o.motors);
+                plan.floaters.extend(o.floaters);
                 plan.cells.extend(o.cells);
             }
             plans = others;
@@ -208,27 +208,34 @@ impl Dim {
         }
         let mut going = Vec::new();
         for mut plan in plans {
-            let steps = self.motors_way(c, &plan.motors);
+            let steps = self.floaters_way(c, &plan.floaters);
             let ahead = (steps.0 != IVec3::ZERO).then(|| self.ahead_every_way(c, plan.cells.iter().copied(), &plan.cells, steps.0, steps.1)).flatten();
             match ahead {
-                Some(broken) => {
+                Some(mut broken) => {
+                    // What is fixed to them comes along, unless it can't.
+                    let list: Vec<IVec3> = plan.cells.iter().copied().collect();
+                    let riders: FxHashSet<IVec3> = self.who_rides(c, &list, None, IVec3::ZERO).0.into_iter().map(|r| r.0).collect();
+                    broken.retain(|b| !riders.contains(b));
+                    broken.extend(ways(steps.0).flat_map(|step| self.who_rides(c, &list, None, step).1));
+                    broken.sort_unstable_by_key(|b| b.to_array());
+                    broken.dedup();
                     plan.broken = broken;
                     going.push(plan);
                 }
                 None => {
-                    log::debug!("motors at {:?} can't go", plan.motors);
-                    held.extend(plan.motors);
+                    log::debug!("floaters at {:?} can't go", plan.floaters);
+                    held.extend(plan.floaters);
                 }
             }
         }
         (going, held)
     }
 
-    /// Which way these motors in the world add up to, by axis, and whether they break through.
-    fn motors_way(&self, c: &Content, motors: &[IVec3]) -> (IVec3, bool) {
+    /// Which way these floaters in the world add up to, by axis, and whether they break through.
+    fn floaters_way(&self, c: &Content, floaters: &[IVec3]) -> (IVec3, bool) {
         let mut sum = IVec3::ZERO;
         let mut breaks = false;
-        for p in motors {
+        for p in floaters {
             let Some(s) = self.get(*p).map(|s| c.states[s as usize].signal) else { continue };
             let Some(level) = self.space.signals.level_into(*p) else { continue };
             sum += crate::world::DIRS.get(s.front as usize).copied().unwrap_or(IVec3::ZERO) * level as i32;
@@ -238,10 +245,10 @@ impl Dim {
     }
 
     /// Off with them.
-    pub(super) fn run_motor_plan(&mut self, c: &'static Content, plan: MotorPlan) {
+    pub(super) fn run_floater_plan(&mut self, c: &'static Content, plan: FloaterPlan) {
         self.break_for_body(c, plan.broken);
-        let center = plan.motors.iter().copied().min_by_key(|p| p.to_array()).unwrap_or(IVec3::ZERO);
-        log::debug!("motors at {:?} set off with {} blocks", plan.motors, plan.cells.len());
+        let center = plan.floaters.iter().copied().min_by_key(|p| p.to_array()).unwrap_or(IVec3::ZERO);
+        log::debug!("floaters at {:?} set off with {} blocks", plan.floaters, plan.cells.len());
         let cells = self.with_riders(c, center, plan.cells.into_iter().collect());
         self.lift(c, c.game.platform_kind, center.as_dvec3() + DVec3::new(0.5, 0.0, 0.5), cells, &[], Liveness::Free);
     }
@@ -286,7 +293,7 @@ impl Dim {
         }
     }
 
-    /// Platforms: their motors say how they go. Coming to a stop, they go on to a whole block.
+    /// Platforms: their floaters say how they go. Coming to a stop, they go on to a whole block.
     pub(super) fn drive_bodies(&mut self, c: &'static Content) {
         let bodies = &self.bodies;
         let ids: Vec<u64> = self.entities.list.iter().filter(|e| (e.kind == c.game.platform_kind || bodies.get(&e.id).is_some_and(|b| b.stopping)) && !e.removed && e.motion != Motion::Parked).map(|e| e.id).collect();
@@ -305,18 +312,18 @@ impl Dim {
             return;
         }
         let Some(cell) = b.cell else { return };
-        let Some(motors) = b.signals.motors(c) else { return };
+        let Some(floaters) = b.signals.floaters(c) else { return };
         // Without any it is a mod's.
-        if motors.is_empty() {
+        if floaters.is_empty() {
             return;
         }
-        let v: DVec3 = motors.iter().filter_map(|&(f, level, _)| crate::world::DIRS.get(f as usize).map(|d| d.as_dvec3() * level as f64 * SPEED_PER_LEVEL)).sum();
+        let v: DVec3 = floaters.iter().filter_map(|&(f, level, _)| crate::world::DIRS.get(f as usize).map(|d| d.as_dvec3() * level as f64 * SPEED_PER_LEVEL)).sum();
         let v = v.clamp(DVec3::splat(-MOST_SPEED), DVec3::splat(MOST_SPEED));
-        let breaks = motors.iter().any(|m| m.2);
+        let breaks = floaters.iter().any(|m| m.2);
         let pos = e.pos;
         let vel = e.vel;
         if v == DVec3::ZERO {
-            log::debug!("a platform at {cell} has no power: {motors:?}");
+            log::debug!("a platform at {cell} has no power: {floaters:?}");
             self.bring_to_stop(id, pos, vel, None);
             return;
         }
@@ -331,13 +338,38 @@ impl Dim {
             return;
         }
         if b.looked_from != Some((cell, sign)) {
-            let at: Vec<IVec3> = b.all_blocks().iter().filter(|(_, s)| c.states[*s as usize].flags & abi::block_flags::SOLID != 0).map(|(p, _)| *p + cell).collect();
-            let own: FxHashSet<IVec3> = at.iter().copied().collect();
-            let Some(broken) = self.ahead_every_way(c, at.iter().copied(), &own, sign, breaks) else {
+            let all = b.all_blocks();
+            let own: FxHashSet<IVec3> = all.iter().map(|(p, _)| *p + cell).collect();
+            let solid = |s: u32| c.states[s as usize].flags & abi::block_flags::SOLID != 0;
+            let at: Vec<IVec3> = all.iter().filter(|(_, s)| solid(*s)).map(|(p, _)| *p + cell).collect();
+            let Some(mut broken) = self.ahead_every_way(c, at.iter().copied(), &own, sign, breaks) else {
                 log::debug!("a platform at {cell} going {sign} has something in its way");
                 self.bring_to_stop(id, pos, vel, Some(cell));
                 return;
             };
+            // What it carries that isn't solid doesn't hold it up.
+            let mut off = Vec::new();
+            for (p, _) in all.iter().filter(|(_, s)| !solid(*s)) {
+                for to in ways(sign).map(|step| *p + cell + step).filter(|to| !own.contains(to)) {
+                    match self.get(to).map(|there| super::signal::rider_meets(c, there)) {
+                        Some(RiderMeets::Wall) => off.push(*p),
+                        Some(RiderMeets::Breaks) => broken.push(to),
+                        _ => {}
+                    }
+                }
+            }
+            off.dedup();
+            if !off.is_empty() {
+                self.with_space(c, id, |d, _| {
+                    for p in off {
+                        if let Some(s) = d.get(p).filter(|s| *s != AIR) {
+                            log::debug!("{} riding on a platform at {p} came off", c.state_name(s));
+                            d.drop_block_loot(c, p, s, abi::ItemStack::EMPTY, false, None);
+                            d.set(c, p, AIR);
+                        }
+                    }
+                });
+            }
             self.break_for_body(c, broken);
             if let Some(b) = self.bodies.get_mut(&id) {
                 b.looked_from = Some((cell, sign));

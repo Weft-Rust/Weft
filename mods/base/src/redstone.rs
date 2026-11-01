@@ -21,7 +21,7 @@ pub static DISPENSER: Block = Block::named("dispenser");
 pub static DISPENSER_MENU: Menu = Menu::named("dispenser");
 pub static SLIME_BLOCK: Block = Block::named("slime_block");
 pub static ANCHOR: Block = Block::named("anchor");
-pub static MOTOR: Block = Block::named("motor");
+pub static FLOATER: Block = Block::named("floater");
 pub static COPPER_LAMP: Block = Block::named("copper_lamp");
 
 /// What a box shows when it says nothing: the same picture on every face, cut by its place.
@@ -250,23 +250,23 @@ pub fn register(r: &mut Registry) {
         .needs_tool(0)
         .tab(&crate::tabs::REDSTONE);
 
-    r.block(&MOTOR)
+    r.block(&FLOATER)
         .facing(Facings::ALL, Toward::Player)
         // It goes where the player looks, and what it was placed against is what it takes along.
         .placement(|_, props| {
             let looked_at = props.facing().opposite();
             props.set("facing", looked_at.name());
         })
-        .signal_motor(false)
+        .signal_floater(false)
         .states(|p, s| {
             // Arrows on the sides, toward the sticky front, in the color of how it is doing.
             let side = match p.int("power") {
-                1 => "motor_side_going",
-                2 => "motor_side_stuck",
-                _ => "motor_side",
+                1 => "floater_side_going",
+                2 => "floater_side_stuck",
+                _ => "floater_side",
             };
             let whole = [0.0, 0.0, 16.0, 16.0];
-            let faces = [(side, whole), (side, whole), (side, whole), (side, whole), ("motor_front", whole), ("motor_back", whole)];
+            let faces = [(side, whole), (side, whole), (side, whole), (side, whole), ("floater_front", whole), ("floater_back", whole)];
             s.framed_box_with(p.frame_front(), [0.0, 0.0, 0.0], [16.0, 16.0, 16.0], faces, [1, 3, 2, 0, 0, 0], None).opacity(15)
         })
         .signal_read(|w, p| match w.prop(p, "power") {
@@ -375,7 +375,7 @@ pub fn register(r: &mut Registry) {
     r.shaped(C, "piston", 1, &["ppp", "cic", "crc"], &[('p', "#planks"), ('c', "#cobblestone"), ('i', "iron_ingot"), ('r', "redstone")]);
     r.shaped(C, "slime_block", 1, &["ccc", "cwc", "ccc"], &[('c', "clay"), ('w', "#crops/wheat")]);
     r.shaped(C, "sticky_piston", 1, &["s", "p"], &[('s', "slime_block"), ('p', "piston")]);
-    r.shaped(C, "motor", 1, &["ipi", "iri", "ipi"], &[('i', "iron_ingot"), ('r', "redstone"), ('p', "piston")]);
+    r.shaped(C, "floater", 1, &["ipi", "iri", "ipi"], &[('i', "iron_ingot"), ('r', "redstone"), ('p', "piston")]);
     r.shaped(C, "copper_lamp", 1, &[" c ", "crc", " c "], &[('c', "gold_ingot"), ('r', "redstone")]);
     r.shaped(C, "anchor", 1, &["iii", "iri", "iii"], &[('i', "iron_ingot"), ('r', "redstone")]);
     r.shaped(C, "observer", 1, &["ccc", "rri", "ccc"], &[('c', "#cobblestone"), ('r', "redstone"), ('i', "iron_ingot")]);

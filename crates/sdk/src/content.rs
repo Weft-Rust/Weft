@@ -733,7 +733,7 @@ macro_rules! state_setters {
             self.each(|s, _| s.flags |= bf::SIGNAL_BLOCKER);
             self
         }
-        /// Pistons and motors can't move it. A state with this on a platform stops the platform, if
+        /// Pistons and floaters can't move it. A state with this on a platform stops the platform, if
         /// more of the platform is pushing it.
         pub fn immovable(mut self) -> Self {
             self.each(|s, _| s.flags |= bf::IMMOVABLE);
@@ -1217,9 +1217,9 @@ impl<'a> BlockBuilder<'a> {
     /// that the way slime does, half a block a second per level of power. Circuits on it go on.
     /// Without power, or against what it can't go through, it all lands on a whole block.
     /// `power`: 0 idle, 1 going, 2 stuck. `breaks`: it breaks what is in its way instead.
-    pub fn signal_motor(mut self, breaks: bool) -> Self {
+    pub fn signal_floater(mut self, breaks: bool) -> Self {
         self.signal = Some(SignalBuild { mode: breaks as u32, ..SignalBuild::default() });
-        self.signal_props(abi::signal_kind::MOTOR, 3, false, false)
+        self.signal_props(abi::signal_kind::FLOATER, 3, false, false)
     }
     /// Pushes blocks at its `facing` with power from any other side, the `power` property saying
     /// it is out (after `facing`). `head`: the block it pushes out, with a `facing` property.

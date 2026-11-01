@@ -573,7 +573,7 @@ pub async fn redstone_anchor(t: T) -> R {
     t.check(t.block(add(f, [5, 3, z])).await?.contains("slime"), "the slime moved");
     t.check(t.block(beside).await?.contains("anchor"), "the anchor touching it stayed behind");
 
-    // On a motor's way. Power for the anchors from the world, along the way from x = 6: what is
+    // On a floater's way. Power for the anchors from the world, along the way from x = 6: what is
     // pushed stops there, what isn't flies on to the wall.
     let (y, z) = (5, -14);
     let at = |x: i32, dy: i32, z: i32| add(f, [x, y + dy, z]);
@@ -590,7 +590,7 @@ pub async fn redstone_anchor(t: T) -> R {
     for z in [pushed, beside] {
         t.set(at(1, 0, z), "base:slime_block").await?;
         t.set(at(1, -1, z), "base:slime_block").await?;
-        t.set(at(0, 0, z), "base:motor[facing=east]").await?;
+        t.set(at(0, 0, z), "base:floater[facing=east]").await?;
     }
     settle(&t).await?;
     for z in [pushed, beside] {
@@ -600,7 +600,7 @@ pub async fn redstone_anchor(t: T) -> R {
     let stopped_at = { let mut v = Vec::new(); for x in 2..13 { if t.block(at(x, 0, pushed)).await?.contains("anchor") { v.push(x); } } v };
     t.check(stopped_at.len() == 1 && (6..=7).contains(&stopped_at[0]), format!("the one it pushes stops it where it got power: {stopped_at:?}"));
     let stopped = stopped_at.first().copied().unwrap_or(0);
-    t.check(t.block(at(stopped - 2, 0, pushed)).await?.contains("power=2"), format!("its motor is stuck: {}", t.block(at(stopped - 2, 0, pushed)).await?));
+    t.check(t.block(at(stopped - 2, 0, pushed)).await?.contains("power=2"), format!("its floater is stuck: {}", t.block(at(stopped - 2, 0, pushed)).await?));
     t.check(t.block(at(12, 0, beside + 1)).await?.contains("anchor"), format!("the one beside rides on: {}", t.block(at(12, 0, beside + 1)).await?));
     // And goes on without power.
     t.fill(at(6, 1, pushed), at(9, 1, pushed), "air").await?;
@@ -701,9 +701,9 @@ pub async fn redstone_body_light(t: T) -> R {
     Ok(())
 }
 
-/// A motor takes what it is stuck to along: at a wall it lands, with the circuit on it working all the
+/// A floater takes what it is stuck to along: at a wall it lands, with the circuit on it working all the
 /// way, what stands on it carried without slipping.
-pub async fn redstone_motor(t: T) -> R {
+pub async fn redstone_floater(t: T) -> R {
     t.flat().await?;
     t.cmd("/rule testkit:no_hurt 1").await?;
     let f = t.feet();
@@ -711,7 +711,7 @@ pub async fn redstone_motor(t: T) -> R {
     let at = |x: i32, dy: i32| add(f, [x, y + dy, z]);
     t.fill(at(10, -1), at(10, 1), "base:obsidian").await?;
     t.set(at(2, 0), "base:slime_block").await?;
-    t.set(at(1, 0), "base:motor[facing=east]").await?;
+    t.set(at(1, 0), "base:floater[facing=east]").await?;
     t.set(at(3, 0), "base:slime_block").await?;
     t.set(at(2, -1), "base:slime_block").await?;
     t.set(at(2, 1), "base:stone").await?;
@@ -724,8 +724,8 @@ pub async fn redstone_motor(t: T) -> R {
     t.cmd(&format!("/tp {} {} {}", f[0] as f64 + 2.5, f[1] + y + 2, f[2] as f64 + z as f64 + 0.5)).await?;
     t.secs(0.5).await?;
     let start = t.state().pos[0];
-    // Power to the motor from what comes along.
-    // Under the motor, stuck to the slime next to it: it goes along.
+    // Power to the floater from what comes along.
+    // Under the floater, stuck to the slime next to it: it goes along.
     t.set(at(1, -1), "base:redstone_block").await?;
     let lamp_local = [1, 1, 0];
     let (mut own, mut seen_lit) = (None, false);
@@ -742,9 +742,9 @@ pub async fn redstone_motor(t: T) -> R {
     t.check(seen_lit, "the lamp is on it");
     t.secs(4.0).await?;
     t.check(t.block(at(9, 0)).await?.contains("slime"), format!("at the wall it landed: {}", t.block(at(9, 0)).await?));
-    t.check(t.block(at(7, 0)).await?.contains("motor"), "the motor with it");
+    t.check(t.block(at(7, 0)).await?.contains("floater"), "the floater with it");
     t.check(t.block(at(8, 1)).await?.contains("stone"), "and the block on the slime");
-    t.check(!t.block(at(1, 0)).await?.contains("motor"), "nothing left behind");
+    t.check(!t.block(at(1, 0)).await?.contains("floater"), "nothing left behind");
     let now = t.state().pos[0];
     let slip = (now - start) - (now - start).round();
     t.probe("how far what stood on it slipped", slip.abs() as f32, slip.abs() < 0.02);
@@ -754,7 +754,7 @@ pub async fn redstone_motor(t: T) -> R {
 
     // Fed in full: 7.5 blocks a second.
     let z = 16;
-    t.set(add(f, [0, y + 12, z]), "base:motor[facing=east]").await?;
+    t.set(add(f, [0, y + 12, z]), "base:floater[facing=east]").await?;
     t.set(add(f, [1, y + 12, z]), "base:slime_block").await?;
     t.set(add(f, [1, y + 13, z]), "base:slime_block").await?;
     t.set(add(f, [0, y + 13, z]), "base:redstone_block").await?;
@@ -776,28 +776,28 @@ pub async fn redstone_motor(t: T) -> R {
     t.cmd(&format!("/tp {} {} {}", f[0], f[1] + 14, f[2])).await?;
     let z = 8;
     let at = |x: i32, dy: i32| add(f, [x, y + dy, z]);
-    t.set(at(0, 0), "base:motor[facing=east]").await?;
+    t.set(at(0, 0), "base:floater[facing=east]").await?;
     t.set(at(1, 0), "base:slime_block").await?;
     // The floor it touches isn't in front of it, so it doesn't come, nor does anything else.
     t.set(at(0, -1), "base:stone").await?;
-    // Dust beside its way, which a motor doesn't take along as it would a block touching it.
+    // Dust beside its way, which a floater doesn't take along as it would a block touching it.
     t.fill(add(f, [-2, y - 1, z + 1]), add(f, [2, y - 1, z + 1]), "base:stone").await?;
     t.fill(add(f, [-1, y, z + 1]), add(f, [2, y, z + 1]), &wire(&[DOWN])).await?;
     t.set(add(f, [-2, y, z + 1]), "base:redstone_block").await?;
     t.secs(3.0).await?;
     t.check(t.block(at(0, 0)).await?.contains("air"), "it left");
     t.check(t.block(at(0, -1)).await?.contains("stone"), "without the block under it");
-    let found: Vec<i32> = { let mut v = Vec::new(); for x in 2..9 { if t.block(at(x, 0)).await?.contains("motor") { v.push(x); } } v };
+    let found: Vec<i32> = { let mut v = Vec::new(); for x in 2..9 { if t.block(at(x, 0)).await?.contains("floater") { v.push(x); } } v };
     t.check(found.len() == 1 && found[0] >= 2 && found[0] <= 5, format!("it stopped just past what fed it: {found:?}"));
 
     // Something in the way from the first: it doesn't go, until that is gone.
     let z = 12;
     let at = |x: i32, dy: i32| add(f, [x, y + dy, z]);
-    t.set(at(0, 0), "base:motor[facing=east]").await?;
+    t.set(at(0, 0), "base:floater[facing=east]").await?;
     t.set(at(1, 0), "base:obsidian").await?;
     t.set(at(-1, 0), "base:redstone_block").await?;
     settle(&t).await?;
-    t.check(t.block(at(0, 0)).await?.contains("motor"), "it stays, with obsidian in front of it");
+    t.check(t.block(at(0, 0)).await?.contains("floater"), "it stays, with obsidian in front of it");
     t.check(t.block(at(0, 0)).await?.contains("power=2"), "and shows it is stuck");
     // Which a comparator behind it reads.
     let (gate, lamp) = (add(f, [0, y, z + 1]), add(f, [0, y, z + 2]));
@@ -807,17 +807,17 @@ pub async fn redstone_motor(t: T) -> R {
     settle(&t).await?;
     t.check(lit(&t, lamp).await?, "a comparator reads that it is stuck");
     // How it looks, stuck and not, on the floor and on a wall.
-    t.set(at(-1, 2), "base:motor[facing=up]").await?;
-    t.set(at(-3, 2), "base:motor[facing=south]").await?;
+    t.set(at(-1, 2), "base:floater[facing=up]").await?;
+    t.set(at(-3, 2), "base:floater[facing=south]").await?;
     t.cmd(&format!("/tp {} {} {}", f[0] as f64 - 0.5, f[1] + y + 4, f[2] as f64 + z as f64 + 4.5)).await?;
     t.c().fly(true);
-    t.op("put me 1 base:motor 1").await?;
+    t.op("put me 1 base:floater 1").await?;
     t.op("put me 2 base:lever 1").await?;
     t.op("put me 3 base:redstone_torch 1").await?;
     t.c().select(1);
     t.look_at(at(-1, 1));
     t.secs(0.5).await?;
-    t.shot("motors").await?;
+    t.shot("floaters").await?;
     t.set(at(1, 0), "air").await?;
     t.secs(0.8).await?;
     t.check(t.block(at(0, 0)).await?.contains("air"), "and goes when that has gone");
@@ -977,32 +977,124 @@ pub async fn redstone_body_edges(t: T) -> R {
     Ok(())
 }
 
+/// What is fixed to a body's leading face comes along, whichever way that is. What it runs into
+/// that is solid knocks it off, and the body goes on: a lever feeding the floater is a way to stop
+/// on arrival. What isn't solid it breaks, like the body would.
+pub async fn redstone_floater_riders(t: T) -> R {
+    t.flat().await?;
+    t.cmd("/rule testkit:no_hurt 1").await?;
+    let f = t.feet();
+    let y = 6;
+    let items = |t: T, p: [i32; 3], r: i32| async move {
+        let list = t.op(&format!("near {} {} {} {r}", p[0], p[1], p[2])).await?;
+        Ok::<usize, String>(list.split_whitespace().filter(|e| e.ends_with("core:item")).count())
+    };
+    let ways: [(&str, [i32; 3], [i32; 3], &str); 4] = [
+        ("up", [0, 1, 0], [0, 1, 0], "base:lever[attach=down,front=north,power=off]"),
+        ("down", [0, -1, 0], [0, -1, 0], "base:lever[attach=up,front=north,power=off]"),
+        ("east", [1, 0, 0], [1, 0, 0], "base:lever[attach=west,front=east,power=off]"),
+        ("east", [1, 0, 0], [0, 1, 0], "base:lever[attach=down,front=north,power=off]"),
+    ];
+    for (i, (facing, way, on, lever)) in ways.into_iter().enumerate() {
+        let m = add(f, [0, y, -6 - 5 * i as i32]);
+        let front = add(m, way);
+        let stone = add(front, if way[0] != 0 { [0, 0, 1] } else { [1, 0, 0] });
+        let at = add(stone, on);
+        t.set(m, &format!("base:floater[facing={facing}]")).await?;
+        t.set(front, "base:slime_block").await?;
+        t.set(stone, "base:stone").await?;
+        t.set(at, lever).await?;
+        t.frames(4).await?;
+        // Power from a block that stays behind: a block's way and it stops.
+        t.set(add(m, [-way[0], -way[1], -way[2]]), "base:redstone_block").await?;
+        t.secs(1.5).await?;
+        let mut seen = Vec::new();
+        for d in 0..4 {
+            if t.block(add(at, [way[0] * d, way[1] * d, way[2] * d])).await?.contains("lever") {
+                seen.push(d);
+            }
+        }
+        t.check(seen == [1], format!("{facing}, lever at {on:?}: it came along: {seen:?}"));
+        t.check_eq(items(t.clone(), at, 6).await?, 0, "nothing dropped");
+    }
+
+    // The lever on the leading face is what feeds the floater, through the stone it is on.
+    let z = -32;
+    let at = |x: i32, dy: i32, dz: i32| add(f, [x, y + dy, z + dz]);
+    t.set(at(0, 0, 0), "base:floater[facing=east]").await?;
+    t.set(at(1, 0, 0), "base:slime_block").await?;
+    t.set(at(1, 1, 0), "base:slime_block").await?;
+    t.set(at(0, 1, 0), "base:slime_block").await?;
+    t.set(at(0, 1, -1), "base:slime_block").await?;
+    t.set(at(0, 0, -1), "base:stone").await?;
+    // Something to break on the way, and what it stops at.
+    t.set(at(3, -1, -1), "base:stone").await?;
+    t.set(at(3, 0, -1), "base:dandelion").await?;
+    t.set(at(6, 0, -1), "base:obsidian").await?;
+    t.frames(4).await?;
+    t.set(at(1, 0, -1), "base:lever[attach=west,front=east,power=on]").await?;
+    t.secs(3.0).await?;
+    t.check(!t.block(at(3, 0, -1)).await?.contains("dandelion"), "the flower in its way broke");
+    t.check(t.block(at(6, 0, -1)).await?.contains("obsidian"), "what stops it stays");
+    let mut stone = Vec::new();
+    let mut levers = 0;
+    for x in 0..12 {
+        stone.extend(t.block(at(x, 0, -1)).await?.contains("base:stone").then_some(x));
+        levers += t.block(at(x, 0, -1)).await?.contains("lever") as i32;
+    }
+    t.check(stone.len() == 1 && (3..=5).contains(&stone[0]), format!("it stopped short of the wall: the stone at {stone:?}"));
+    t.check_eq(levers, 0, "the lever came off");
+    t.check(items(t.clone(), at(5, 0, -1), 12).await? >= 2, "the lever and the flower dropped");
+
+    // A wall only the lever meets, on a body with its own power: on it goes without the lever.
+    let z = -40;
+    let at = |dx: i32, dy: i32| add(f, [dx, y + dy, z]);
+    t.set(at(0, 0), "base:floater[facing=up]").await?;
+    t.set(at(0, 1), "base:slime_block").await?;
+    t.set(at(1, 1), "base:slime_block").await?;
+    t.set(at(2, 1), "base:lever[attach=west,front=east,power=off]").await?;
+    t.set(at(2, 4), "base:obsidian").await?;
+    t.set(at(0, 8), "base:obsidian").await?;
+    t.frames(4).await?;
+    t.set(at(1, 0), "base:redstone_block").await?;
+    t.secs(2.5).await?;
+    t.check(t.block(at(0, 7)).await?.contains("slime"), format!("the body went on to the top: {}", t.block(at(0, 7)).await?));
+    t.check(t.block(at(2, 4)).await?.contains("obsidian"), "the wall stays");
+    let mut levers = 0;
+    for dy in 0..10 {
+        levers += t.block(at(2, dy)).await?.contains("lever") as i32;
+    }
+    t.check_eq(levers, 0, "the lever didn't get through it");
+    t.check(items(t.clone(), at(2, 3), 14).await? >= 1, "it dropped");
+    Ok(())
+}
+
 /// Up it goes too, with what is on it.
-pub async fn redstone_motor_up(t: T) -> R {
+pub async fn redstone_floater_up(t: T) -> R {
     t.flat().await?;
     let f = t.feet();
     let z = -5;
     let at = |y: i32| add(f, [3, y, z]);
-    t.set(at(0), "base:motor[facing=up]").await?;
+    t.set(at(0), "base:floater[facing=up]").await?;
     t.set(at(1), "base:slime_block").await?;
     t.set(add(f, [4, 1, z]), "base:slime_block").await?;
     // What stops it.
     t.set(at(5), "base:obsidian").await?;
-    // What feeds it, stuck to the slime, next to the motor.
+    // What feeds it, stuck to the slime, next to the floater.
     t.set(add(f, [4, 0, z]), "base:redstone_block").await?;
     t.secs(2.0).await?;
-    t.check(t.block(at(3)).await?.contains("motor"), format!("the motor got up under what stops it: {}", t.block(at(3)).await?));
+    t.check(t.block(at(3)).await?.contains("floater"), format!("the floater got up under what stops it: {}", t.block(at(3)).await?));
     t.check(t.block(at(4)).await?.contains("slime"), "the block in front of it with it");
     Ok(())
 }
 
-/// Motors stuck to the same thing go as one, the same whichever way it is all turned; ones pulling
+/// Floaters stuck to the same thing go as one, the same whichever way it is all turned; ones pulling
 /// opposite ways stay where they are.
-pub async fn redstone_motors_together(t: T) -> R {
+pub async fn redstone_floaters_together(t: T) -> R {
     t.flat().await?;
     let f = t.feet();
     let y = 4;
-    // Two motors with one block of slime in front of both, going ways across each other, fed in
+    // Two floaters with one block of slime in front of both, going ways across each other, fed in
     // one tick by a piece of dust touching both. A quarter turn each time, around a spot of its own.
     let turn = |q: i32, p: [i32; 2]| match q {
         0 => [p[0], p[1]],
@@ -1025,8 +1117,8 @@ pub async fn redstone_motors_together(t: T) -> R {
         let o = [[-9, -9], [9, -9], [9, 9], [-9, 9]][q as usize];
         let at = |p: [i32; 2], dy: i32| { let v = turn(q, p); add(f, [o[0] + v[0], y + dy, o[1] + v[1]]) };
         t.set(at([1, 0], 0), "base:slime_block").await?;
-        t.set(at([0, 0], 0), &format!("base:motor[facing={}]", names(q, [1, 0]))).await?;
-        t.set(at([1, -1], 0), &format!("base:motor[facing={}]", names(q, [0, 1]))).await?;
+        t.set(at([0, 0], 0), &format!("base:floater[facing={}]", names(q, [1, 0]))).await?;
+        t.set(at([1, -1], 0), &format!("base:floater[facing={}]", names(q, [0, 1]))).await?;
         t.set(at([0, -1], -1), "base:stone").await?;
         t.set(at([-1, -1], -1), "base:stone").await?;
         t.set(at([0, -1], 0), &wire(&[DOWN])).await?;
@@ -1036,7 +1128,7 @@ pub async fn redstone_motors_together(t: T) -> R {
         let mut found = Vec::new();
         for dx in -2..7 {
             for dz in -2..7 {
-                if t.block(at([dx, dz], 0)).await?.contains("motor") {
+                if t.block(at([dx, dz], 0)).await?.contains("floater") {
                     found.push([dx, dz]);
                 }
             }
@@ -1053,8 +1145,8 @@ pub async fn redstone_motors_together(t: T) -> R {
     // Pulling opposite ways as hard, nothing goes: the dust feeding them runs out from the middle.
     let (y, z) = (y + 8, 0);
     t.set(add(f, [1, y, z]), "base:slime_block").await?;
-    t.set(add(f, [0, y, z]), "base:motor[facing=east]").await?;
-    t.set(add(f, [2, y, z]), "base:motor[facing=west]").await?;
+    t.set(add(f, [0, y, z]), "base:floater[facing=east]").await?;
+    t.set(add(f, [2, y, z]), "base:floater[facing=west]").await?;
     t.fill(add(f, [0, y - 1, z + 1]), add(f, [2, y - 1, z + 2]), "base:stone").await?;
     t.fill(add(f, [0, y, z + 1]), add(f, [2, y, z + 1]), &wire(&[DOWN])).await?;
     settle(&t).await?;
@@ -1064,8 +1156,8 @@ pub async fn redstone_motors_together(t: T) -> R {
         t.frames(3).await?;
         lifted |= t.op(&format!("near {} {} {} 6", f[0] + 1, f[1] + y, f[2] + z)).await?.contains("core:platform");
     }
-    t.check(!lifted, "opposite motors never set off");
-    t.check(t.block(add(f, [0, y, z])).await?.contains("motor") && t.block(add(f, [2, y, z])).await?.contains("motor"), "and stay");
+    t.check(!lifted, "opposite floaters never set off");
+    t.check(t.block(add(f, [0, y, z])).await?.contains("floater") && t.block(add(f, [2, y, z])).await?.contains("floater"), "and stay");
     Ok(())
 }
 

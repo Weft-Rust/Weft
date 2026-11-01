@@ -1,7 +1,8 @@
 //! Turns a cube plus a one-block border into GPU records.
 //!
 //! Full block faces: 4 words (pos/dir/ao, texture/biome/tint, light for 4 corners).
-//! Everything else (plants, boxes, liquids): 8-word quads with explicit corners.
+//! Everything else (plants, boxes, liquids, whatever is translucent): 8-word quads with explicit
+//! corners.
 
 use crate::gpu_layout::{face, quad};
 use weft_abi::{Layer, Model, block_flags as bf};
@@ -114,8 +115,15 @@ pub fn build(c: &Content, n: &Neighborhood, ctm: &super::ctm::Ctm) -> Mesh {
                             }
                             let (ao, light) = corner_data(n, ctm, &opaque, x, y, z, dir);
                             let tex = ctm.resolve(c, n, x, y, z, dir, textures[dir] & face::TEX_MASK);
-                            let tint = face_tint(info, ctm, dir, tex) as u32;
-                            mesh.faces[info.layer as usize].push(crate::gpu_layout::face_record([x, y, z], dir as u32, ao, tint, tex, biome, light));
+                            let tint = face_tint(info, ctm, dir, tex);
+                            // All that is translucent is kept far to near as one list of quads.
+                            if info.layer == Layer::Translucent {
+                                let corners = CORNERS[dir].map(|k| [(x + k[0]) as f32, (y + k[1]) as f32, (z + k[2]) as f32]);
+                                let light = std::array::from_fn(|k| darker_by_ao(light[k], (ao >> (k * 2)) & 3));
+                                mesh.quads[Layer::Translucent as usize].push(quad(corners, WHOLE, tex, biome, tint, light));
+                            } else {
+                                mesh.faces[info.layer as usize].push(crate::gpu_layout::face_record([x, y, z], dir as u32, ao, tint as u32, tex, biome, light));
+                            }
                         }
                     }
                     Model::Cross => {
@@ -286,6 +294,13 @@ fn brightest_around(n: &Neighborhood, x: i32, y: i32, z: i32) -> u32 {
         }
     }
     most[0] | most[1] << 8 | most[2] << 16 | most[3] << 24
+}
+
+/// A corner's light with its ambient occlusion in it, a quad having no place for it: about what
+/// the world shader's factors do to a bright corner, in light levels.
+fn darker_by_ao(light: u32, ao: u32) -> u32 {
+    let down = [4u32, 2, 1, 0][ao as usize];
+    (0..4).fold(0, |w, ch| w | ((light >> (ch * 4)) & face::LIGHT_MASK).saturating_sub(down) << (ch * 4))
 }
 
 /// A whole picture on a quad.

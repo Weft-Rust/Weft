@@ -268,6 +268,13 @@ pub fn quad_pos(p: [f32; 3]) -> u32 {
     e(p[0]) | e(p[1]) << quad::POS_BITS | e(p[2]) << (2 * quad::POS_BITS)
 }
 
+/// Where the middle of a quad is, in 1/32 block from the cube's corner, whatever else is on its
+/// corners' words.
+pub fn quad_middle(q: &[u32; 8]) -> [i32; 3] {
+    let at = |w: u32, axis: u32| ((w >> (axis * quad::POS_BITS)) & quad::POS_MASK) as i32 - quad::POS_OFFSET as i32;
+    std::array::from_fn(|a| at(q[0], a as u32) + at(q[2], a as u32))
+}
+
 /// A quad's uv word, and what goes on top of each of its corners' words: `uv` (u0, v0, u1, v1, 16
 /// across a texture), tint kind and flags.
 #[inline]
@@ -822,6 +829,13 @@ mod quad_uv_tests {
         assert_eq!((w >> quad::TINT_SHIFT) & 31, quad::FLAT);
         let fine = on[0] >> 30 | (on[1] >> 30) << 2 | (on[2] >> 30) << 4 | (on[3] >> 30) << 6 | ((w >> 20) & 15) << 8;
         assert_eq!([fine & 7, (fine >> 3) & 7, (fine >> 6) & 7, (fine >> 9) & 7], [2, 0, 2, 7]);
+    }
+
+    #[test]
+    fn quad_middle_ignores_the_uv_on_the_corners() {
+        let word = |p: [f32; 3]| quad_pos(p) | 3 << quad::UV_FINE_LOW_SHIFT;
+        let (a, c) = (word([1.0, 2.0, -1.0]), word([2.0, 2.0, 0.0]));
+        assert_eq!(quad_middle(&[a, 0, c, 0, 0, 0, 0, 0]), [48, 64, -16]);
     }
 }
 

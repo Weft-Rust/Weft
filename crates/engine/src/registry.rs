@@ -27,7 +27,7 @@ pub const VIRTUAL: &str = "core:virtual";
 /// A block falling as an entity (`Host::fall_block`), placed again where it lands.
 pub const FALLING: &str = "core:falling_block";
 pub const MOVING: &str = "core:moving_blocks";
-/// What a motor carries, and what `World::lift` makes.
+/// What a floater carries, and what `World::lift` makes.
 pub const PLATFORM: &str = "core:platform";
 
 #[derive(Clone, Debug)]

@@ -48,7 +48,7 @@ Solid blocks carry power by default. `.redstone_blocker()` turns that off, the w
 | `redstone_lamp` | Lit with any power around it |
 | `piston`, `sticky_piston` | Pushes up to 12 blocks, powered from any side but its front. Breaks what isn't solid, stops at block entities and `.immovable()` blocks. The blocks move as a body, so whoever stands on them rides along smoothly |
 | `slime_block` | What a piston moves takes what touches it along, for flying machines. `.sticky()` on any block does the same |
-| `motor` | Goes the way you look when placing it, any of the six, its green front first. With power from any other side it carries itself, the block in front of it and what is stuck to that through slime, half a block a second per level of power, circuits going on. Nothing else it touches goes along: the floor and what feeds it stay. Without power, or at something solid in the way, it all lands on a whole block. It shows red when it can't go; a comparator reads 1 going, 15 stuck |
+| `floater` | What is fixed to its blocks comes along; what runs into a solid block on the way comes off and drops while it all goes on, so a torch or lever feeding it from the leading face stops it on arrival. Goes the way you look when placing it, any of the six, its green front first. With power from any other side it carries itself, the block in front of it and what is stuck to that through slime, half a block a second per level of power, circuits going on. Nothing else it touches goes along: the floor and what feeds it stay. Without power, or at something solid in the way, it all lands on a whole block. It shows red when it can't go; a comparator reads 1 going, 15 stuck |
 | `copper_lamp` | Each new pulse flips it. A comparator reads 15 while it is lit |
 | `anchor` | With power it can't be moved: in a row being pushed it stops the push, touching slime it stays behind. On a platform on its way, getting power with more of the platform pushing it stops the platform at the next whole block; with nothing pushing it, it rides on. Without power it moves like any block |
 | `observer` | A pulse out of its back when the block it looks at changes, and when a piston moves it |
@@ -96,7 +96,7 @@ The rest of the set, each with the properties it needs added for you:
 - `.signal_switch()`: a lever or button. Goes on the clicked face; flip its `power` property from `on_use`.
 - `.signal_torch()`, `.signal_repeater()`, `.signal_comparator()`: as in the game.
 - `.signal_read(|w, p| level)`: what a comparator behind the block reads, instead of how full it is. It looks again when the block changes; `w.signal_read_changed(p)` for anything else it depends on.
-- `.signal_motor(breaks)` after `.facing(..)`: a motor; `breaks` makes it break what is in its way. `power` is 0 idle, 1 going, 2 stuck.
+- `.signal_floater(breaks)` after `.facing(..)`: a floater; `breaks` makes it break what is in its way. `power` is 0 idle, 1 going, 2 stuck.
 - `w.lift(center, &cells)` takes blocks out of the world into a moving structure, with chests and what is in them, circuits going on. Move it with `set_entity` (a speed) or `w.body_go(id, pos, ticks)`, and `w.put_down(id)` makes it blocks again, on the nearest whole block.
 - `.signal_observer()` and `.signal_piston(head, sticky)`, `.signal_piston_head()`: after `.facing(..)`.
 

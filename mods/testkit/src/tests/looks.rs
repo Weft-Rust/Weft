@@ -620,6 +620,41 @@ pub async fn block_dust_scatters(t: T) -> R {
     Ok(())
 }
 
+/// Translucent blocks show far to near inside a cube as well, from any side: the same two blocks
+/// look the same within one cube as with a cube's edge between them, where the cube order sees to it.
+pub async fn translucent_order(t: T) -> R {
+    t.flat().await?;
+    t.op("time 6000").await?;
+    t.op("mode spectator").await?;
+    let f = t.feet();
+    let (bx, y, bz) = (f[0].div_euclid(16) * 16, f[1] + 3, f[2].div_euclid(16) * 16);
+    for side in [1, -1] {
+        let mut seen = Vec::new();
+        for (name, low) in [("one_cube", 6), ("two_cubes", 15)] {
+            let (a, b) = ([bx + low, y, bz + low], [bx + low + 1, y, bz + low + 1]);
+            t.set(a, "base:slime_block").await?;
+            t.set(b, "base:slime_block").await?;
+            let near = if side > 0 { b } else { a };
+            let middle = [(bx + low) as f64 + 1.0, y as f64 + 0.5, (bz + low) as f64 + 1.0];
+            let s = side as f64;
+            t.c().teleport([middle[0] + s * 3.0, middle[1] + 0.5, middle[2] + s * 2.0]);
+            t.frames(10).await?;
+            t.look_at(near);
+            t.secs(0.4).await?;
+            let shot = t.shot(&format!("{name}_{}", if side > 0 { "east" } else { "west" })).await?;
+            // The near block's top, with the far one's side behind it.
+            let on = t.on_screen([near[0] as f64 + 0.5, y as f64 + 1.0, near[2] as f64 + 0.5]).unwrap_or((0.5, 0.5));
+            seen.push(shot.avg(on.0 - 0.01, on.1 - 0.01, on.0 + 0.01, on.1 + 0.01));
+            t.set(a, "air").await?;
+            t.set(b, "air").await?;
+            t.frames(3).await?;
+        }
+        let off = (0..3).map(|i| (seen[0][i] - seen[1][i]).abs()).fold(0.0, f32::max);
+        t.probe(&format!("how far apart the two are, side {side}"), off, off < 6.0);
+    }
+    Ok(())
+}
+
 /// A random `.ctm` varies plants and box models too: red and blue tiles of a green texture, each
 /// row in front of a white wall.
 pub async fn ctm_off_the_cube(t: T) -> R {

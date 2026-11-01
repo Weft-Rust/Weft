@@ -35,10 +35,10 @@ const BURN_FLIPS: usize = 8;
 const BURN_WINDOW: u64 = 60;
 const BURN_TIME: u64 = 160;
 const PUSH_LIMIT: usize = 12;
-const MOTOR_IDLE: u8 = 0;
-const MOTOR_GOING: u8 = 1;
-const MOTOR_STUCK: u8 = 2;
-/// More than that stuck to a motor and it doesn't go.
+const FLOATER_IDLE: u8 = 0;
+const FLOATER_GOING: u8 = 1;
+const FLOATER_STUCK: u8 = 2;
+/// More than that stuck to a floater and it doesn't go.
 const BODY_LIMIT: usize = 4096;
 /// Vanilla's: a piston's blocks take two ticks to get there.
 const MOVE_TICKS: u8 = 2;
@@ -120,8 +120,8 @@ enum Effect {
     Logic { p: IVec3, inputs: [u8; 3] },
     /// A comparator reading a block that has its own idea of it, and what is at its sides.
     Compare { p: IVec3, behind: IVec3, side: u8 },
-    /// What power a motor has.
-    Motor { p: IVec3, level: u8 },
+    /// What power a floater has.
+    Floater { p: IVec3, level: u8 },
 }
 
 #[derive(Default)]
@@ -249,6 +249,27 @@ fn compared(mode: u8, rear: u8, side: u8) -> u8 {
         rear
     } else {
         0
+    }
+}
+
+/// What a block riding on a moving one does on coming to a cell with `there` in it.
+#[derive(Clone, Copy, PartialEq)]
+pub(super) enum RiderMeets {
+    Nothing,
+    /// That breaks, as under the moving block itself.
+    Breaks,
+    /// It comes off, which is a way to stop what it was feeding.
+    Wall,
+}
+
+pub(super) fn rider_meets(c: &Content, there: u32) -> RiderMeets {
+    let s = &c.states[there as usize];
+    if there == AIR || s.liquid.is_some() || s.flags & bf::REPLACEABLE != 0 || s.signal.kind == sk::WIRE {
+        RiderMeets::Nothing
+    } else if s.flags & bf::SOLID != 0 {
+        RiderMeets::Wall
+    } else {
+        RiderMeets::Breaks
     }
 }
 
@@ -479,13 +500,13 @@ impl Signals {
         self.dirty_devices.extend(those);
     }
 
-    /// The motors here, by the way each goes and how fast, and whether it breaks through. `None`
+    /// The floaters here, by the way each goes and how fast, and whether it breaks through. `None`
     /// until they have all been told what power they have.
-    pub(super) fn motors(&self, c: &Content) -> Option<Vec<(u8, u8, bool)>> {
+    pub(super) fn floaters(&self, c: &Content) -> Option<Vec<(u8, u8, bool)>> {
         let mut out = Vec::new();
         for d in self.devices.values() {
             let s = &c.states[d.state as usize].signal;
-            if s.kind == sk::MOTOR {
+            if s.kind == sk::FLOATER {
                 if d.input == u8::MAX {
                     return None;
                 }
@@ -1089,14 +1110,14 @@ impl Signals {
                     effects.push(Effect::Sink { p, level: most });
                 }
             }
-            sk::MOTOR => {
+            sk::FLOATER => {
                 self.polled.remove(&p);
                 // From any side but its front, which is stuck to what it takes along.
                 let mut most = 0;
                 for dir in (0..6u8).filter(|dir| *dir != s.front) {
                     most = most.max(read!(dir));
                 }
-                effects.push(Effect::Motor { p, level: most });
+                effects.push(Effect::Floater { p, level: most });
             }
             sk::PISTON => {
                 self.polled.remove(&p);
@@ -1256,7 +1277,7 @@ impl Dim {
 
     fn signal_effects(&mut self, c: &'static Content, effects: Vec<Effect>) {
         let mut plans = Vec::new();
-        let mut motors = Vec::new();
+        let mut floaters = Vec::new();
         for e in effects {
             match e {
                 Effect::Sink { p, level } => {
@@ -1298,16 +1319,16 @@ impl Dim {
                         self.space.signals.schedule(p, want, info.delay, self.time);
                     }
                 }
-                Effect::Motor { p, level } => {
+                Effect::Floater { p, level } => {
                     if let Some(dev) = self.space.signals.devices.get_mut(&p) {
                         dev.input = level;
                     }
                     if self.frame != 0 {
-                        self.motor_shows(c, p, MOTOR_GOING * (level > 0) as u8);
+                        self.floater_shows(c, p, FLOATER_GOING * (level > 0) as u8);
                     } else if level > 0 {
-                        motors.push(p);
+                        floaters.push(p);
                     } else {
-                        self.motor_shows(c, p, MOTOR_IDLE);
+                        self.floater_shows(c, p, FLOATER_IDLE);
                     }
                 }
                 Effect::Logic { p, inputs } => {
@@ -1325,23 +1346,23 @@ impl Dim {
             }
         }
         // Worked out from who moves whom and who wants what, never from where they are, for
-        // a build to behave the same whichever way it is turned. A motor moving a piston is
-        // like a piston moving one; what motors and pistons both want, neither gets.
-        motors.sort_unstable_by_key(|p| p.to_array());
-        let (mut motor_plans, held) = self.motor_plans(c, motors);
+        // a build to behave the same whichever way it is turned. A floater moving a piston is
+        // like a piston moving one; what floaters and pistons both want, neither gets.
+        floaters.sort_unstable_by_key(|p| p.to_array());
+        let (mut floater_plans, held) = self.floater_plans(c, floaters);
         for p in held {
             self.space.signals.held.insert(p);
-            self.motor_shows(c, p, MOTOR_STUCK);
+            self.floater_shows(c, p, FLOATER_STUCK);
         }
         plans.retain(|plan: &PushPlan| {
-            let moved = motor_plans.iter().any(|m| m.cells.contains(&plan.p));
+            let moved = floater_plans.iter().any(|m| m.cells.contains(&plan.p));
             if moved {
                 self.space.signals.held.insert(plan.p);
             }
             !moved
         });
         let mut lost = vec![false; plans.len()];
-        let mut lost_motors = vec![false; motor_plans.len()];
+        let mut lost_floaters = vec![false; floater_plans.len()];
         let waiting = loop {
             let waiting = being_moved(&plans, &lost);
             let mut claims: FxHashMap<IVec3, u32> = FxHashMap::default();
@@ -1352,14 +1373,14 @@ impl Dim {
                     *claims.entry(cell).or_default() += 1;
                 }
             }
-            for (m, _) in motor_plans.iter().enumerate().filter(|(m, _)| !lost_motors[*m]) {
-                for cell in motor_plans[m].cells.iter().chain(motor_plans[m].broken.iter()) {
+            for (m, _) in floater_plans.iter().enumerate().filter(|(m, _)| !lost_floaters[*m]) {
+                for cell in floater_plans[m].cells.iter().chain(floater_plans[m].broken.iter()) {
                     *claims.entry(*cell).or_default() += 1;
                 }
             }
             let losers: Vec<usize> = (0..plans.len()).filter(going).filter(|i| plan_cells(&plans[*i]).any(|cell| claims[&cell] > 1)).collect();
-            let motor_losers: Vec<usize> = (0..motor_plans.len()).filter(|m| !lost_motors[*m]).filter(|m| motor_plans[*m].cells.iter().chain(motor_plans[*m].broken.iter()).any(|cell| claims[cell] > 1)).collect();
-            if losers.is_empty() && motor_losers.is_empty() {
+            let floater_losers: Vec<usize> = (0..floater_plans.len()).filter(|m| !lost_floaters[*m]).filter(|m| floater_plans[*m].cells.iter().chain(floater_plans[*m].broken.iter()).any(|cell| claims[cell] > 1)).collect();
+            if losers.is_empty() && floater_losers.is_empty() {
                 break waiting;
             }
             for i in losers {
@@ -1367,11 +1388,11 @@ impl Dim {
                 lost[i] = true;
                 self.space.signals.polled.insert(plans[i].p);
             }
-            for m in motor_losers {
-                lost_motors[m] = true;
-                self.space.signals.polled.extend(motor_plans[m].motors.iter().copied());
-                for &p in &motor_plans[m].motors {
-                    self.motor_shows(c, p, MOTOR_STUCK);
+            for m in floater_losers {
+                lost_floaters[m] = true;
+                self.space.signals.polled.extend(floater_plans[m].floaters.iter().copied());
+                for &p in &floater_plans[m].floaters {
+                    self.floater_shows(c, p, FLOATER_STUCK);
                 }
             }
         };
@@ -1382,18 +1403,18 @@ impl Dim {
                 self.run_plan(c, plan);
             }
         }
-        for (m, plan) in std::mem::take(&mut motor_plans).into_iter().enumerate() {
-            if !lost_motors[m] {
-                self.run_motor_plan(c, plan);
+        for (m, plan) in std::mem::take(&mut floater_plans).into_iter().enumerate() {
+            if !lost_floaters[m] {
+                self.run_floater_plan(c, plan);
             }
         }
     }
 
-    /// What a motor shows and a comparator reads of it (`power`: 0 idle, 1 going, 2 stuck).
-    fn motor_shows(&mut self, c: &'static Content, p: IVec3, level: u8) {
+    /// What a floater shows and a comparator reads of it (`power`: 0 idle, 1 going, 2 stuck).
+    fn floater_shows(&mut self, c: &'static Content, p: IVec3, level: u8) {
         let Some(state) = self.get(p) else { return };
         let info = c.states[state as usize].signal;
-        if info.kind == sk::MOTOR && info.level != level {
+        if info.kind == sk::FLOATER && info.level != level {
             self.set(c, p, with_level(&info, state, level));
         }
     }
@@ -1490,9 +1511,9 @@ impl Dim {
         Some(plan)
     }
 
-    /// What a motor takes along: what is in front of it, and on from that what touches anything
+    /// What a floater takes along: what is in front of it, and on from that what touches anything
     /// sticky. Nothing else it touches comes into it. `None`: it can't.
-    pub(super) fn stuck_to_motor(&self, c: &Content, p: IVec3) -> Option<Vec<IVec3>> {
+    pub(super) fn stuck_to_floater(&self, c: &Content, p: IVec3) -> Option<Vec<IVec3>> {
         let info = c.states[self.get(p)? as usize].signal;
         let grip = p + *DIRS.get(info.front as usize)?;
         let mut moved = vec![p];
@@ -1501,7 +1522,7 @@ impl Dim {
         let held = self.get(grip)?;
         if held != AIR && c.states[held as usize].flags & bf::SOLID != 0 {
             if !self.movable(c, held) {
-                log::debug!("a motor at {p} has in front of it what can't be moved");
+                log::debug!("a floater at {p} has in front of it what can't be moved");
                 return None;
             }
             moved.push(grip);
@@ -1520,7 +1541,7 @@ impl Dim {
                 let s = self.get(n)?;
                 if s != AIR && c.states[s as usize].flags & bf::SOLID != 0 && self.movable(c, s) {
                     if moved.len() == BODY_LIMIT {
-                        log::debug!("too much for a motor at {p}");
+                        log::debug!("too much for a floater at {p}");
                         return None;
                     }
                     moved.push(n);
@@ -1538,9 +1559,9 @@ impl Dim {
     }
 
     /// What stands on `moved` goes with them along `step`, unless it would run into something:
-    /// what rides, and what breaks instead. Not what merely lies in the way, which
-    /// `gather_move` has broken. `not`: a cell that doesn't come into it.
-    fn who_rides(&self, c: &Content, list: &[IVec3], not: Option<IVec3>, step: IVec3) -> (Vec<(IVec3, u32)>, Vec<IVec3>) {
+    /// what rides, and what breaks instead, in its way or knocked off. Not what merely lies in the
+    /// way of `moved`, which `gather_move` has broken. `not`: a cell that doesn't come into it.
+    pub(super) fn who_rides(&self, c: &Content, list: &[IVec3], not: Option<IVec3>, step: IVec3) -> (Vec<(IVec3, u32)>, Vec<IVec3>) {
         let moved: FxHashSet<IVec3> = list.iter().copied().collect();
         let mut riding: FxHashMap<IVec3, u32> = FxHashMap::default();
         let mut broken = Vec::new();
@@ -1572,7 +1593,7 @@ impl Dim {
         // Those running into what doesn't move or come along don't ride: they break, and then
         // what would have followed them may find it free, or run into something too. As many
         // rounds as that takes, none of it in any order.
-        let free = |s: &Dim, to: IVec3| s.get(to).is_some_and(|there| there == AIR || c.states[there as usize].flags & bf::REPLACEABLE != 0 || c.states[there as usize].signal.kind == sk::WIRE);
+        let free = |s: &Dim, to: IVec3| s.get(to).is_some_and(|there| rider_meets(c, there) != RiderMeets::Wall);
         loop {
             let stuck: Vec<IVec3> = riding.keys().copied().filter(|n| {
                 let to = *n + step;
@@ -1588,6 +1609,9 @@ impl Dim {
         }
         let mut riding: Vec<(IVec3, u32)> = riding.into_iter().collect();
         riding.sort_unstable_by_key(|r| r.0.to_array());
+        let in_their_way = riding.iter().map(|r| r.0 + step).filter(|to| !moved.contains(to) && !riding.iter().any(|r| r.0 == *to));
+        let in_their_way: Vec<IVec3> = in_their_way.filter(|to| self.get(*to).is_some_and(|there| rider_meets(c, there) == RiderMeets::Breaks)).collect();
+        broken.extend(in_their_way);
         (riding, broken)
     }
 
