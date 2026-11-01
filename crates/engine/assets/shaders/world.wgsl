@@ -79,9 +79,10 @@ struct Frame {
 }
 
 fn texture_frame(name: u32) -> Frame {
-    let base = tex_info[name * 2u];
-    let info = tex_info[name * 2u + 1u];
-    let size = f32(tex_info[arrayLength(&tex_info) / 3u * 2u + name]);
+    let base = tex_info[name * 4u];
+    let info = tex_info[name * 4u + 1u];
+    let raw_size = tex_info[name * 4u + 2u];
+    let size = select(16.0, f32(raw_size), raw_size > 0u);
     if info == 0u {
         return Frame(base, base, 0.0, size);
     }
@@ -249,8 +250,9 @@ fn shade(in: VOut, albedo: vec4<f32>) -> vec4<f32> {
 // Nearest texels with antialiased borders (vanilla 26.1's sampleNearest): up close each texel
 // keeps its color but its edge blends over one screen pixel, so blocks look clean, not jagged.
 fn nearest_uv(size: f32, uv: vec2<f32>, du: vec2<f32>, dv: vec2<f32>) -> vec2<f32> {
-    let inv_s = 1.0 / size;
-    let t = uv * size;
+    let s = select(16.0, size, size > 0.0);
+    let inv_s = 1.0 / s;
+    let t = uv * s;
     let r = round(t);
     let inv_pp = inverseSqrt(max(du * du + dv * dv, vec2(1e-10))) * inv_s;
     let off = clamp((t - r) * inv_pp + 0.5, vec2(0.0), vec2(1.0));
@@ -287,7 +289,7 @@ fn fs_opaque(in: VOut) -> @location(0) vec4<f32> {
 // Mip level from the smaller screen derivative: a plant quad seen almost edge-on would otherwise
 // pick a tiny mip whose averaged texels cover the whole quad and draw it as a solid strip.
 fn sample_cutout(in: VOut, nuv: vec2<f32>, du: vec2<f32>, dv: vec2<f32>) -> vec4<f32> {
-    let size = in.size;
+    let size = select(16.0, in.size, in.size > 0.0);
     let t = in.uv * size;
     let lod = max(log2(max(min(length(du * size), length(dv * size)), 1e-6)), 0.0);
     let a = textureSampleLevel(textures[in.layer], linear_mipped, nuv, lod);
