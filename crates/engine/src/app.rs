@@ -1616,6 +1616,7 @@ fn reload_assets(r: &mut Running, opts: &Options) {
         g.client.render.set_textures(&mut *r.gpu, &r.textures);
         g.client.entity_render.reload(&mut *r.gpu, &r.assets);
         g.client.particles.reload(&mut *r.gpu, &r.assets);
+        g.client.wires.reload(&mut *r.gpu, &r.assets);
         g.client.weather_render.reload(&mut *r.gpu, &r.assets);
         g.client.sky.reload(&mut *r.gpu, &r.assets);
         g.client.world.remesh_all();
@@ -1932,6 +1933,7 @@ fn record_passes(r: &mut Running, info: &weft_render::FrameInfo, scale: f32) {
         g.client.gpu_terrain.frame(&mut *r.gpu, &mut r.list, info.slot);
         let cam = g.client.render_camera();
         g.client.particles.simulate(&mut *r.gpu, &mut r.list, info.slot, &r.textures, &g.client.world, &cam);
+        g.client.update_wires(&mut *r.gpu, &r.textures);
     }
     r.list.push(Cmd::BeginPass { color: Some((world_target, Some(clear))), depth: Some((r.depth.0, Some(0.0))) });
     if let Some(g) = &mut r.game {

@@ -106,6 +106,8 @@ pub struct Lighter<'a, M: CubeMap> {
     cache: Cell<(IVec3, *const Cube)>,
     /// Last cube added to `changed`, to skip the hash insert on every write.
     last_changed: IVec3,
+    /// Light from what isn't a block of these cubes: moving bodies going through them.
+    extra: Option<&'a rustc_hash::FxHashMap<IVec3, [u8; 3]>>,
 }
 
 #[inline]
@@ -124,7 +126,13 @@ impl<'a, M: CubeMap> Lighter<'a, M> {
             remove: VecDeque::new(),
             cache: Cell::new((IVec3::MAX, std::ptr::null())),
             last_changed: IVec3::MAX,
+            extra: None,
         }
+    }
+
+    pub fn with_extra(mut self, extra: &'a rustc_hash::FxHashMap<IVec3, [u8; 3]>) -> Self {
+        self.extra = Some(extra);
+        self
     }
 
     #[inline]
@@ -177,8 +185,15 @@ impl<'a, M: CubeMap> Lighter<'a, M> {
     }
 
     #[inline]
-    fn emit(&self, state: u32, c: usize) -> u8 {
-        if c == SKY { 0 } else { self.c.tight[state as usize].light[c - 1] }
+    fn emit(&self, p: IVec3, state: u32, c: usize) -> u8 {
+        if c == SKY {
+            return 0;
+        }
+        let own = self.c.tight[state as usize].light[c - 1];
+        match self.extra {
+            Some(extra) if !extra.is_empty() => extra.get(&p).map_or(own, |e| own.max(e[c - 1])),
+            _ => own,
+        }
     }
 
     fn propagate(&mut self, c: usize) {
@@ -216,7 +231,7 @@ impl<'a, M: CubeMap> Lighter<'a, M> {
                 let derived = nl <= reach(v, c == SKY && d == 2);
                 if derived {
                     let (state, _) = self.read(n).unwrap();
-                    let e = self.emit(state, c);
+                    let e = self.emit(n, state, c);
                     self.put(n, c, e);
                     self.remove.push_back((n, nl));
                     if e > 0 {
@@ -320,9 +335,9 @@ impl<'a, M: CubeMap> Lighter<'a, M> {
             if emits {
                 for i in 0..4096usize {
                     let state = self.map.cube(cp).unwrap().get(i);
-                    let e = self.emit(state, c);
+                    let p = base + crate::world::cube::offset(i);
+                    let e = self.emit(p, state, c);
                     if e > 0 {
-                        let p = base + crate::world::cube::offset(i);
                         self.put(p, c, e);
                         self.add.push_back((p, e));
                     }
@@ -448,11 +463,25 @@ impl<'a, M: CubeMap> Lighter<'a, M> {
             return;
         }
         for &c in self.channels() {
+            self.relight_at(p, new, c);
+        }
+    }
+
+    /// `extra` changed at `p`.
+    pub fn source_changed(&mut self, p: IVec3) {
+        let Some((state, _)) = self.read(p) else { return };
+        for c in 1..=3 {
+            self.relight_at(p, state, c);
+        }
+    }
+
+    fn relight_at(&mut self, p: IVec3, new: u32, c: usize) {
+        {
             let cur = self.get(p, c).unwrap_or(0);
             self.put(p, c, 0);
             self.remove.push_back((p, cur));
             self.unpropagate(c);
-            let e = self.emit(new, c);
+            let e = self.emit(p, new, c);
             if e > 0 {
                 self.put(p, c, e);
                 self.add.push_back((p, e));

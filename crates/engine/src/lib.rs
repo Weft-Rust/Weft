@@ -38,6 +38,7 @@ pub mod settings;
 pub mod shaders;
 pub mod stack;
 pub mod ui;
+pub mod wire;
 pub mod world;
 
 pub use app::api::{exit_code, set_launch_options};

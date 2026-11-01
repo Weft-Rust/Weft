@@ -977,56 +977,37 @@ fn block_shape(out: &mut Vec<GpuBox>, textures: &GameTextures, m: Mat4, s: &crat
 /// Model boxes (a block's, or an item's from its file) in the unit cube `m` maps, tinted like
 /// `s` (an item's own boxes pass air: no tint).
 fn boxes_shape(out: &mut Vec<GpuBox>, textures: &GameTextures, m: Mat4, boxes: &[crate::content::ModelBox], s: &crate::content::StateInfo, color: Vec4) {
+    let tint = crate::content::item_tint(s.tint) & 0xff_ffff;
     for b in boxes {
-        let (mn, mx) = (Vec3::from_array(b.min), Vec3::from_array(b.max));
-        let mb = m * Mat4::from_translation(mn) * Mat4::from_scale(mx - mn);
-        let l = b.textures.map(|t| textures.texture(t));
-        // Faces the block tints take the tint here, not from a tinted copy drawn on top (the
-        // untinted faces would show through cutout holes and at the edges).
-        let overlaid = |d: usize| textures.overlays.get(b.textures[d] as usize).is_some_and(|&o| o != 0);
-        let tinted = if s.tint == 0 { 0 } else { (0..6).filter(|&d| s.tint_faces & (1 << d) != 0 && !overlaid(d)).fold(0, |m, d| m | 1 << d) };
-        out.push(GpuBox {
-            rows: rows(mb),
-            dims: mn.extend(1.0).to_array(),
-            uvo: mx.extend(0.0).to_array(),
-            color: color.to_array(),
-            ids: [0, box_mode::FACES, l[0] | l[1] << 16, l[2] | l[3] << 16],
-            ids2: [l[4] | l[5] << 16, 0, tinted, crate::content::item_tint(s.tint) & 0xff_ffff],
-        });
-        tinted_faces(out, textures, mb, s, &b.textures, color);
+        for d in 0..6 {
+            let Some((corners, uv)) = super::mesher::box_face(b, d) else { continue };
+            let (n, shade) = super::mesher::face_look(&corners);
+            let [p0, p1, _, p3] = corners.map(Vec3::from_array);
+            let overlay = textures.overlays.get(b.textures[d] as usize).filter(|&&o| o != 0).map(|o| o - 1);
+            let mut face = |texture: u32, tinted: bool, lift: f32| {
+                let place = Mat4::from_cols((p1 - p0).extend(0.0), (p3 - p0).extend(0.0), Vec4::ZERO, (p0 + n * lift).extend(1.0));
+                out.push(GpuBox {
+                    rows: rows(m * place),
+                    dims: [shade, 0.0, 0.0, 0.0],
+                    uvo: uv.map(|v| v as f32 / 16.0),
+                    color: color.to_array(),
+                    ids: [0, box_mode::QUAD, textures.texture(texture), 0],
+                    ids2: [0, 0, tinted as u32, tint],
+                });
+            };
+            // Faces the block tints take the tint here, not from a tinted copy drawn on top (the
+            // untinted faces would show through cutout holes and at the edges).
+            face(b.textures[d], s.tint != 0 && s.tint_faces & (1 << d) != 0 && overlay.is_none(), 0.0);
+            // The tinted part of a face (a grass side), just outside it.
+            if let Some(o) = overlay.filter(|_| s.tint != 0) {
+                face(o, true, 0.002);
+            }
+        }
     }
 }
 
 fn rows(m: Mat4) -> [[f32; 4]; 3] {
     [m.row(0).to_array(), m.row(1).to_array(), m.row(2).to_array()]
-}
-
-/// The tinted overlays of a block item's textures (grass sides) drawn on top. `m` maps the unit
-/// cube.
-fn tinted_faces(out: &mut Vec<GpuBox>, textures: &GameTextures, m: Mat4, s: &crate::content::StateInfo, faces: &[u32; 6], color: Vec4) {
-    if s.tint == 0 {
-        return;
-    }
-    let tint = crate::content::item_tint(s.tint);
-    let rgb = Vec3::new(((tint >> 16) & 255) as f32, ((tint >> 8) & 255) as f32, (tint & 255) as f32) / 255.0;
-    for d in 0..6 {
-        let Some(tex) = textures.overlays.get(faces[d] as usize).filter(|&&o| o != 0).map(|o| o - 1) else { continue };
-        let l = textures.texture(tex);
-        // A zero-thick box just outside that face.
-        let axis = d / 2;
-        let mut offset = Vec3::ZERO;
-        let mut scale = Vec3::ONE;
-        offset[axis] = if d % 2 == 1 { 1.002 } else { -0.002 };
-        scale[axis] = 0.0;
-        let f = m * Mat4::from_translation(offset) * Mat4::from_scale(scale);
-        out.push(GpuBox {
-            rows: rows(f),
-            color: (color.truncate() * rgb).extend(color.w).to_array(),
-            ids: [0, box_mode::FACES, l | l << 16, l | l << 16],
-            ids2: [l | l << 16, 0, 0, 0],
-            ..Default::default()
-        });
-    }
 }
 
 /// An item model instance: `m` places the model's unit cube.

@@ -77,6 +77,8 @@ pub fn load(assets: &Assets, c: &Content, next: u32) -> (Looks, Vec<String>) {
         m.boxes
             .iter()
             .map(|b| ModelBox {
+                turn: [0; 6],
+                tilt: weft_abi::BoxTilt::NONE,
                 min: b.min.map(|v| v / 16.0),
                 max: b.max.map(|v| v / 16.0),
                 textures: std::array::from_fn(|i| if b.textures[i].is_empty() { own(i) } else { id(&b.textures[i]) }),

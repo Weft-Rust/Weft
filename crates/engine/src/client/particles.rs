@@ -257,17 +257,19 @@ impl Particles {
         // Block dust shows the block's side texture (a box model's first box's).
         let side = |s: &crate::content::StateInfo| match s.boxes.first() {
             Some(b) if s.model == weft_abi::Model::Boxes => b.textures[1],
+            // A piece of wire shows its dot, red: the picture has no color of its own.
+            _ if s.model == weft_abi::Model::Wire => s.textures[3],
             _ => s.textures[1],
         };
         let dust = c.states.get(b.block as usize).filter(|_| k.frames.is_empty());
         let layer = dust.map_or(0, side);
         // Only if the side it shows is a tinted one: grass blocks' sides are dirt with a tinted
         // overlay, and their dust stays brown like vanilla's.
-        let tint = dust.filter(|s| s.tint != 0 && s.tint_faces & 2 != 0).map_or(0xFF_FFFF, |s| {
+        let tint = if dust.is_some_and(|s| s.model == weft_abi::Model::Wire) { 0xC8_1414 } else { dust.filter(|s| s.tint != 0 && s.tint_faces & 2 != 0).map_or(0xFF_FFFF, |s| {
             let p = pos.floor().as_ivec3();
             let biome = world.cube(p >> 4i32).map_or(0, |cube| cube.biome((p.x & 15) as usize, (p.z & 15) as usize));
             c.biomes.get(biome as usize).and_then(|b| b.tints.get(s.tint as usize - 1)).copied().unwrap_or_else(|| crate::content::item_tint(s.tint))
-        });
+        }) };
         // Drawn apart by how they blend; bursts beyond what there is room for are dropped.
         let which = (k.flags & pf::TRANSLUCENT != 0) as usize;
         let (head, capacity, start) = {

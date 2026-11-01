@@ -34,11 +34,34 @@ impl Client {
                 self.seed = seed;
                 self.reset_terrain(dim, fwd);
             }
-            ToClient::Cube { dim, pos, cube, edit } if dim == self.world.dim => fwd.push(terrain::In::Cube { pos, cube, edit }),
-            ToClient::Unload { dim, pos } if dim == self.world.dim => fwd.push(terrain::In::Unload(pos)),
-            ToClient::Blocks { dim, changes } if dim == self.world.dim => fwd.push(terrain::In::Blocks(changes)),
+            ToClient::Cube { dim, frame: 0, pos, cube, edit } if dim == self.world.dim => fwd.push(terrain::In::Cube { pos, cube, edit }),
+            ToClient::Cube { dim, frame, pos, cube, .. } if dim == self.world.dim => {
+                if let Some(e) = self.entities.get_mut(&frame) {
+                    if e.structure.is_none() {
+                        e.structure = Some(Box::new(ClientWorld::structure(dim)));
+                        self.render.remove_frame(frame);
+                    }
+                    let s = e.structure.as_mut().unwrap();
+                    s.insert(pos, cube, Default::default());
+                    s.scan_bounds();
+                }
+            }
+            ToClient::Unload { dim, pos } if dim == self.world.dim => {
+                self.wires.cube_gone(0, pos);
+                fwd.push(terrain::In::Unload(pos));
+            }
+            ToClient::Blocks { dim, frame: 0, changes } if dim == self.world.dim => fwd.push(terrain::In::Blocks(changes)),
+            ToClient::Blocks { dim, frame, changes } if dim == self.world.dim => {
+                if let Some(s) = self.entities.get_mut(&frame).and_then(|e| e.structure.as_mut()) {
+                    for (p, state) in changes {
+                        s.set_block(p, state);
+                    }
+                    s.scan_bounds();
+                }
+            }
             ToClient::Saved { dim, cubes } if dim == self.world.dim => fwd.push(terrain::In::Saved(cubes)),
             ToClient::Edits { dim, specs, all } if dim == self.world.dim => fwd.push(terrain::In::Edits { specs, all }),
+            ToClient::Signals { dim, frame, changes } if dim == self.world.dim => self.wires.power_changed(frame, &changes),
             ToClient::Time { dim, time } if dim == self.world.dim => {
                 self.world.time = time;
                 self.since_time = 0;
@@ -46,18 +69,9 @@ impl Client {
             ToClient::Teleport { dim, pos, frame } => self.teleported(dim, pos, frame, fwd),
             ToClient::Spawn(list) => self.spawn_entities(list),
             ToClient::Moves { tick, moves } => self.receive_moves(tick, moves),
-            ToClient::Structure { id, cubes, full } => {
-                let dim = self.world.dim;
-                if let Some(e) = self.entities.get_mut(&id) {
-                    if full || e.structure.is_none() {
-                        e.structure = Some(Box::new(ClientWorld::structure(dim)));
-                        self.render.remove_frame(id);
-                    }
-                    let s = e.structure.as_mut().unwrap();
-                    for (pos, cube) in cubes {
-                        s.insert(pos, cube, Default::default());
-                    }
-                    s.scan_bounds();
+            ToClient::BodyLight { frame, lights } => {
+                if let Some(e) = self.entities.get_mut(&frame) {
+                    e.world_light = lights.into_iter().collect();
                 }
             }
             ToClient::Swing { used_item } => {
@@ -227,13 +241,11 @@ impl Client {
             self.entity_components.clear();
         }
         let at = self.body_tick(self.body_clock);
-        let on = frame.and_then(|(id, rel)| self.entities.get(&id).map(|b| (id, b.pose(at) + rel)));
+        let on = frame.and_then(|(id, rel)| self.entities.get(&id).map(|b| (id, b.known(at) + rel)));
         let pos = on.map_or(pos, |o| o.1);
         self.player.support = on.map(|o| o.0);
         // Off whatever it rode, or the next step would put it back there.
-        if on.is_none() {
-            self.player.riding = None;
-        }
+        self.player.riding = None;
         self.player.pos = pos;
         self.player.prev = pos;
         self.player.vel = DVec3::ZERO;
@@ -276,6 +288,7 @@ impl Client {
                     rel: DVec3::ZERO,
                     rel_target: None,
                     structure: None,
+                    world_light: Default::default(),
                 },
             );
         }
@@ -292,6 +305,7 @@ impl Client {
         for &(id, pos, yaw, pitch, pose, frame) in &list {
             if let Some(e) = self.entities.get_mut(&id) {
                 e.pose = pose;
+                let was = e.target;
                 e.target = pos;
                 e.target_yaw = yaw;
                 e.pitch = pitch;
@@ -300,6 +314,10 @@ impl Client {
                     // A paused server keeps sending the same tick: one sample per
                     // tick, or two at the same time make an endless speed.
                     let t = tick as f64;
+                    // It starts from where it appeared, or its first move is a jump.
+                    if e.track.is_empty() {
+                        e.track.push_back((t - 1.0, was));
+                    }
                     match e.track.back_mut() {
                         Some(last) if last.0 == t => last.1 = pos,
                         Some(last) if last.0 > t => {

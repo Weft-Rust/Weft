@@ -2,6 +2,7 @@
 
 pub use weft_abi as abi;
 
+pub mod signal;
 pub mod ai;
 mod cache;
 pub mod client;

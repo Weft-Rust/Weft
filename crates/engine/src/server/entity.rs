@@ -45,12 +45,12 @@ pub struct Entity {
     /// Worn items as last sent to clients.
     pub worn: Vec<u32>,
     /// The solid body it rides (stands on, or flies above within its carry height).
-    pub support: Option<u64>,
+    /// The body it is on: what it rides, or whose blocks hold it if it has an `anchor`.
+    pub frame: Option<u64>,
+    pub motion: Motion,
     /// Its own box (width, height, eye) and another kind it looks like, set by mods.
     pub size: Option<[f32; 3]>,
     pub look: Option<u32>,
-    /// Falling blocks: ticks it has lain on the ground.
-    pub rested: u8,
     /// Crouching players: a 1.5 high box with lower eyes.
     pub pose: crate::world::Pose,
     /// Sprinting, as its client says (players).
@@ -69,7 +69,22 @@ pub struct Entity {
     pub nav: Option<super::path::Nav>,
 }
 
+/// How a body goes, besides its speed, which is what `Free` goes by.
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub enum Motion {
+    Free,
+    /// To there, in that many ticks.
+    To { to: DVec3, left: u16 },
+    /// It has landed and is waiting to go: its blocks are the world's now.
+    Parked,
+}
+
 impl Entity {
+    /// The frame the block it belongs to is in: 0 for the world and what isn't a block's.
+    pub fn block_frame(&self) -> u64 {
+        self.anchor.and(self.frame).unwrap_or(0)
+    }
+
     pub fn new(id: u64, kind: u32, pos: DVec3, health: f32) -> Entity {
         Entity {
             id,
@@ -99,10 +114,10 @@ impl Entity {
             anchor: None,
             sent: None,
             worn: Vec::new(),
-            support: None,
+            frame: None,
+            motion: Motion::Free,
             size: None,
             look: None,
-            rested: 0,
             pose: Default::default(),
             sprinting: false,
             permission: 0,
@@ -189,7 +204,8 @@ pub struct Entities {
     pub dirty_comp: FxHashSet<(u64, u32)>,
     /// Synced components as last sent, to find what changed (`find_changes`).
     sent: FxHashMap<(u64, u32), Box<[u8]>>,
-    pub anchors: FxHashMap<IVec3, u64>,
+    /// Block entities by the frame their block is in (0: the world) and where in it.
+    pub anchors: FxHashMap<(u64, IVec3), u64>,
     /// Killed this tick: clients play the death animation when they go.
     pub killed: Vec<u64>,
     /// Item entities picked up whole this tick, and by whom (clients pull them in).
@@ -239,7 +255,7 @@ impl Entities {
             self.inventories.entry(id).or_insert_with(|| vec![ItemStack::EMPTY; c.game.player_layout.slots as usize]);
         }
         if let Some(a) = e.anchor {
-            self.anchors.insert(a, id);
+            self.anchors.insert((e.block_frame(), a), id);
         }
         self.index.insert(id, self.list.len());
         self.list.push(e);
@@ -270,11 +286,35 @@ impl Entities {
         }
     }
 
+    /// `id`'s block is at `at` in `frame` now, as it comes to be somewhere else.
+    pub fn attach(&mut self, id: u64, frame: u64, at: IVec3, pos: DVec3) {
+        let Some(e) = self.get_mut(id) else { return };
+        let was = e.anchor.map(|a| (e.block_frame(), a));
+        e.anchor = Some(at);
+        e.frame = (frame != 0).then_some(frame);
+        e.pos = pos;
+        if let Some(was) = was.filter(|was| self.anchors.get(was) == Some(&id)) {
+            self.anchors.remove(&was);
+        }
+        self.anchors.insert((frame, at), id);
+    }
+
+    /// Who decides which region `e` is in: the body holding it, if it is a block on one.
+    pub fn follows<'a>(&'a self, e: &'a Entity) -> &'a Entity {
+        e.frame.filter(|_| e.anchor.is_some()).and_then(|f| self.get(f)).unwrap_or(e)
+    }
+
+    /// Block entities on body `id`.
+    pub fn on_body(&self, id: u64) -> Vec<u64> {
+        self.list.iter().filter(|e| !e.removed && e.anchor.is_some() && e.frame == Some(id)).map(|e| e.id).collect()
+    }
+
     pub fn remove(&mut self, id: u64) {
         if let Some(e) = self.get_mut(id) {
             e.removed = true;
             if let Some(a) = e.anchor {
-                self.anchors.remove(&a);
+                let frame = e.block_frame();
+                self.anchors.remove(&(frame, a));
             }
         }
     }
@@ -318,7 +358,7 @@ impl Entities {
         self.index = self.list.iter().enumerate().map(|(i, e)| (e.id, i)).collect();
         // Its block is the new region's now; here, the place would still count as taken.
         if let Some(a) = e.anchor {
-            self.anchors.remove(&a);
+            self.anchors.remove(&(e.block_frame(), a));
         }
         let inv = self.inventories.remove(&id);
         let keys: Vec<(u64, u32)> = self.comps.keys().filter(|k| k.0 == id).copied().collect();
@@ -424,21 +464,39 @@ pub fn step(c: &Content, e: &mut Entity, gravity: f64, block: &impl Fn(IVec3) ->
     if e.anchor.is_some() {
         return out;
     }
-    if k.is(ef::KINEMATIC) {
+    if k.is(ef::KINEMATIC) || e.motion == Motion::Parked {
+        // On another body, it goes with that too (a piston on a platform moving blocks).
+        let carried = e.frame.and_then(|f| bodies.iter().find(|b| b.id == f)).map_or(DVec3::ZERO, |b| b.delta);
+        e.pos += carried;
+        match &mut e.motion {
+            Motion::To { to, left } => {
+                *to += carried;
+                let arrived = *left <= 1;
+                let at = *to;
+                e.vel = (at - e.pos) / (*left as f64 * DT);
+                *left = left.saturating_sub(1);
+                if arrived {
+                    (e.pos, e.vel, e.motion) = (at, DVec3::ZERO, Motion::Free);
+                    return out;
+                }
+            }
+            Motion::Parked => return out,
+            Motion::Free => {}
+        }
         e.pos += e.vel * DT;
         e.moved = (e.vel.with_y(0.0) * DT).length() as f32;
         return out;
     }
     let (hw, h, _) = e.dims(c);
     // The body it rides moves it first (blocks still stop it), then bodies that ran into it push.
-    let ride = physics::ride(e.pos, hw, &mut e.support, bodies);
+    let ride = physics::ride(c, e.pos, hw, e.on_ground, &mut e.frame, bodies, e.id);
     if ride.carry != DVec3::ZERO {
         e.pos = physics::move_box(c, block, e.pos, hw, h, ride.carry, 0.0).pos;
     }
     if let Some(d) = ride.released {
         e.vel += d / DT;
     }
-    let (shift, crushes) = physics::push(c, e.pos, hw, h, bodies, e.id, e.support);
+    let (shift, crushes) = physics::push(c, e.pos, hw, h, bodies, e.id, e.frame);
     if shift != DVec3::ZERO {
         // Blocks stop the push; a crushing body hurts what it cannot push away.
         let to = physics::move_box(c, block, e.pos, hw, h, shift, 0.0).pos;
@@ -470,7 +528,7 @@ pub fn step(c: &Content, e: &mut Entity, gravity: f64, block: &impl Fn(IVec3) ->
     e.on_ground = r.on_ground;
     if r.on_ground {
         if let Some(b) = physics::standing_on(c, e.pos, hw, bodies, e.id) {
-            e.support = Some(b);
+            e.frame = Some(b);
         }
     }
     let dy = e.pos.y - start.y;

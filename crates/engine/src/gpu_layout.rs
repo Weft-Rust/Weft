@@ -72,6 +72,7 @@ shared! {
         FLAMES = 3,
         TEXEL = 4,
         FILLED = 5,
+        QUAD = 6,
     }
     /// UI quad modes (`ui.wgsl`).
     ui_mode {
@@ -233,14 +234,7 @@ pub mod terrain {
 /// A unit cube's faces (-X +X -Y +Y -Z +Z), four corners each counter-clockwise seen from
 /// outside: bottom-left, bottom-right, top-right, top-left in texture space. The shaders get it
 /// as `CORNERS`.
-pub const CORNERS: [[[i32; 3]; 4]; 6] = [
-    [[0, 0, 0], [0, 0, 1], [0, 1, 1], [0, 1, 0]],
-    [[1, 0, 1], [1, 0, 0], [1, 1, 0], [1, 1, 1]],
-    [[0, 0, 0], [1, 0, 0], [1, 0, 1], [0, 0, 1]],
-    [[0, 1, 1], [1, 1, 1], [1, 1, 0], [0, 1, 0]],
-    [[1, 0, 0], [0, 0, 0], [0, 1, 0], [1, 1, 0]],
-    [[0, 0, 1], [1, 0, 1], [1, 1, 1], [0, 1, 1]],
-];
+pub const CORNERS: [[[i32; 3]; 4]; 6] = weft_abi::FACE_CORNERS;
 
 /// A block face record (`face`): (x, y, z) in the cube, `ao` 2 bits per corner, `light` per
 /// corner (`corner_light`).
@@ -441,10 +435,9 @@ gpu_struct! {
     pub struct GpuBox as "Box" {
         /// Unit cube -> camera-relative world, rows of a 3x4 matrix.
         pub rows: [[f32; 4]; 3],
-        /// Box size in texels (w, h, d) for the classic unwrap; block faces: min corner in the
-        /// block, w = 1 when set.
+        /// Box size in texels (w, h, d) for the classic unwrap; `QUAD`: x its shade.
         pub dims: [f32; 4],
-        /// Texel origin and texture size.
+        /// Texel origin and texture size; `QUAD`: the part of its picture, 0..1.
         pub uvo: [f32; 4],
         /// Tint (rgb) and hurt flash (a).
         pub color: [f32; 4],
@@ -561,6 +554,16 @@ pub struct ParticleSimArgs {
 }
 
 gpu_struct! {
+    /// A quad of redstone wire: a piece of it, or an arm of one.
+    pub struct GpuWireQuad as "WireQuad" {
+        /// The cell, and w its face (3 bits) and which part of it (`wire.wgsl`).
+        pub pos: [i32; 4],
+        /// x texture index, y light (as `GpuParticle`), z its piece's number among the levels.
+        pub data: [u32; 4],
+    }
+}
+
+gpu_struct! {
     pub struct GpuWeather as "WeatherColumn" {
         /// The column's middle relative to the camera in x and z, its strip's bottom and top in y.
         /// As x, bottom, z, top.
@@ -667,7 +670,7 @@ bindings! {
         FRAMES "frames": "array<u32>",
         // Camera-relative positions of moving structures drawn this frame (0: none, the
         // world's cubes): a cube's `origin.w` picks one, its `origin.xyz` is then the cube in
-        // the structure.
+        // the structure. Its w is the world's light where the structure is, as bits.
         OFFSETS "offsets": "array<vec4<f32>>",
         // Glow mask texture per bindless texture index, all ones: none.
         GLOW_MAP "glow_map": "array<u32>",
@@ -708,6 +711,11 @@ bindings! {
         FRAMES "frames": "array<u32>",
         CELLS "cells": "array<u32>",
     }
+    wire "wire.wgsl" {
+        QUADS "quads": "array<WireQuad>",
+        LEVELS "levels": "array<u32>",
+        SCENE "scene": "Scene",
+    }
     weather "weather.wgsl" {
         COLUMNS "columns": "array<WeatherColumn>",
         SCENE "scene": "Scene",
@@ -746,7 +754,7 @@ fn solid_at(p: vec3<i32>) -> bool {
 
 /// Every GPU struct as WGSL.
 fn structs() -> String {
-    [Scene::wgsl(), Globals::wgsl(), GpuBox::wgsl(), Instance::wgsl(), GpuCuboid::wgsl(), GpuCorner::wgsl(), GpuBone::wgsl(), GpuParticle::wgsl(), GpuSimParticle::wgsl(), GpuParticleKind::wgsl(), GpuWeather::wgsl(), GpuSky::wgsl(), Quad::wgsl(), Screen::wgsl(), Pass::wgsl()].concat()
+    [Scene::wgsl(), Globals::wgsl(), GpuBox::wgsl(), Instance::wgsl(), GpuCuboid::wgsl(), GpuCorner::wgsl(), GpuBone::wgsl(), GpuParticle::wgsl(), GpuSimParticle::wgsl(), GpuParticleKind::wgsl(), GpuWireQuad::wgsl(), GpuWeather::wgsl(), GpuSky::wgsl(), Quad::wgsl(), Screen::wgsl(), Pass::wgsl()].concat()
 }
 
 /// What goes in front of an engine shader (or a pack's replacement of it): the constants, every

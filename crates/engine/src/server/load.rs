@@ -266,7 +266,7 @@ impl Server {
                 .collect();
             let storage = self.storage.clone();
             let d = &mut self.dims[di];
-            let before: usize = d.regions.iter().map(|r| r.cubes.len()).sum();
+            let before: usize = d.regions.iter().map(|r| r.space.cubes.len()).sum();
             for r in &mut d.regions {
                 let removed = r.retain_cubes(c, |pos| {
                     views.iter().any(|&(v, lo, hi)| v.column(pos) && pos.y >= lo && pos.y <= hi)
@@ -284,7 +284,7 @@ impl Server {
                 }
                 r.entities.compact();
             }
-            d.dirty |= d.regions.iter().map(|r| r.cubes.len()).sum::<usize>() != before;
+            d.dirty |= d.regions.iter().map(|r| r.space.cubes.len()).sum::<usize>() != before;
         }
     }
 
@@ -383,7 +383,8 @@ pub(super) fn send_far(c: &'static Content, p: &mut Player, dim: &mut DimSet, st
                 Arc::new(cube)
             }
         };
-        p.conn.send(ToClient::Cube { dim: p.dim, pos, cube, edit: false });
+        p.conn.send(ToClient::Cube { dim: p.dim, frame: 0, pos, cube, edit: false });
+        p.send_levels(dim, pos);
         p.sent.insert(pos);
     }
 }

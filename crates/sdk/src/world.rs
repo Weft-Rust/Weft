@@ -65,6 +65,30 @@ impl World {
         unsafe { (host().set_structure_block)(self.raw, entity, &pos, state) != 0 }
     }
 
+    /// Takes `cells` out of the world into a new moving structure, whose block (0, 0, 0) is at
+    /// `center` and which they keep their places around. Chests and the like go along with
+    /// what is in them, and it stands there till told otherwise: `set_entity` for a speed,
+    /// `body_go` to go somewhere, `put_down` to be blocks again. Its entity, or 0 if nothing came.
+    pub fn lift(&self, center: [i32; 3], cells: &[[i32; 3]]) -> u64 {
+        unsafe { (host().lift_blocks)(self.raw, &center, cells.as_ptr(), cells.len()) }
+    }
+
+    /// A moving structure goes back into the world at the nearest whole block. What found its
+    /// place taken drops.
+    pub fn put_down(&self, entity: u64) {
+        unsafe { (host().put_down_body)(self.raw, entity) }
+    }
+
+    /// A moving structure goes to `pos` in exactly `ticks`.
+    pub fn body_go(&self, entity: u64, pos: [f64; 3], ticks: u32) {
+        unsafe { (host().body_go)(self.raw, entity, &pos, ticks) }
+    }
+
+    /// What a comparator reads of the block at `pos` (`signal_read`) may be different now.
+    pub fn signal_read_changed(&self, pos: [i32; 3]) {
+        unsafe { (host().signal_read_changed)(self.raw, &pos) }
+    }
+
     pub fn schedule(&self, pos: [i32; 3], delay_ticks: u32) {
         unsafe { (host().schedule_tick)(self.raw, &pos, delay_ticks) }
     }
@@ -84,6 +108,11 @@ impl World {
 
     pub fn flags(&self, pos: [i32; 3]) -> u32 {
         state_flags(self.get(pos))
+    }
+
+    /// The strongest redstone power coming into a cell, 0..15.
+    pub fn signal(&self, pos: [i32; 3]) -> u8 {
+        unsafe { (host().signal_at)(self.raw, &pos) as u8 }
     }
 
     /// The value of property `name` of the block at `pos`: `w.prop(pos, "lit")`.

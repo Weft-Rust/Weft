@@ -97,7 +97,8 @@ pub fn build(c: &Content, n: &Neighborhood, ctm: &super::ctm::Ctm) -> Mesh {
                 let textures = look.and_then(|l| l.textures).unwrap_or(info.textures);
                 let model = if look.is_some_and(|l| l.boxes.is_some()) { Model::Boxes } else { info.model };
                 match model {
-                    Model::None => {}
+                    // Drawn apart, for its power to change without a new mesh (`wires.rs`).
+                    Model::None | Model::Wire => {}
                     Model::Cube => {
                         for dir in 0..6 {
                             let [dx, dy, dz] = NORMALS[dir];
@@ -148,20 +149,8 @@ pub fn build(c: &Content, n: &Neighborhood, ctm: &super::ctm::Ctm) -> Mesh {
                                     continue;
                                 }
                                 let fl = if at_edge { light16(nl) } else { l };
-                                let corners = CORNERS[dir].map(|k| {
-                                    [
-                                        x as f32 + if k[0] == 1 { bx.max[0] } else { bx.min[0] },
-                                        y as f32 + if k[1] == 1 { bx.max[1] } else { bx.min[1] },
-                                        z as f32 + if k[2] == 1 { bx.max[2] } else { bx.min[2] },
-                                    ]
-                                });
-                                if bx.uv[dir][0] <= crate::block_model::NO_FACE {
-                                    continue;
-                                }
-                                let uv = match bx.uv[dir] {
-                                    r if r[0] >= 0.0 => r.map(|v| v.round().clamp(0.0, 31.0) as u32),
-                                    _ => box_uv(dir, bx.min, bx.max),
-                                };
+                                let Some((corners, uv)) = box_face(bx, dir) else { continue };
+                                let corners = corners.map(|p| [p[0] + x as f32, p[1] + y as f32, p[2] + z as f32]);
                                 let tex = ctm.resolve(c, n, x, y, z, dir, bx.textures[dir] & face::TEX_MASK);
                                 mesh.quads[info.layer as usize].push(quad(corners, uv, tex, biome, info.tint, [fl; 4]));
                             }
@@ -181,6 +170,36 @@ pub fn build(c: &Content, n: &Neighborhood, ctm: &super::ctm::Ctm) -> Mesh {
 /// Order of face directions in a mesh: all positive, then all negative, so the directions seen
 /// from one octant are mostly one contiguous range.
 pub const DIR_RANK: [u8; 6] = [3, 0, 4, 1, 5, 2];
+
+/// A face of a model's box as it is drawn, in the world and as an item alike: its corners in the
+/// block, turned and tilted, and the part of its picture (texels). `None`: it has no such face.
+pub fn box_face(bx: &crate::content::ModelBox, dir: usize) -> Option<([[f32; 3]; 4], [u32; 4])> {
+    if bx.uv[dir][0] <= crate::block_model::NO_FACE {
+        return None;
+    }
+    let corners = CORNERS[dir].map(|k| std::array::from_fn(|a| if k[a] == 1 { bx.max[a] } else { bx.min[a] }));
+    let uv = match bx.uv[dir] {
+        r if r[0] >= 0.0 => r.map(|v| v.round().clamp(0.0, 31.0) as u32),
+        _ => box_uv(dir, bx.min, bx.max),
+    };
+    let corners: [[f32; 3]; 4] = std::array::from_fn(|i| corners[(i + bx.turn[dir] as usize) % 4]);
+    Some((if bx.tilt.degrees != 0.0 { corners.map(|p| tilted(p, &bx.tilt)) } else { corners }, uv))
+}
+
+/// Which way a face `box_face` gave looks, and how bright that makes it: as the world shader has
+/// it for such faces.
+pub fn face_look(corners: &[[f32; 3]; 4]) -> (glam::Vec3, f32) {
+    let [p0, p1, p2, _] = corners.map(glam::Vec3::from_array);
+    let n = (p1 - p0).cross(p2 - p1).normalize_or_zero();
+    (n, n.x * n.x * 0.6 + n.z * n.z * 0.8 + n.y * n.y * if n.y > 0.0 { 1.0 } else { 0.5 })
+}
+
+/// A corner of a box tilted about its axis.
+fn tilted(p: [f32; 3], t: &weft_abi::BoxTilt) -> [f32; 3] {
+    let o = glam::Vec3::from_array(t.origin);
+    let turn = glam::Quat::from_axis_angle(glam::Vec3::from_array(t.axis).normalize(), t.degrees.to_radians());
+    (o + turn * (glam::Vec3::from_array(p) - o)).to_array()
+}
 
 fn box_uv(dir: usize, min: [f32; 3], max: [f32; 3]) -> [u32; 4] {
     let p = |v: f32| (v * 16.0).round().clamp(0.0, 16.0) as u32;

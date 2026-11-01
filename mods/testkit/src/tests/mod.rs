@@ -7,6 +7,7 @@ mod gameplay;
 mod liquids;
 mod looks;
 mod probe;
+pub mod redstone;
 mod scene;
 mod sync;
 mod ui;
@@ -158,6 +159,43 @@ pub fn all() -> Vec<TestDef> {
         looks::third_person_shakes,
         looks::block_dust_scatters,
         looks::ctm_off_the_cube,
+        redstone::redstone_wire,
+        redstone::redstone_on_walls,
+        redstone::redstone_conduction,
+        redstone::redstone_torch,
+        redstone::redstone_repeater,
+        redstone::redstone_comparator,
+        redstone::redstone_piston,
+        redstone::redstone_piston_moves,
+        redstone::redstone_door,
+        redstone::redstone_contest,
+        redstone::redstone_rides,
+        redstone::redstone_body_edges,
+        redstone::redstone_motors_together,
+        redstone::redstone_motor_up,
+        redstone::redstone_motor,
+        redstone::redstone_lift_api,
+        redstone::redstone_copper_lamp,
+        redstone::redstone_body_light,
+        redstone::redstone_body_and_world,
+        redstone::redstone_moves_chest,
+        redstone::redstone_timing,
+        redstone::redstone_spit,
+        redstone::redstone_anchor,
+        redstone::redstone_flying_machine,
+        redstone::redstone_flying_rider,
+        redstone::redstone_observer,
+        redstone::redstone_dispenser,
+        redstone::redstone_by_hand,
+        redstone::redstone_looks,
+        redstone::redstone_first_piece,
+        redstone::redstone_head_stays_inside,
+        redstone::redstone_for_mods,
+        redstone::redstone_clock,
+        redstone::redstone_saved,
+        redstone::redstone_saved_moving,
+        redstone::redstone_on_a_structure,
+        redstone::redstone_turned,
         looks::attack_indicator,
         looks::shaders_and_glow,
         looks::texture_seams,
@@ -177,6 +215,12 @@ pub fn all() -> Vec<TestDef> {
         bodies::skiff_pause,
         gameplay::respawn,
         bodies::skiff_blocks,
+        bodies::body_chest,
+        bodies::body_sneak_edge,
+        bodies::body_no_bob,
+        bodies::body_place,
+        bodies::body_lit_at_once,
+        redstone::body_walking,
         bodies::natural_spawning,
         bodies::zombie_chases,
         bodies::morph,
@@ -185,7 +229,7 @@ pub fn all() -> Vec<TestDef> {
 
 /// Measurements without a verdict worth failing a run over; `--test bench`.
 pub fn bench() -> Vec<TestDef> {
-    crate::tests![world::fly_load, world::load_benchmark, world::item_farm, looks::particle_crowd, world::crater]
+    crate::tests![redstone::redstone_bench, world::fly_load, world::load_benchmark, world::item_farm, looks::particle_crowd, world::crater]
 }
 
 /// A process's first world is slow to open and to settle, which timings shouldn't be measuring.

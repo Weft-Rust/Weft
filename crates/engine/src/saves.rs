@@ -146,8 +146,7 @@ pub fn list(saves: &Path) -> Vec<WorldMeta> {
 }
 
 pub fn create(saves: &Path, name: &str, seed: u64) -> WorldMeta {
-    let base: String = name.chars().map(|c| if c.is_alphanumeric() || c == '-' || c == '_' { c } else { '_' }).collect();
-    let base = if base.is_empty() { "world".to_string() } else { base };
+    let base = folder_name(name);
     let mut dir = saves.join(&base);
     let mut n = 1;
     while dir.exists() {
@@ -157,6 +156,19 @@ pub fn create(saves: &Path, name: &str, seed: u64) -> WorldMeta {
     let m = WorldMeta { dir, format: SAVE_FORMAT, name: name.to_string(), seed, last_played: now_secs(), times: Vec::new(), day_offsets: Vec::new(), ops: Vec::new(), weather: Vec::new(), edits: Vec::new(), next_entity: 1, configs: Vec::new(), mods: Vec::new() };
     m.save();
     m
+}
+
+/// The folder `create` gives a world called `name`, if it is free.
+fn folder_name(name: &str) -> String {
+    let base: String = name.chars().map(|c| if c.is_alphanumeric() || c == '-' || c == '_' { c } else { '_' }).collect();
+    if base.is_empty() { "world".to_string() } else { base }
+}
+
+/// Whether this is the world a new one called the same would overwrite: one in the folder of its
+/// own name. A folder somebody renamed or copied a world into still has the name inside, and
+/// isn't to go because of it.
+pub fn in_own_folder(w: &WorldMeta) -> bool {
+    w.dir.file_name().is_some_and(|f| f.to_string_lossy() == folder_name(&w.name))
 }
 
 /// Seed from user text: numbers are used as is, anything else is hashed.
@@ -636,5 +648,23 @@ impl Screen for CreateWorld {
                 button(ui, cx, "menu.cancel", &[], 120.0, |c| c.requests.push(Request::Close));
             });
         });
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_renamed_copy_is_not_its_own_folder() {
+        let dir = std::env::temp_dir().join(format!("weft-saves-{}", std::process::id()));
+        let w = create(&dir, "test-thing", 1);
+        assert!(in_own_folder(&w));
+        let copy = dir.join("my_build");
+        std::fs::rename(&w.dir, &copy).unwrap();
+        let moved = list(&dir).into_iter().next().unwrap();
+        assert_eq!(moved.name, "test-thing");
+        assert!(!in_own_folder(&moved));
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

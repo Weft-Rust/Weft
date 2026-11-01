@@ -2,20 +2,21 @@
 
 ## Contents
 1. [Introduction](#introduction)
-2. [Creating a mod in two minutes](#creating-a-mod-in-two-minutes)
-3. [Names and paths](#names-and-paths)
+2. [Preparation](#preparation)
+3. [Creating a mod in two minutes](#creating-a-mod-in-two-minutes)
+4. [Names and paths](#names-and-paths)
    - [Names](#names), [References](#references), [Handles](#handles), [Textures](#textures), [Translations](#translations)
-4. [Components and tags as inter-mod communication](#components-and-tags-as-inter-mod-communication)
-5. [Content builders](#content-builders)
+5. [Components and tags as inter-mod communication](#components-and-tags-as-inter-mod-communication)
+6. [Content builders](#content-builders)
    - [Blocks](#blocks), [Items](#items), [Entities](#entities), [Machines](#machines), [Liquids](#liquids), [World](#world), [Recipes](#recipes), [Loot](#loot), [Replacing something of another mod](#replacing-something-of-another-mod)
-6. [Hooking into the game](#hooking-into-the-game)
+7. [Hooking into the game](#hooking-into-the-game)
    - [Built-in events](#built-in-events), [Systems and energy](#systems-and-energy)
-7. [Commands](#commands)
-8. [World API](#world-api)
-9. [Client side](#client-side)
-10. [Debugging](#debugging)
-11. [Things that make your and other modders' life easier](#things-that-make-your-and-other-modders-life-easier)
-12. [Guides for bigger systems](#guides-for-other-systems)
+8. [Commands](#commands)
+9. [World API](#world-api)
+10. [Client side](#client-side)
+11. [Debugging](#debugging)
+12. [Things that make your and other modders' life easier](#things-that-make-your-and-other-modders-life-easier)
+13. [Guides for bigger systems](#guides-for-other-systems)
 
 ## Introduction
 This is a guide describing how the base game itself is written.\
@@ -23,6 +24,11 @@ The game is a mod called `base`, which has no private hooks or priorities from t
 your mod can too.\
 When in doubt, check `mods/base` and `mods/testmod` and copy from there.\
 testmod exists to prove you don't have to touch the engine.
+
+## Preparation
+1. Before starting working on Weft, you'll need workspace. The best recommendation I can give is using JetBrains RustRover, which is free and has everything needed.\
+2. Clone the repo using built-in Clone Repository feature, where you'll put https://github.com/Weft-Rust/Weft as a link, which will create folder on your pc with the code.\
+3. Then after finishing you need to configure Run Configuration. Find Run Configuration tab in top-right corner, and set the command to `run`, and call it whatever, after that the game will be launched from your local copy of the repo.
 
 ## Creating a mod in two minutes
 
@@ -227,7 +233,7 @@ is dropped.
 - `growth(seconds, min_light)` + `on_grow(..)` for plants
 - `spreads("#grass_spreads_to", seconds, min_light)` for what creeps onto neighbors (grass onto dirt), `smothered("dirt", seconds)` for what turns when covered. There are no random ticks: these, growth and scheduled ticks all run on world time, so they catch up on time nobody was there for
 - `ambient_particle("mymod:spark")` for particles the client shows around a block now and then (torch smoke), nothing on the server
-- `on_use`, `on_neighbor`, `on_scheduled`
+- `on_use`, `on_neighbor`, `on_scheduled`, `on_pass` (on a moving body, it came to another cell of the world: a drill, a plow)
 - `on_placed(|w, change| ..)`, `on_broken(..)`: the `BLOCK_PLACED` and `BLOCK_BROKEN` events for this block only, at the end of the tick
 - `prop("lit", ["false", "true"])`, `prop("age", 0..=7)` and `facing(Facings::HORIZONTAL, Toward::Player)` for states, like blockstates in modern Minecraft: every combination of values is a state
 - `states(|p, s| ..)` to make each state look different (`p.facing()`, `p.is("lit", "true")`), `placement(|place, p| p.set(..))` to pick values when placed
@@ -416,6 +422,7 @@ You can contact me on Discord: `@vortex_so`
 ## Guides for other systems
 - [Textures](textures.md): animation, glow, tinted overlays
 - [CTM](ctm.md): connected and varied block textures (glass, logs, random stone)
+- [Redstone](redstone.md): wire on any face, gates, pistons, and blocks of your own that join in
 - [Localization](localization.md): all text, item tooltips, rich text and effects, icons and meters, lines by tag, adding them from other mods and packs
 - [Worldgen](worldgen.md): ores, structures, biomes, spawns, new dimensions and terrain, also in other mods' dimensions
 - [Sky](sky.md): suns, moons, stars and skyboxes in any dimension, changing or removing the ones there

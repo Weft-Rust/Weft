@@ -57,7 +57,11 @@ fn vs_item(@builtin(vertex_index) vi: u32, @builtin(instance_index) ii: u32) -> 
 fn box_vertex(b: Box, v: u32) -> VOut {
     let face = v / 6u;
     let c = TRI[v % 6u];
-    let p = CORNERS[face * 4u + c];
+    var p = CORNERS[face * 4u + c];
+    // One face of a block's box, as the world mesher makes it: the rows place a unit square.
+    if b.ids.y == BOX_MODE_QUAD {
+        p = vec3(UVS[c].x, 1.0 - UVS[c].y, 0.0);
+    }
     let local = vec4(p, 1.0);
     let world = vec3(dot(b.rows[0], local), dot(b.rows[1], local), dot(b.rows[2], local));
     var out: VOut;
@@ -93,19 +97,17 @@ fn box_vertex(b: Box, v: u32) -> VOut {
             out.glow = glow_map[out.layer];
         }
         out.uv = uv;
-        if b.dims.w > 0.5 {
-            // A box inside a block (dims = min, uvo = max): the part of the texture the world
-            // mesher would show there.
-            let q = mix(b.dims.xyz, b.uvo.xyz, p);
-            switch face {
-                case 0u: { out.uv = vec2(q.z, 1.0 - q.y); }
-                case 1u: { out.uv = vec2(1.0 - q.z, 1.0 - q.y); }
-                case 2u: { out.uv = vec2(q.x, q.z); }
-                case 3u: { out.uv = vec2(q.x, q.z); }
-                case 4u: { out.uv = vec2(1.0 - q.x, 1.0 - q.y); }
-                default: { out.uv = vec2(q.x, 1.0 - q.y); }
-            }
+    } else if b.ids.y == BOX_MODE_QUAD {
+        // A box is 6 faces to draw; this is one.
+        if face != 0u {
+            out.clip = vec4(0.0, 0.0, 0.0, 1.0);
         }
+        out.mode = BOX_MODE_FACES;
+        out.layer = b.ids.z;
+        if out.layer < arrayLength(&glow_map) {
+            out.glow = glow_map[out.layer];
+        }
+        out.uv = mix(b.uvo.xy, b.uvo.zw, UVS[c]);
     } else {
         let r = face_rect(face, b.dims.xyz, b.uvo.xy);
         out.uv = (r.xy + uv * r.zw) / b.uvo.zw;
@@ -113,7 +115,7 @@ fn box_vertex(b: Box, v: u32) -> VOut {
     }
     let hurt = b.color.a;
     var tint = b.color.rgb;
-    if b.ids.y == BOX_MODE_FACES && ((b.ids2.z >> face) & 1u) != 0u {
+    if (b.ids.y == BOX_MODE_FACES && ((b.ids2.z >> face) & 1u) != 0u) || (b.ids.y == BOX_MODE_QUAD && b.ids2.z != 0u) {
         tint *= vec3(f32((b.ids2.w >> 16u) & 255u), f32((b.ids2.w >> 8u) & 255u), f32(b.ids2.w & 255u)) / 255.0;
     }
     out.tint = pow(tint, vec3(2.2));
@@ -122,7 +124,8 @@ fn box_vertex(b: Box, v: u32) -> VOut {
         lit = lightmap(unpack_light(b.ids2.y), scene.params.z, scene.light.x, scene.light.y);
     }
     // Gamma-space shading applied in linear space, as in the world shader.
-    out.color = vec4(pow(tint * lit * SHADE[face] * mix(vec3(1.0), vec3(1.0, 0.4, 0.4), hurt), vec3(2.2)), 1.0);
+    let shade = select(SHADE[face], b.dims.x, b.ids.y == BOX_MODE_QUAD);
+    out.color = vec4(pow(tint * lit * shade * mix(vec3(1.0), vec3(1.0, 0.4, 0.4), hurt), vec3(2.2)), 1.0);
     return out;
 }
 

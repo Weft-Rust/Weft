@@ -22,6 +22,8 @@ pub struct Nav {
     pub found_for: Option<DVec3>,
     /// Ticks without getting anywhere.
     pub stuck: u32,
+    /// The body it walks on, whose coordinates the target and the path are in.
+    pub frame: Option<u64>,
 }
 
 impl Nav {

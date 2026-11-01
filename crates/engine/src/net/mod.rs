@@ -169,10 +169,8 @@ messages! {
         /// `look` (yaw, pitch), `selected` and `flying` as it left them.
         Welcome { player: u64, dim: u32, pos: DVec3, seed: u64, look: [f32; 2], selected: u32, flying: bool },
         /// `edit`: sent again because blocks in it changed (shown whole, at once), not loading.
-        Cube { dim: u32, pos: IVec3, cube: Arc<Cube>, edit: bool },
-        /// Cubes of a moving structure (entity `id`), in its own coordinates; `full`: all of them
-        /// (the structure was not known), otherwise the ones that changed.
-        Structure { id: u64, cubes: Vec<(IVec3, Arc<Cube>)>, full: bool },
+        /// `frame`: the body it is a cube of, in that body's coordinates; 0 for the world.
+        Cube { dim: u32, frame: u64, pos: IVec3, cube: Arc<Cube>, edit: bool },
         Unload { dim: u32, pos: IVec3 },
         /// Cubes in view that differ from generation (saved, or changed while loaded): the
         /// client does not generate them and waits for them to be sent.
@@ -180,7 +178,12 @@ messages! {
         /// Area edits of the dimension (`AreaFill::spec`): `all` replaces what the client has,
         /// otherwise they come after it. Clients make them on what they generate.
         Edits { dim: u32, specs: Vec<String>, all: bool },
-        Blocks { dim: u32, changes: Vec<(IVec3, u32)> },
+        /// Of the world, or of body `frame`.
+        Blocks { dim: u32, frame: u64, changes: Vec<(IVec3, u32)> },
+        /// The world's light on body `frame`, by its cubes.
+        BodyLight { frame: u64, lights: Vec<(IVec3, u32)> },
+        /// Power of pieces of wire: (cell, face, level), of the world or of body `frame`.
+        Signals { dim: u32, frame: u64, changes: Vec<(IVec3, u8, u8)> },
         Time { dim: u32, time: u64 },
         /// `frame`: the solid body it was put on and the position relative to that body (clients
         /// draw bodies ahead of the server, so only the relative position is right for them).
@@ -267,8 +270,8 @@ messages! {
         /// Let go of the use button before the item took effect.
         StopUsing,
         /// `frame`: the structure (entity) the block is part of, its position in the structure's
-        /// coordinates; 0 for the world.
-        Break { pos: IVec3, frame: u64 },
+        /// coordinates; 0 for the world. `face`: of its selection that was hit.
+        Break { pos: IVec3, face: u8, frame: u64 },
         /// Right click on a block: the block reacts first (chests), otherwise the held item is used or
         /// placed against the clicked face. `frame` like `Break`'s; `look` in world space.
         Use { pos: IVec3, face: u8, look: [f32; 3], sneak: bool, frame: u64 },

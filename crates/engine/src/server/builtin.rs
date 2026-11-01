@@ -191,7 +191,7 @@ fn insert(s: &mut Server, x: &Ctx) -> Vec<Msg> {
     let (Some(p), Some(item)) = (block_at(a), a.id("item")) else { return Vec::new() };
     let count = a.int("count").unwrap_or(1).clamp(1, 1 << 20) as u32;
     match s.dims[dim as usize].region_at(p) {
-        Some(r) => match r.entities.anchors.get(&p).copied() {
+        Some(r) => match r.anchored(p) {
             Some(owner) => {
                 let left = r.entities.insert_item(c, owner, ItemStack::new(item, count));
                 say("insert.done", vec![int(count - left.count), Arg::Name(Name::Item(item))])
@@ -313,7 +313,7 @@ fn regions(s: &mut Server, x: &Ctx) -> Vec<Msg> {
         .iter()
         .filter(|d| !d.regions.is_empty())
         .map(|d| {
-            let sizes: Vec<String> = d.regions.iter().map(|r| format!("{}/{}", r.cubes.len(), r.entities.list.len())).collect();
+            let sizes: Vec<String> = d.regions.iter().map(|r| format!("{}/{}", r.space.cubes.len(), r.entities.list.len())).collect();
             format!("{}: {} ({})", c.dims[d.id as usize].name, d.regions.len(), sizes.join(" "))
         })
         .collect();

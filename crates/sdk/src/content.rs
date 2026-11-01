@@ -331,6 +331,7 @@ impl Registry {
             looks: None,
             facing: None,
             placement: None,
+            signal: None,
         }
     }
 
@@ -448,10 +449,29 @@ struct StateDef {
     layer: Layer,
     model: Model,
     textures: [String; 6],
-    boxes: Vec<([f32; 3], [f32; 3], [String; 6], [[f32; 4]; 6])>,
+    boxes: Vec<([f32; 3], [f32; 3], [String; 6], [[f32; 4]; 6], [u8; 6], abi::BoxTilt)>,
     collision: Vec<[f32; 6]>,
     selection: Vec<[f32; 6]>,
     components: Vec<Pending>,
+    signal: SignalSpec,
+}
+
+/// What a state is to redstone, see `abi::SignalDesc`.
+#[derive(Clone, Copy)]
+struct SignalSpec {
+    kind: u32,
+    attach: u32,
+    front: u32,
+    delay: u32,
+    mode: u32,
+    head: &'static str,
+}
+
+impl Default for SignalSpec {
+    fn default() -> Self {
+        let d = abi::SignalDesc::DEFAULT;
+        SignalSpec { kind: d.kind, attach: d.attach, front: d.front, delay: d.delay, mode: d.mode, head: "" }
+    }
 }
 
 impl StateDef {
@@ -478,6 +498,7 @@ impl StateDef {
             collision: Vec::new(),
             selection: Vec::new(),
             components: Vec::new(),
+            signal: SignalSpec::default(),
         }
     }
 }
@@ -487,8 +508,12 @@ struct BlockCallbacks {
     on_use: Option<abi::Callback>,
     on_neighbor: Option<abi::Callback>,
     on_scheduled: Option<abi::Callback>,
+    on_pass: Option<abi::Callback>,
+    signal_read: Option<abi::Callback>,
     placement: Option<abi::Callback>,
     on_grow: Option<abi::Callback>,
+    on_signal: Option<abi::Callback>,
+    signal_logic: Option<abi::Callback>,
     /// (mean seconds per step, light needed).
     grow: (f32, u32),
 }
@@ -650,7 +675,7 @@ macro_rules! state_setters {
                 s.flags &= !bf::OPAQUE;
                 s.opacity = 0;
                 s.layer = Layer::Cutout;
-                s.boxes.push((min, max, Default::default(), [[-1.0; 4]; 6]));
+                s.boxes.push((min, max, Default::default(), [[-1.0; 4]; 6], [0; 6], abi::BoxTilt::NONE));
             });
             self
         }
@@ -665,8 +690,58 @@ macro_rules! state_setters {
                 s.flags &= !bf::OPAQUE;
                 s.opacity = 0;
                 s.layer = Layer::Cutout;
-                s.boxes.push((min, max, std::array::from_fn(|i| block_tex(ns, faces[i].0)), faces.map(|f| f.1)));
+                s.boxes.push((min, max, std::array::from_fn(|i| block_tex(ns, faces[i].0)), faces.map(|f| f.1), [0; 6], abi::BoxTilt::NONE));
             });
+            self
+        }
+        /// `model_box_faces` written for a floor with the front to the north, turned for `frame`
+        /// (`Props::frame`). A texel rectangle with a negative start is taken from the box.
+        pub fn framed_box(self, frame: crate::signal::Frame, min: [f32; 3], max: [f32; 3], faces: [(&str, [f32; 4]); 6]) -> Self {
+            self.framed_box_with(frame, min, max, faces, [0; 6], None)
+        }
+        /// `framed_box` with its pictures given quarter turns of their own, per face, and the box
+        /// tilted: around a point (texels) about an axis (own -X, +X ... as a `Dir`) by degrees,
+        /// right-handed, like a model file's element. `FramedBox::NO_FACE` leaves a face out.
+        pub fn framed_box_with(mut self, frame: crate::signal::Frame, min: [f32; 3], max: [f32; 3], faces: [(&str, [f32; 4]); 6], turns: [u8; 6], tilt: Option<([f32; 3], crate::Dir, f32)>) -> Self {
+            let local: [(&str, [f32; 4], u8); 6] = std::array::from_fn(|i| (faces[i].0, if faces[i].1[0] == -1.0 { crate::signal::box_uv(i, min, max) } else { faces[i].1 }, turns[i]));
+            let (lo, hi, placed, turn) = frame.place(min, max, local);
+            let turn: [u8; 6] = std::array::from_fn(|i| (turn[i] + placed[i].2) % 4);
+            let tilt = tilt.map_or(abi::BoxTilt::NONE, |(origin, axis, degrees)| abi::BoxTilt { origin: frame.at(origin), axis: frame.along(axis), degrees });
+            self.each(|s, ns| {
+                if s.model != Model::Boxes {
+                    s.boxes.clear();
+                }
+                s.model = Model::Boxes;
+                s.flags &= !bf::OPAQUE;
+                s.opacity = 0;
+                s.layer = Layer::Cutout;
+                s.boxes.push((lo, hi, std::array::from_fn(|i| block_tex(ns, placed[i].0)), placed.map(|f| f.1), turn, tilt));
+            });
+            self
+        }
+        /// `selection` and `collision` for a model written for a floor with the front to the north.
+        pub fn framed_selection(self, frame: crate::signal::Frame, min: [f32; 3], max: [f32; 3]) -> Self {
+            let (lo, hi) = frame.corners(min, max);
+            self.selection(lo, hi)
+        }
+        pub fn framed_collision(self, frame: crate::signal::Frame, min: [f32; 3], max: [f32; 3]) -> Self {
+            let (lo, hi) = frame.corners(min, max);
+            self.collision(lo, hi)
+        }
+        /// Doesn't carry redstone power, the way glass doesn't. Wire can still lie on it.
+        pub fn redstone_blocker(mut self) -> Self {
+            self.each(|s, _| s.flags |= bf::SIGNAL_BLOCKER);
+            self
+        }
+        /// Pistons and motors can't move it. A state with this on a platform stops the platform, if
+        /// more of the platform is pushing it.
+        pub fn immovable(mut self) -> Self {
+            self.each(|s, _| s.flags |= bf::IMMOVABLE);
+            self
+        }
+        /// A piston moving it takes what touches it along, like slime.
+        pub fn sticky(mut self) -> Self {
+            self.each(|s, _| s.flags |= bf::STICKY);
             self
         }
         /// What the crosshair picks, outlines and cracks (pixels 0..16; call again for more boxes),
@@ -736,6 +811,7 @@ pub struct BlockBuilder<'a> {
     opens: String,
     looks: Option<Box<dyn for<'s> Fn(&Props, State<'s>) -> State<'s>>>,
     facing: Option<(crate::Facings, crate::Toward)>,
+    signal: Option<SignalBuild>,
     placement: Option<std::sync::Arc<dyn Fn(&Place, &mut Props) + Send + Sync>>,
 }
 
@@ -781,6 +857,30 @@ impl Props {
     /// The `facing` property.
     pub fn facing(&self) -> crate::Dir {
         crate::Dir::from_name(self.get("facing")).unwrap_or(crate::Dir::Up)
+    }
+    /// How the block is turned, from its `attach` and `front` or `facing` properties, for
+    /// `framed_box`.
+    pub fn frame(&self) -> crate::signal::Frame {
+        let attach = crate::Dir::from_name(self.get("attach")).unwrap_or(crate::Dir::Down);
+        let front = crate::Dir::from_name(self.get("front")).unwrap_or_else(|| self.facing());
+        crate::signal::Frame::new(attach, front)
+    }
+    /// A block that faces along `facing`, with its top that way: for `framed_box`.
+    pub fn frame_up(&self) -> crate::signal::Frame {
+        let f = self.facing();
+        let north = if f.face() / 2 == 1 { crate::Dir::North } else { crate::Dir::Up };
+        crate::signal::Frame::new(f.opposite(), north)
+    }
+    /// A block with its north to `facing`, the way vanilla turns one: its top stays up unless it
+    /// faces up or down.
+    pub fn frame_front(&self) -> crate::signal::Frame {
+        let f = self.facing();
+        let attach = match f {
+            crate::Dir::Up => crate::Dir::North,
+            crate::Dir::Down => crate::Dir::South,
+            _ => crate::Dir::Down,
+        };
+        crate::signal::Frame::new(attach, f)
     }
     pub fn set(&mut self, name: &str, value: &str) {
         if let Some(v) = self.values.iter_mut().find(|v| v.0 == name) {
@@ -998,6 +1098,12 @@ impl<'a> BlockBuilder<'a> {
         self
     }
 
+    /// On a moving body, it came to another cell of the world: a drill, a plow. `pos` is that cell,
+    /// in the world's coordinates; `other` where this is on the body, `entity` the body.
+    pub fn on_pass(mut self, f: impl Fn(&mut BlockEvent) + Send + Sync + 'static) -> Self {
+        self.callbacks.on_pass = Some(callback(move |a: &mut abi::BlockEventArgs| f(BlockEvent::wrap(a))));
+        self
+    }
     pub fn on_scheduled(mut self, f: impl Fn(&mut BlockEvent) + Send + Sync + 'static) -> Self {
         self.callbacks.on_scheduled = Some(callback(move |a: &mut abi::BlockEventArgs| f(BlockEvent::wrap(a))));
         self
@@ -1029,6 +1135,119 @@ impl<'a> BlockBuilder<'a> {
         self.prop("facing", allowed.dirs().map(|d| d.name()).collect::<Vec<_>>().as_slice())
     }
 
+    /// Which way it faces as an item and by default (after `facing`).
+    pub fn facing_first(mut self, d: crate::Dir) -> Self {
+        if let Some((_, values)) = self.props.iter_mut().find(|p| p.0 == "facing") {
+            if let Some(i) = values.iter().position(|v| v == d.name()) {
+                values.swap(0, i);
+            }
+        }
+        self
+    }
+
+    /// Wire that lies on any face of a block, connecting to wire of the same block only; textures
+    /// are the dot on top and the line on the sides. A property `faces` holds where it lies.
+    pub fn wire(mut self) -> Self {
+        self.each(|s, _| {
+            s.flags = 0;
+            s.model = Model::Wire;
+            s.opacity = 0;
+            s.layer = Layer::Cutout;
+            s.put(&c::HARDNESS, 0.0);
+        });
+        self.signal = Some(SignalBuild { kind: abi::signal_kind::WIRE, ..SignalBuild::default() });
+        self.prop("faces", 0..=63)
+    }
+
+    fn signal_props(mut self, kind: u32, levels: u32, attach: bool, front: bool) -> Self {
+        self.signal = Some(SignalBuild { kind, attaches: attach, ..self.signal.unwrap_or_default() });
+        if attach {
+            self = self.prop("attach", ["down", "up", "north", "south", "west", "east"]);
+        }
+        if front {
+            self = self.prop("front", ["north", "south", "west", "east", "up", "down"]);
+        }
+        match levels {
+            0 => self,
+            2 => self.prop("power", ["off", "on"]),
+            3 => self.prop("power", 0..=2),
+            _ => self.prop("power", 0..=15),
+        }
+    }
+
+    /// Always gives full power to what is next to it.
+    pub fn signal_block(self) -> Self {
+        self.signal_props(abi::signal_kind::SOURCE, 0, false, false)
+    }
+    /// A lever or button: goes on the clicked face; its `power` property (`off`, `on`) gives full
+    /// power around it and strongly into the block it is on.
+    pub fn signal_switch(self) -> Self {
+        self.signal_props(abi::signal_kind::SOURCE, 2, true, true)
+    }
+    /// Goes on the clicked face and gives full power unless the block it is on has any.
+    pub fn signal_torch(self) -> Self {
+        self.signal_props(abi::signal_kind::TORCH, 2, true, false)
+    }
+    /// Goes on the clicked face; full power out of the front, a `delay` property (1..4 redstone
+    /// ticks, two game ticks each) after what is behind it has any.
+    pub fn signal_repeater(self) -> Self {
+        self.signal_props(abi::signal_kind::REPEATER, 2, true, true).prop("delay", 1..=4)
+    }
+    /// Goes on the clicked face; out of the front what is behind it, unless a side has more. Its
+    /// `mode` property (`compare`, `subtract`) takes the sides from it instead.
+    pub fn signal_comparator(self) -> Self {
+        self.signal_props(abi::signal_kind::COMPARATOR, 16, true, true).prop("mode", ["compare", "subtract"])
+    }
+    /// A pulse out of its back when the block at its `facing` changes (after `facing`).
+    pub fn signal_observer(self) -> Self {
+        self.signal_props(abi::signal_kind::OBSERVER, 2, false, false)
+    }
+    /// Its `power` property, if it has one, and `on_signal` follow the power around it.
+    pub fn signal_sink(self) -> Self {
+        self.signal_props(abi::signal_kind::SINK, 0, false, false)
+    }
+    /// What a comparator behind it reads, 0..15, instead of how full it is. It looks again when
+    /// the block changes; for anything else it depends on, call `World::signal_read_changed`.
+    pub fn signal_read(mut self, f: impl Fn(&World, [i32; 3]) -> u8 + Send + Sync + 'static) -> Self {
+        self.callbacks.signal_read = Some(callback(move |a: &mut abi::SignalReadArgs| a.output = f(&World::from_raw(a.world), a.pos) as u32));
+        self
+    }
+    /// Goes along its `facing` (after `facing`), any of the six ways. Its front is what sticks: with
+    /// power from any other side it carries itself, the block in front of it and what is stuck to
+    /// that the way slime does, half a block a second per level of power. Circuits on it go on.
+    /// Without power, or against what it can't go through, it all lands on a whole block.
+    /// `power`: 0 idle, 1 going, 2 stuck. `breaks`: it breaks what is in its way instead.
+    pub fn signal_motor(mut self, breaks: bool) -> Self {
+        self.signal = Some(SignalBuild { mode: breaks as u32, ..SignalBuild::default() });
+        self.signal_props(abi::signal_kind::MOTOR, 3, false, false)
+    }
+    /// Pushes blocks at its `facing` with power from any other side, the `power` property saying
+    /// it is out (after `facing`). `head`: the block it pushes out, with a `facing` property.
+    /// `sticky` brings a block back.
+    pub fn signal_piston(mut self, head: &'static str, sticky: bool) -> Self {
+        self.signal = Some(SignalBuild { head, mode: sticky as u32, ..SignalBuild::default() });
+        self.signal_props(abi::signal_kind::PISTON, 2, false, false)
+    }
+    /// The moving part of a piston (after `facing`): it goes when the piston does.
+    pub fn signal_piston_head(mut self) -> Self {
+        self.each(|s, _| s.flags |= bf::NOT_STOOD_ON);
+        self.signal_props(abi::signal_kind::PISTON_HEAD, 0, false, false)
+    }
+    /// A gate with logic of your own, on the clicked face: what comes out of the front `delay`
+    /// game ticks after what goes in calls for it. Runs only when something around it changes.
+    pub fn signal_logic(mut self, delay: u32, f: impl Fn(&SignalLogic) -> u8 + Send + Sync + 'static) -> Self {
+        self.callbacks.signal_logic = Some(callback(move |a: &mut abi::LogicArgs| {
+            a.output = f(SignalLogic::wrap(a)) as u32;
+        }));
+        self.signal = Some(SignalBuild { delay: Some(delay), ..self.signal.unwrap_or_default() });
+        self.signal_props(abi::signal_kind::LOGIC, 16, true, true)
+    }
+    /// Called when the power around a `signal_sink` changes.
+    pub fn on_signal(mut self, f: impl Fn(&SignalEvent) + Send + Sync + 'static) -> Self {
+        self.callbacks.on_signal = Some(callback(move |a: &mut abi::SignalArgs| f(SignalEvent::wrap(a))));
+        self
+    }
+
     /// Chooses property values when a player places it (after `facing`):
     /// `.placement(|p, props| props.set("axis", if p.face() < 2 { "x" } else { "y" }))`.
     pub fn placement(mut self, f: impl Fn(&Place, &mut Props) + Send + Sync + 'static) -> Self {
@@ -1044,6 +1263,7 @@ impl Drop for BlockBuilder<'_> {
         }
         // One state per combination of property values, each customized by `.states(..)`.
         let looks = self.looks.take();
+        let signal = self.signal;
         if !self.props.is_empty() || looks.is_some() {
             let template = self.states[0].clone();
             let ns = self.reg.ns;
@@ -1054,16 +1274,34 @@ impl Drop for BlockBuilder<'_> {
                     if let Some(f) = &looks {
                         f(p, State { def: &mut d, ns });
                     }
+                    if let Some(b) = &signal {
+                        b.apply(p, &mut d, ns);
+                    }
                     d
                 })
                 .collect();
+        } else if let Some(b) = &signal {
+            let none = Props { values: Vec::new() };
+            let ns = self.reg.ns;
+            for d in &mut self.states {
+                b.apply(&none, d, ns);
+            }
         }
-        if self.facing.is_some() || self.placement.is_some() {
+        let attaches = signal.is_some_and(|b| b.attaches);
+        let switch = signal.is_some_and(|b| b.kind == abi::signal_kind::SOURCE);
+        if self.facing.is_some() || self.placement.is_some() || attaches {
             let (props, facing, user) = (self.props.clone(), self.facing, self.placement.take());
             self.callbacks.placement = Some(callback(move |a: &mut abi::PlaceArgs| {
                 let mut p = Props { values: props.iter().map(|(n, v)| (n.clone(), v[0].clone())).collect() };
                 if let Some((allowed, toward)) = facing {
                     p.set("facing", toward.choose(allowed, a.face, a.look).name());
+                }
+                if attaches {
+                    let attach = crate::Dir::from_face(a.face).opposite();
+                    p.set("attach", attach.name());
+                    // A switch on a wall is always upright, as in vanilla; a gate goes with the look.
+                    let front = if switch && attach.horizontal() { crate::Dir::Down } else { crate::signal::along(attach, a.look) };
+                    p.set("front", front.name());
                 }
                 let first = a.state;
                 if let Some(f) = &user {
@@ -1077,7 +1315,7 @@ impl Drop for BlockBuilder<'_> {
         let boxes: Vec<Vec<abi::ModelBox>> = self
             .states
             .iter()
-            .map(|s| s.boxes.iter().map(|(min, max, t, uv)| abi::ModelBox { min: *min, max: *max, textures: std::array::from_fn(|i| Str::new(&t[i])), uv: *uv }).collect())
+            .map(|s| s.boxes.iter().map(|(min, max, t, uv, turn, tilt)| abi::ModelBox { turn: *turn, tilt: *tilt, min: *min, max: *max, textures: std::array::from_fn(|i| Str::new(&t[i])), uv: *uv }).collect())
             .collect();
         let mut scratch: Vec<Vec<Vec<u8>>> = vec![Vec::new(); self.states.len()];
         let state_values: Vec<Vec<abi::CompValue>> = self.states.iter().zip(scratch.iter_mut()).map(|(s, sc)| raw_values(&s.components, sc)).collect();
@@ -1097,6 +1335,7 @@ impl Drop for BlockBuilder<'_> {
                 collision: Slice::new(&s.collision),
                 selection: Slice::new(&s.selection),
                 components: Slice::new(v),
+                signal: abi::SignalDesc { kind: s.signal.kind, attach: s.signal.attach, front: s.signal.front, delay: s.signal.delay, mode: s.signal.mode, head: Str::new(s.signal.head) },
                 ..abi::StateDesc::DEFAULT
             })
             .collect();
@@ -1114,11 +1353,15 @@ impl Drop for BlockBuilder<'_> {
 
             on_neighbor: cb.on_neighbor.unwrap_or(abi::Callback::NONE),
             on_scheduled: cb.on_scheduled.unwrap_or(abi::Callback::NONE),
+            on_pass: cb.on_pass.unwrap_or(abi::Callback::NONE),
+            signal_read: cb.signal_read.unwrap_or(abi::Callback::NONE),
             placement: cb.placement.unwrap_or(abi::Callback::NONE),
             replace: self.replace as u32,
             grow_seconds: cb.grow.0,
             grow_light: cb.grow.1,
             on_grow: cb.on_grow.unwrap_or(abi::Callback::NONE),
+            on_signal: cb.on_signal.unwrap_or(abi::Callback::NONE),
+            signal_logic: cb.signal_logic.unwrap_or(abi::Callback::NONE),
             own_states: (self.own_states || !self.replace) as u32,
             retexture: Slice::new(&retexture),
             opens: Str::new(&self.opens),
@@ -1656,6 +1899,118 @@ impl Gen {
     #[inline]
     pub fn get(&mut self, x: usize, y: usize, z: usize) -> u32 {
         self.blocks()[(y * 16 + z) * 16 + x]
+    }
+}
+
+/// How `BlockBuilder` makes a state's `SignalSpec` from its properties.
+#[derive(Clone, Copy, Default)]
+struct SignalBuild {
+    kind: u32,
+    attaches: bool,
+    delay: Option<u32>,
+    mode: u32,
+    head: &'static str,
+}
+
+impl SignalBuild {
+    fn apply(&self, p: &Props, d: &mut StateDef, ns: &'static str) {
+        let dir = |name: &str| crate::Dir::from_name(p.get(name));
+        let front = dir("front").or(dir("facing"));
+        let mut s = SignalSpec { kind: self.kind, mode: self.mode, head: self.head, ..SignalSpec::default() };
+        if let Some(a) = dir("attach") {
+            s.attach = a.face();
+            // A torch powers the block on the far side of it, as high as it stands.
+            if self.kind == abi::signal_kind::TORCH {
+                s.front = a.opposite().face();
+            }
+        }
+        if let Some(f) = front {
+            s.front = f.face();
+        }
+        if let Some(t) = self.delay {
+            s.delay = t;
+        }
+        // A `delay` is in redstone ticks, two game ticks each.
+        if p.int("delay") > 0 {
+            s.delay = p.int("delay") * 2;
+        }
+        if p.is("mode", "subtract") {
+            s.mode = 1;
+        }
+        d.signal = s;
+        if self.attaches {
+            if let Some(a) = dir("attach") {
+                let _ = State { def: d, ns }.needs(a.face(), "");
+            }
+        }
+        if self.kind == abi::signal_kind::WIRE {
+            let mask = p.int("faces");
+            // A thin plate on each face it lies on.
+            const PLATES: [[f32; 6]; 6] = [[0.0, 0.0, 0.0, 1.0, 16.0, 16.0], [15.0, 0.0, 0.0, 16.0, 16.0, 16.0], [0.0, 0.0, 0.0, 16.0, 1.0, 16.0], [0.0, 15.0, 0.0, 16.0, 16.0, 16.0], [0.0, 0.0, 0.0, 16.0, 16.0, 1.0], [0.0, 0.0, 15.0, 16.0, 16.0, 16.0]];
+            d.selection = (0..6).filter(|f| mask & (1 << f) != 0).map(|f| PLATES[f as usize]).collect();
+            if mask == 0 {
+                d.selection = vec![PLATES[2]];
+            }
+        }
+    }
+}
+
+/// What `BlockBuilder::on_signal` is told.
+pub struct SignalEvent {
+    args: abi::SignalArgs,
+}
+
+impl SignalEvent {
+    fn wrap(a: &mut abi::SignalArgs) -> &mut SignalEvent {
+        unsafe { &mut *(a as *mut abi::SignalArgs as *mut SignalEvent) }
+    }
+    pub fn world(&self) -> World {
+        World::from_raw(self.args.world)
+    }
+    pub fn pos(&self) -> [i32; 3] {
+        self.args.pos
+    }
+    pub fn state(&self) -> u32 {
+        self.args.state
+    }
+    /// Power around it now, 0..15.
+    pub fn level(&self) -> u8 {
+        self.args.level as u8
+    }
+    /// What it was.
+    pub fn was(&self) -> u8 {
+        self.args.was as u8
+    }
+    /// It just got power.
+    pub fn rising(&self) -> bool {
+        self.args.was == 0 && self.args.level > 0
+    }
+}
+
+/// What came in on each side of a `BlockBuilder::signal_logic` block.
+pub struct SignalLogic {
+    args: abi::LogicArgs,
+}
+
+impl SignalLogic {
+    fn wrap(a: &mut abi::LogicArgs) -> &mut SignalLogic {
+        unsafe { &mut *(a as *mut abi::LogicArgs as *mut SignalLogic) }
+    }
+    pub fn world(&self) -> World {
+        World::from_raw(self.args.world)
+    }
+    pub fn pos(&self) -> [i32; 3] {
+        self.args.pos
+    }
+    pub fn rear(&self) -> u8 {
+        self.args.rear as u8
+    }
+    pub fn sides(&self) -> [u8; 2] {
+        [self.args.sides[0] as u8, self.args.sides[1] as u8]
+    }
+    /// What it gives now.
+    pub fn output(&self) -> u8 {
+        self.args.output as u8
     }
 }
 

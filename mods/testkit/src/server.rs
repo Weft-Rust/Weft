@@ -22,6 +22,9 @@ pub static PROTECT_GOLD: Config<bool> = Config::named("protect_gold");
 pub static HALF_DAMAGE: Config<bool> = Config::named("half_damage");
 /// Mobs may not attack while it is on.
 pub static PEACE: Config<bool> = Config::named("peace");
+static DRILL: Block = Block::named("drill");
+/// How many cells of the world a drill on a moving body has come to.
+static PASSES: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
 /// Players can't be hurt (`question::HURT`) or use items (`question::USE_ITEM`) while on.
 pub static NO_HURT: Config<bool> = Config::named("no_hurt");
 pub static NO_USE: Config<bool> = Config::named("no_use");
@@ -52,6 +55,14 @@ pub fn register(r: &mut Registry) {
     static VARIED_BOX: Block = Block::named("varied_box");
     r.block(&VARIED_PLANT).texture("varied").plant().no_item();
     r.block(&VARIED_BOX).texture("varied").model_box([2.0, 0.0, 2.0], [14.0, 16.0, 14.0]).no_item();
+    // A mod's own redstone: a gate on when both its rear and a side have power, another wire.
+    static AND_GATE: Block = Block::named("and_gate");
+    static BLUE_WIRE: Block = Block::named("blue_wire");
+    r.block(&DRILL).on_pass(|_| {
+        PASSES.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    }).texture("varied").no_item();
+    r.block(&AND_GATE).signal_logic(2, |s| if s.rear() > 0 && s.sides().iter().any(|v| *v > 0) { 15 } else { 0 }).model_box([0.0, 0.0, 0.0], [16.0, 2.0, 16.0]).not_solid().texture("varied").no_item();
+    r.block(&BLUE_WIRE).wire().textures("varied", "varied", "varied").no_item();
     r.entity_component(&MARK, 0, component_flags::SYNC_WATCHERS);
     r.attach(&PIG, &MARK);
     r.config(&COUNT_MARKS).bool(false).world();
@@ -201,6 +212,28 @@ fn run(w: &World, cmd: &Command) -> Result<String, String> {
     (op.2)(w, cmd, player, me)
 }
 
+/// A repeater with a delay of four into a block with a torch on it, the torch feeding the
+/// repeater through wire that goes clear of that block, which would hold it on: flips slowly
+/// enough for a torch not to burn out.
+fn clock(w: &World, p: [i32; 3]) -> Result<String, String> {
+    let state = |name: &str, props: &[(&str, &str)]| -> Result<u32, String> {
+        let mut s = Block::lookup(name).ok_or(format!("no {name}"))?;
+        for (k, v) in props {
+            s = state_with(s, k, v).ok_or(format!("{name} has no {k}={v}"))?;
+        }
+        Ok(s)
+    };
+    let wire = Block::lookup("base:redstone").ok_or("no redstone")? + (1 << 2);
+    let at = |x: i32, z: i32| [p[0] + x, p[1], p[2] + z];
+    w.set(at(0, 0), state("base:stone", &[])?);
+    w.set(at(1, 0), state("base:redstone_torch", &[("attach", "west")])?);
+    for (x, z) in [(2, 0), (2, 1), (2, 2), (1, 2), (0, 2), (-1, 2), (-2, 2), (-2, 1), (-2, 0)] {
+        w.set(at(x, z), wire);
+    }
+    w.set(at(-1, 0), state("base:repeater", &[("attach", "down"), ("front", "east"), ("delay", "4")])?);
+    Ok(String::new())
+}
+
 /// `(name, usage, what it does)`, the running player and where it stands given.
 type Run = fn(&World, &Command, u64, [i32; 3]) -> Result<String, String>;
 
@@ -211,6 +244,67 @@ static PROTECTED: std::sync::Mutex<Option<[i32; 3]>> = std::sync::Mutex::new(Non
 /// parses positions (`~dx`), block, item and entity names, and the answer goes back to the test
 /// that ran it (`Client::run_command`), as `ok ..` or `err ..`.
 const OPS: &[(&str, &str, Run)] = &[
+    ("lift", "<at:pos> <r:int>", |w, cmd, _, _| {
+        // All in a cube of that reach around it.
+        let (p, r) = (pos(cmd, "at")?, int::<i32>(cmd, "r")?);
+        let mut cells = Vec::new();
+        for x in -r..=r {
+            for y in -r..=r {
+                for z in -r..=r {
+                    cells.push([p[0] + x, p[1] + y, p[2] + z]);
+                }
+            }
+        }
+        Ok(w.lift(p, &cells).to_string())
+    }),
+    ("putdown", "<id:int>", |w, cmd, _, _| {
+        w.put_down(int(cmd, "id")?);
+        Ok(String::new())
+    }),
+    ("bodygo", "<id:int> <x:float> <y:float> <z:float> <ticks:int>", |w, cmd, _, _| {
+        w.body_go(int(cmd, "id")?, [cmd.float("x").ok_or("x")? as f64, cmd.float("y").ok_or("y")? as f64, cmd.float("z").ok_or("z")? as f64], int(cmd, "ticks")?);
+        Ok(String::new())
+    }),
+    ("passes", "", |_, _, _, _| Ok(PASSES.load(std::sync::atomic::Ordering::Relaxed).to_string())),
+    ("structureset", "<id:int> <x:int> <y:int> <z:int> <block:block>", |w, cmd, _, _| {
+        let (id, p) = (int::<u64>(cmd, "id")?, [int::<i32>(cmd, "x")?, int::<i32>(cmd, "y")?, int::<i32>(cmd, "z")?]);
+        if w.set_structure_block(id, p, self::id(cmd, "block")?) { Ok(String::new()) } else { Err(format!("no structure {id}")) }
+    }),
+    ("rsbuild", "<at:pos> <seed:int>", |w, cmd, _, _| crate::tests::redstone::build_turned(w, int::<u64>(cmd, "seed")?, pos(cmd, "at")?)),
+    ("rsfill", "<at:pos> <half:int>", |w, cmd, _, _| {
+        let (p, half) = (pos(cmd, "at")?, int::<i32>(cmd, "half")?);
+        let s = Block::lookup("base:redstone").ok_or("no redstone")? + (1 << 2);
+        for x in -half..half {
+            for z in -half..half {
+                w.set([p[0] + x, p[1], p[2] + z], s);
+            }
+        }
+        Ok(String::new())
+    }),
+    ("rsclear", "<at:pos> <half:int>", |w, cmd, _, _| {
+        let (p, half) = (pos(cmd, "at")?, int::<i32>(cmd, "half")?);
+        let air = 0;
+        for x in -half - 3..half + 3 {
+            for z in -half - 3..half + 3 {
+                w.set([p[0] + x, p[1], p[2] + z], air);
+            }
+        }
+        Ok(String::new())
+    }),
+    // A torch on a block with a repeater feeding it back: a clock that never burns out.
+    ("rsclock", "<at:pos> <n:int>", |w, cmd, _, _| {
+        let p = pos(cmd, "at")?;
+        clock(w, p)
+    }),
+    ("rsclocks", "<at:pos> <n:int>", |w, cmd, _, _| {
+        let (p, n) = (pos(cmd, "at")?, int::<i32>(cmd, "n")?);
+        let side = (n as f32).sqrt().ceil() as i32;
+        for i in 0..n {
+            let q = [p[0] + (i % side) * 6 - side * 3, p[1], p[2] + (i / side) * 6 - side * 3];
+            clock(w, q)?;
+        }
+        Ok(n.to_string())
+    }),
     ("set", "<pos:pos> <block:block>", |w, cmd, _, _| {
         let p = pos(cmd, "pos")?;
         if !w.set(p, id(cmd, "block")?) {
@@ -371,10 +465,11 @@ const OPS: &[(&str, &str, Run)] = &[
         Ok(format!("{n} drops"))
     }),
     ("find", "<r:int> <block:block>", |w, cmd, _, me| {
-        // The first block of that kind within `r` of the player.
+        // The first block of that kind within `r` of the player, not far above or below.
         let r: i32 = int(cmd, "r")?;
         let want = block_of(id(cmd, "block")?);
-        for y in me[1] - r..=me[1] + r {
+        let up = r.min(40);
+        for y in me[1] - up..=me[1] + up {
             for z in me[2] - r..=me[2] + r {
                 for x in me[0] - r..=me[0] + r {
                     if block_of(w.get([x, y, z])) == want {

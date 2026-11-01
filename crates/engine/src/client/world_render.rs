@@ -680,7 +680,7 @@ impl WorldRenderer {
     }
 
     /// `frames`: structures to draw and where their block (0, 0, 0) is in the world.
-    pub fn draw(&mut self, gpu: &mut dyn Backend, list: &mut CommandList, frame: &FrameInfo, cam: &Camera, scene: BufferId, frames: &[(u64, DVec3)]) {
+    pub fn draw(&mut self, gpu: &mut dyn Backend, list: &mut CommandList, frame: &FrameInfo, cam: &Camera, scene: BufferId, frames: &[(u64, DVec3)], lights: &FxHashMap<MeshKey, u32>) {
         let aspect = frame.width as f32 / frame.height.max(1) as f32;
         let view_proj = cam.proj(aspect) * cam.view();
         let cam_block = cam.pos.floor();
@@ -698,6 +698,16 @@ impl WorldRenderer {
         let planes = frustum_planes(view_proj);
         // Camera-relative offset of each structure drawn (k + 1 its index; 0 the world).
         let frame_offsets: Vec<Vec3> = frames.iter().map(|f| (f.1 - (cam_cube * 16).as_dvec3()).as_vec3()).collect();
+        // What a structure's meshes pick: its place and the world's light on that cube of it,
+        // full sky until it is known.
+        let mut picks: Vec<(Vec3, u32)> = frame_offsets.iter().map(|o| (*o, crate::world::light::SKY_FULL as u32)).collect();
+        let mut cube_pick: FxHashMap<MeshKey, i32> = FxHashMap::default();
+        for (&key, &light) in lights {
+            if let Some(k) = frames.iter().position(|f| f.0 == key.0) {
+                picks.push((frame_offsets[k], light));
+                cube_pick.insert(key, picks.len() as i32);
+            }
+        }
         // Regions in view, nearest first: what is drawn first then hides what is behind it.
         let side = (16 << REGION) as f32;
         let mut seen: Vec<(f32, &Vec<(MeshKey, GpuMesh)>)> = self
@@ -729,7 +739,7 @@ impl WorldRenderer {
                         ((key.1 - cam_cube).as_vec3() * 16.0 - cam_frac, 0)
                     } else {
                         let Some(k) = frames.iter().position(|f| f.0 == key.0) else { continue };
-                        (frame_offsets[k] + key.1.as_vec3() * 16.0 - cam_frac, k as i32 + 1)
+                        (frame_offsets[k] + key.1.as_vec3() * 16.0 - cam_frac, cube_pick.get(&key).copied().unwrap_or(k as i32 + 1))
                     };
                     let center = lo + Vec3::splat(8.0);
                     if planes.iter().all(|pl| pl.dot(center.extend(1.0)) > -13.86) {
@@ -815,11 +825,12 @@ impl WorldRenderer {
             return;
         }
         let obuf = crate::gpu_layout::frame_buffer(gpu, &mut self.origins, frame.slot, n, 16, usage::STORAGE, "origins");
-        let fbuf = crate::gpu_layout::frame_buffer(gpu, &mut self.offsets, frame.slot, frames.len() as u32 + 1, 16, usage::STORAGE, "frame offsets");
+        let fbuf = crate::gpu_layout::frame_buffer(gpu, &mut self.offsets, frame.slot, picks.len() as u32 + 1, 16, usage::STORAGE, "frame offsets");
         let offs = gpu.mapped(fbuf);
         offs[..16].fill(0);
-        for (k, o) in frame_offsets.iter().enumerate() {
+        for (k, (o, light)) in picks.iter().enumerate() {
             offs[(k + 1) * 16..(k + 1) * 16 + 12].copy_from_slice(bytemuck::cast_slice(&o.to_array()));
+            offs[(k + 1) * 16 + 12..(k + 1) * 16 + 16].copy_from_slice(&light.to_le_bytes());
         }
         let ibuf = crate::gpu_layout::frame_buffer(gpu, &mut self.indirect, frame.slot, n, 20, usage::INDIRECT, "indirect");
         let origins = Mapped(gpu.mapped(obuf)[..n as usize * 16].as_mut_ptr());

@@ -26,6 +26,9 @@ pub const ITEM: &str = "core:item";
 pub const VIRTUAL: &str = "core:virtual";
 /// A block falling as an entity (`Host::fall_block`), placed again where it lands.
 pub const FALLING: &str = "core:falling_block";
+pub const MOVING: &str = "core:moving_blocks";
+/// What a motor carries, and what `World::lift` makes.
+pub const PLATFORM: &str = "core:platform";
 
 #[derive(Clone, Debug)]
 pub struct Cuboid {
@@ -315,6 +318,9 @@ pub struct Game {
     pub item_kind: u32,
     pub virtual_kind: u32,
     pub falling_kind: u32,
+    /// Blocks a piston is moving, an entity while they do.
+    pub moving_kind: u32,
+    pub platform_kind: u32,
     pub energy: u32,
     /// (owner, hook, callback) in mod order, see `abi::client_hook`.
     pub client_hooks: Vec<(ModId, u32, Callback)>,
@@ -1104,6 +1110,12 @@ pub fn freeze_entities(raws: &mut [RawGame], errors: &mut Vec<String>) -> Entiti
     entities.push(RawEntity { name: ITEM.into(), cell: 0, desc: builtin(ITEM, 0.25, 0.25, ef::INVULNERABLE), replace: false, components: Vec::new() });
     entities.push(RawEntity { name: VIRTUAL.into(), cell: 0, desc: builtin(VIRTUAL, 0.0, 0.0, ef::INVULNERABLE | ef::NO_GRAVITY), replace: false, components: Vec::new() });
     entities.push(RawEntity { name: FALLING.into(), cell: 0, desc: builtin(FALLING, 0.98, 1.0, ef::INVULNERABLE | ef::SOLID), replace: false, components: Vec::new() });
+    let mut moving = builtin(MOVING, 1.0, 1.0, ef::INVULNERABLE | ef::SOLID | ef::KINEMATIC | ef::NO_GRAVITY);
+    moving.carry_height = 1.0;
+    entities.push(RawEntity { name: MOVING.into(), cell: 0, desc: moving, replace: false, components: Vec::new() });
+    let mut platform = builtin(PLATFORM, 1.0, 1.0, ef::INVULNERABLE | ef::SOLID | ef::KINEMATIC | ef::NO_GRAVITY);
+    platform.carry_height = 3.0;
+    entities.push(RawEntity { name: PLATFORM.into(), cell: 0, desc: platform, replace: false, components: Vec::new() });
     entities.sort_by(|a, b| a.name.cmp(&b.name).then(a.replace.cmp(&b.replace)));
     let mut kept: Vec<RawEntity> = Vec::with_capacity(entities.len());
     let mut replaced_cells: Vec<(usize, String)> = Vec::new();
@@ -1239,6 +1251,8 @@ pub fn freeze(
     g.player_kind = g.entity_names[PLAYER];
     g.item_kind = g.entity_names[ITEM];
     g.falling_kind = g.entity_names[FALLING];
+    g.moving_kind = g.entity_names[MOVING];
+    g.platform_kind = g.entity_names[PLATFORM];
     g.virtual_kind = g.entity_names[VIRTUAL];
     g.client_hooks.sort_by_key(|h| order(h.0));
     entity_ticks.sort_by_key(|t| order(t.0));

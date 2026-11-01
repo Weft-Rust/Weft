@@ -97,6 +97,7 @@ fn leaves(r: &mut Registry, handle: &'static Block, tex: &str) {
         .opacity(1)
         .tint(&tints::FOLIAGE)
         .tag("leaves")
+        .redstone_blocker()
         .mineable("shears")
         .tab(&crate::tabs::NATURAL);
     // Vanilla: a sapling one time in 20, oak leaves an apple one time in 200.
@@ -134,8 +135,8 @@ pub fn register(r: &mut Registry) {
     r.block(&SANDSTONE).sound_group("stone").textures("sandstone_top", "sandstone_side", "sandstone_bottom").hardness(0.8).mineable("pickaxe").needs_tool(0).tab(&crate::tabs::BUILDING);
     r.block(&SNOW).sound_group("sand").hardness(0.2).mineable("shovel").tab(&crate::tabs::NATURAL);
     // Blue lamps and glass are made with it.
-    r.block(&ICE).sound_group("glass").tag("ice").tag("dyes/blue").hardness(0.5).translucent().opacity(2).friction(0.98).mineable("pickaxe").drops_nothing().tab(&crate::tabs::NATURAL);
-    r.block(&OBSIDIAN).sound_group("stone").hardness(50.0).mineable("pickaxe").needs_tool(tool_tier::DIAMOND).tab(&crate::tabs::NATURAL);
+    r.block(&ICE).redstone_blocker().sound_group("glass").tag("ice").tag("dyes/blue").hardness(0.5).translucent().opacity(2).friction(0.98).mineable("pickaxe").drops_nothing().tab(&crate::tabs::NATURAL);
+    r.block(&OBSIDIAN).immovable().sound_group("stone").hardness(50.0).mineable("pickaxe").needs_tool(tool_tier::DIAMOND).tab(&crate::tabs::NATURAL);
     r.block(&COAL_ORE).sound_group("stone").hardness(3.0).mineable("pickaxe").needs_tool(0).drops("coal", 1).tag("ores").tag("ores/coal").tab(&crate::tabs::NATURAL);
     r.block(&IRON_ORE).sound_group("stone").hardness(3.0).mineable("pickaxe").needs_tool(tool_tier::STONE).drops("raw_iron", 1).tag("ores").tag("ores/iron").tab(&crate::tabs::NATURAL);
     r.block(&GOLD_ORE).sound_group("stone").hardness(3.0).mineable("pickaxe").needs_tool(tool_tier::IRON).drops("raw_gold", 1).tag("ores").tag("ores/gold").tab(&crate::tabs::NATURAL);
@@ -189,9 +190,9 @@ pub fn register(r: &mut Registry) {
         .drops("dirt", 1)
         .tab(&crate::tabs::NATURAL);
 
-    r.block(&GLASS).sound_group("glass").tag("glass").cutout().cull_same().hardness(0.3).drops_nothing().tab(&crate::tabs::BUILDING);
+    r.block(&GLASS).redstone_blocker().sound_group("glass").tag("glass").cutout().cull_same().hardness(0.3).drops_nothing().tab(&crate::tabs::BUILDING);
     for (name, col) in [("red", [0u8, 12, 12]), ("green", [12, 0, 12]), ("blue", [12, 12, 0])] {
-        r.block(Block::generated(format!("{name}_stained_glass"))).sound_group("glass").tag(&format!("stained_glass/{name}")).texture(&format!("glass_{name}")).translucent().filter(col[0], col[1], col[2]).hardness(0.3).tab(&crate::tabs::COLORED);
+        r.block(Block::generated(format!("{name}_stained_glass"))).redstone_blocker().sound_group("glass").tag(&format!("stained_glass/{name}")).texture(&format!("glass_{name}")).translucent().filter(col[0], col[1], col[2]).hardness(0.3).tab(&crate::tabs::COLORED);
     }
     for (name, rgb) in [("red", [15u8, 3, 2]), ("green", [2, 15, 4]), ("blue", [3, 6, 15])] {
         r.block(Block::generated(format!("{name}_lamp"))).sound_group("glass").tag(&format!("lamps/{name}")).texture(&format!("lamp_{name}")).light_rgb(rgb[0], rgb[1], rgb[2]).hardness(0.3).tab(&crate::tabs::COLORED);
@@ -259,17 +260,19 @@ pub fn register(r: &mut Registry) {
 /// Torches stand on the floor or hang on a wall, facing away from it.
 pub const TORCH_FACINGS: Facings = Facings::only(&[Dir::Up, Dir::North, Dir::East, Dir::South, Dir::West]);
 
-/// A torch facing `d`: on the floor (`Up`) or raised against the wall behind it. Wall torches
-/// stand straight: vanilla's lean needs rotated block boxes.
+/// A torch facing `d`: on the floor (`Up`), hanging (`Down`), or leaning out from the wall behind
+/// it, by vanilla's numbers.
 pub fn torch_state<'a>(d: Dir, s: State<'a>, texture: &str) -> State<'a> {
-    let (min, max) = match d {
-        Dir::South => ([7.0, 3.0, 0.0], [9.0, 13.0, 2.0]),
-        Dir::West => ([14.0, 3.0, 7.0], [16.0, 13.0, 9.0]),
-        Dir::North => ([7.0, 3.0, 14.0], [9.0, 13.0, 16.0]),
-        Dir::East => ([0.0, 3.0, 7.0], [2.0, 13.0, 9.0]),
-        _ => ([7.0, 0.0, 7.0], [9.0, 10.0, 9.0]),
-    };
-    s.texture(texture).model_box(min, max).needs(d.opposite().face(), "")
+    let side = (texture, [7.0, 6.0, 9.0, 16.0]);
+    let faces = [side, side, (texture, [7.0, 13.0, 9.0, 15.0]), (texture, [7.0, 6.0, 9.0, 8.0]), side, side];
+    let s = s.texture(texture).needs(d.opposite().face(), "");
+    if d.horizontal() {
+        let frame = weft_sdk::signal::Frame::leaning(d.opposite());
+        s.framed_box_with(frame, [-1.0, 3.5, 7.0], [1.0, 13.5, 9.0], faces, [0; 6], Some(([0.0, 3.5, 8.0], Dir::South, -22.5))).framed_selection(frame, [0.0, 3.0, 5.5], [5.0, 13.0, 10.5])
+    } else {
+        let frame = weft_sdk::signal::Frame::new(d.opposite(), Dir::North);
+        s.framed_box(frame, [7.0, 0.0, 7.0], [9.0, 10.0, 9.0], faces).framed_selection(frame, [6.0, 0.0, 6.0], [10.0, 10.0, 10.0])
+    }
 }
 
 /// Sugar cane and cacti grow a block on top, up to three high.

@@ -648,21 +648,25 @@ impl UiRenderer {
         let (h, q, up) = (size * 0.625 * 0.707_106_8, size * 0.625 * 0.353_553_4, size * 0.625 * 0.866_025_4);
         let o = [x + size / 2.0, y + size / 2.0];
         let at = |p: [f32; 3]| [o[0] + (p[0] - p[2]) * h, o[1] + (p[0] + p[2] - 1.0) * q - (p[1] - 0.5) * up];
+        // Toward the one looking, from that same turn.
+        let toward = glam::Vec3::new(0.612_372_4, 0.5, 0.612_372_4);
         let grass = crate::content::item_tint(s.tint) << 8 | 0xFF;
         let mut shape = boxes.to_vec();
         // Back to front.
         shape.sort_by(|a, b| (a.min[0] + a.min[1] + a.min[2]).total_cmp(&(b.min[0] + b.min[1] + b.min[2])));
         for b in &shape {
-            let (n, m) = (b.min, b.max);
-            let (dx, dy, dz) = (m[0] - n[0], m[1] - n[1], m[2] - n[2]);
-            // (corner, u edge, v edge, face, shade, uv rect): the faces seen from the front, with
-            // the part of the texture the world mesher shows there.
-            let faces = [
-                (at([n[0], m[1], m[2]]), [dx * h, dx * q], [0.0, dy * up], 5, 0.8, [n[0], 1.0 - m[1], m[0], 1.0 - n[1]]),
-                (at([m[0], m[1], m[2]]), [dz * h, -dz * q], [0.0, dy * up], 1, 0.62, [1.0 - m[2], 1.0 - m[1], 1.0 - n[2], 1.0 - n[1]]),
-                (at([n[0], m[1], n[2]]), [dx * h, dx * q], [-dz * h, dz * q], 3, 1.0, [n[0], n[2], m[0], m[2]]),
-            ];
-            for (p0, u, v, face, k, uv) in faces {
+            for face in 0..6 {
+                let Some((corners, uv)) = crate::client::mesher::box_face(b, face) else { continue };
+                let (n, k) = crate::client::mesher::face_look(&corners);
+                if n.dot(toward) <= 0.0 {
+                    continue;
+                }
+                // A quad starts at the top left of its picture: the fourth corner of a face.
+                let [bottom_left, _, top_right, top_left] = corners.map(at);
+                let p0 = top_left;
+                let u = [top_right[0] - p0[0], top_right[1] - p0[1]];
+                let v = [bottom_left[0] - p0[0], bottom_left[1] - p0[1]];
+                let uv = uv.map(|t| t as f32 / 16.0);
                 self.quads.push(Quad { p0, u, v, uv, color: shade(tint(face), k), tex: tex.texture(b.textures[face]), mode: ui_mode::ICON, ..Default::default() });
                 // Tinted overlay on top of its face.
                 if let Some(&ov) = tex.overlays.get(b.textures[face] as usize).filter(|&&ov| ov != 0) {

@@ -105,4 +105,5 @@ pub mod tabs {
     pub static COMBAT: CreativeTab = CreativeTab::named("base:combat");
     pub static FOOD: CreativeTab = CreativeTab::named("base:food");
     pub static INGREDIENTS: CreativeTab = CreativeTab::named("base:ingredients");
+    pub static REDSTONE: CreativeTab = CreativeTab::named("base:redstone");
 }

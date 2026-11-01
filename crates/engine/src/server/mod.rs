@@ -9,6 +9,8 @@ pub mod area;
 mod builtin;
 pub mod dim;
 pub mod energy;
+pub mod signal;
+pub mod space;
 pub mod entity;
 pub(crate) mod extend;
 mod liquid;
@@ -22,7 +24,6 @@ pub mod persist;
 pub mod regions;
 pub mod structure;
 pub mod terrain;
-pub use structure::origin as structure_origin;
 pub mod visibility;
 
 use std::sync::Arc;
@@ -543,7 +544,7 @@ impl Server {
             let n: usize = self.dims.iter().map(|d| d.regions.len()).sum();
             self.shared.regions.store(n as u64, Ordering::Relaxed);
             let regions = || self.dims.iter().flat_map(|d| d.regions.iter());
-            self.shared.cubes.store(regions().map(|r| r.cubes.len() as u64).sum(), Ordering::Relaxed);
+            self.shared.cubes.store(regions().map(|r| r.space.cubes.len() as u64).sum(), Ordering::Relaxed);
             self.shared.entities.store(regions().map(|r| r.entities.list.iter().filter(|e| !e.removed).count() as u64).sum(), Ordering::Relaxed);
         }
         if self.tick % TPS as u64 == 0 && crate::log::on(crate::log::Channel::Load, log::Level::Debug) {
@@ -709,6 +710,9 @@ impl Server {
     }
 
     fn save_all(&mut self, players: bool) {
+        for r in self.dims.iter_mut().flat_map(|d| d.regions.iter_mut()) {
+            r.finish_moving(crate::content::content());
+        }
         let Some(storage) = self.storage.clone() else { return };
         let c = content();
         let t = Instant::now();
@@ -718,13 +722,13 @@ impl Server {
             for r in &mut d.regions {
                 // Cubes where something happened, and the ones entities are in (they move and
                 // spawn in untouched cubes too).
-                let mut cubes: Vec<IVec3> = std::mem::take(&mut r.modified).into_iter().collect();
+                let mut cubes: Vec<IVec3> = std::mem::take(&mut r.space.modified).into_iter().collect();
                 cubes.extend(r.on_disk.iter().copied());
                 cubes.extend(r.entities.list.iter().filter(|e| !e.removed && !e.player && e.kind != c.game.virtual_kind).map(|e| cube_of(e.pos.floor().as_ivec3())));
                 cubes.sort_unstable_by_key(|p| (p.x, p.y, p.z));
                 cubes.dedup();
                 for pos in cubes {
-                    if let Some(cube) = r.cubes.get(&pos) {
+                    if let Some(cube) = r.space.cubes.get(&pos) {
                         let mut bytes = entities_in(c, r, pos);
                         let ticks = r.ticks_in(pos);
                         let holds = r.entities.list.iter().any(|e| !e.removed && !e.player && e.kind != c.game.virtual_kind && cube_of(e.pos.floor().as_ivec3()) == pos);
@@ -813,7 +817,7 @@ impl Server {
             let r = dims[to as usize].ensure_region(c, pos);
             let (hw, ..) = e.dims(c);
             frame = r.body_under(c, pos, hw).map(|(b, at)| (b, pos - at));
-            e.support = frame.map(|f| f.0);
+            e.frame = frame.map(|f| f.0);
             r.entities.insert_with(c, e, inv, comps);
             // The client hears its inventory again (component changes are found by comparing).
             r.entities.dirty_inv.insert(id);
@@ -966,12 +970,18 @@ impl Server {
         let Some(from) = self.dims[dim as usize].entity_region(id) else { return };
         let Some((mut e, inv, comps)) = from.entities.take(id) else { return };
         // The blocks of a structure travel with its entity.
-        let structure = from.structures.remove(&id);
+        let structure = from.bodies.remove(&id);
+        let on_it: Vec<_> = from.entities.on_body(id).into_iter().filter_map(|b| from.entities.take(b)).collect();
         e.pos = pos;
         let r = self.dims[to_dim as usize].ensure_region(c, pos);
         r.entities.insert_with(c, e, inv, comps);
-        if let Some(s) = structure {
-            r.structures.insert(id, s);
+        if let Some(mut s) = structure {
+            // It says what it gives all over again, where it is now.
+            (s.cell, s.in_touch) = (None, false);
+            r.bodies.insert(id, s);
+        }
+        for (b, inv, comps) in on_it {
+            r.entities.insert_with(c, b, inv, comps);
         }
     }
 
@@ -1049,13 +1059,15 @@ fn worn_of(c: &Content, ents: &entity::Entities, id: u64) -> Vec<u32> {
 }
 
 fn serialize(c: &Content, d: &Dim, ids: &[u64]) -> Vec<u8> {
+    // What is on a body comes right after it, for it to be there when those are read back.
+    let ids: Vec<u64> = ids.iter().flat_map(|&id| std::iter::once(id).chain(d.entities.on_body(id))).collect();
     let list: Vec<persist::ToSave> = ids
         .iter()
         .filter_map(|&id| {
             // Virtual inventories are never saved.
             let e = d.entities.get(id).filter(|e| e.kind != c.game.virtual_kind)?;
             let comps = d.entities.comps.iter().filter(|((eid, _), _)| *eid == id).map(|((_, k), v)| (*k, &v[..])).collect();
-            Some((e, d.entities.inventories.get(&id), comps, d.structures.get(&id).map(|s| s.structure_blocks(c))))
+            Some((e, d.entities.inventories.get(&id), comps, d.bodies.get(&id).map(|s| s.structure_blocks(c))))
         })
         .collect();
     let mut out = Vec::new();
@@ -1064,7 +1076,7 @@ fn serialize(c: &Content, d: &Dim, ids: &[u64]) -> Vec<u8> {
 }
 
 fn entities_in(c: &Content, d: &Dim, cube: IVec3) -> Vec<u8> {
-    let ids: Vec<u64> = d.entities.list.iter().filter(|e| !e.removed && !e.player && e.kind != c.game.virtual_kind && cube_of(e.pos.floor().as_ivec3()) == cube).map(|e| e.id).collect();
+    let ids: Vec<u64> = d.entities.list.iter().filter(|e| !e.removed && !e.player && e.kind != c.game.virtual_kind && e.block_frame() == 0 && cube_of(e.pos.floor().as_ivec3()) == cube).map(|e| e.id).collect();
     serialize(c, d, &ids)
 }
 

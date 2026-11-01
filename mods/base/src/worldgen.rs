@@ -57,7 +57,7 @@ pub fn register(r: &mut Registry) {
     // Underground (3D): whole cubes deep under the surface; spiders like it there.
     r.biome(&DEEP_CAVES).tag("cave").tag("dark");
 
-    for (ore, max_y, veins, size) in [(&COAL_ORE, 128, 8, 12), (&IRON_ORE, 64, 6, 8), (&GOLD_ORE, 32, 2, 7), (&DIAMOND_ORE, 16, 1, 6)] {
+    for (ore, max_y, veins, size) in [(&COAL_ORE, 128, 8, 12), (&IRON_ORE, 64, 6, 8), (&GOLD_ORE, 32, 2, 7), (&crate::redstone::REDSTONE_ORE, 16, 4, 8), (&DIAMOND_ORE, 16, 1, 6)] {
         r.ore(ore).y(i32::MIN, max_y).veins(veins).size(size).replace("#stone_ore_replaceables");
     }
 
