@@ -125,7 +125,20 @@ fn plant(r: &mut Registry, handle: &'static Block, tex: &str) {
 /// Sand and gravel: with nothing under them they fall as an entity and land as a block.
 pub fn register(r: &mut Registry) {
     // Any block of any mod tagged so comes in these too.
-    r.tag("has_shapes", &["base:stone", "base:cobblestone", "base:mossy_cobblestone", "base:sandstone", "base:bricks", "base:stone_bricks", "base:oak_planks", "base:birch_planks", "base:spruce_planks"]);
+    r.tag(
+        "has_shapes",
+        &[
+            "base:stone",
+            "base:cobblestone",
+            "base:mossy_cobblestone",
+            "base:sandstone",
+            "base:bricks",
+            "base:stone_bricks",
+            "base:oak_planks",
+            "base:birch_planks",
+            "base:spruce_planks",
+        ],
+    );
     r.stairs("#has_shapes").tab(&crate::tabs::BUILDING);
     r.slabs("#has_shapes").tab(&crate::tabs::BUILDING);
     r.vertical_slabs("#has_shapes").tab(&crate::tabs::BUILDING);

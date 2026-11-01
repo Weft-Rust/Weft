@@ -509,7 +509,11 @@ impl Storage {
         let mut cube = cube.clone();
         cube.compact();
         let mut map: FxHashMap<u32, u32> = FxHashMap::default();
-        for &s in cube.palette().iter().chain(cube.all_extras().flat_map(|(_, parts)| parts)) {
+        for &s in cube
+            .palette()
+            .iter()
+            .chain(cube.all_extras().flat_map(|(_, parts)| parts))
+        {
             map.insert(s, self.ids.world_id(c, s));
         }
         buf.extend_from_slice(&[0; 4]);

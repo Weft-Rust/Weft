@@ -273,7 +273,12 @@ impl Cube {
         // layer decides which neighbors care.
         let mut mask = 1 << 13;
         if !same_extras {
-            for i in self.extras.keys().chain(old.extras.keys()).map(|&i| i as usize) {
+            for i in self
+                .extras
+                .keys()
+                .chain(old.extras.keys())
+                .map(|&i| i as usize)
+            {
                 if self.extras(i) != old.extras(i) {
                     let at = offset(i);
                     mask |= around_mask(at.x, at.y, at.z);

@@ -26,7 +26,12 @@ pub async fn push_is_the_same_for_all(t: T) -> R {
     t.secs(0.5).await?;
     // Its flight is the same step a player's is; sampled from here its top can be missed.
     t.op(&format!("push 0 20 0 {}", pig.trim())).await?;
-    let speed: f64 = t.op(&format!("vel_y {}", pig.trim())).await?.trim().parse().unwrap_or(0.0);
+    let speed: f64 = t
+        .op(&format!("vel_y {}", pig.trim()))
+        .await?
+        .trim()
+        .parse()
+        .unwrap_or(0.0);
     t.note(format!("the pig went at {speed:.1}"));
     t.check((15.0..=21.0).contains(&speed), format!("a pig is pushed as hard as a player: {speed:.1}"));
     Ok(())
@@ -41,7 +46,8 @@ pub async fn water_beside_a_slab_ends_a_fall(t: T) -> R {
     t.set(f, "base:oak_planks_slab").await?;
     t.op(&format!("addpart {} water", at(f))).await?;
     t.check(t.op(&format!("parts {}", at(f))).await?.contains("water"), "water in the cell");
-    t.c().teleport([f[0] as f64 + 0.5, f[1] as f64 + 12.0, f[2] as f64 + 0.5]);
+    t.c()
+        .teleport([f[0] as f64 + 0.5, f[1] as f64 + 12.0, f[2] as f64 + 0.5]);
     t.until("falling", Duration::from_secs(5), |t| !t.flag(client::client_flags::ON_GROUND))
         .await?;
     t.until("landed", Duration::from_secs(10), |t| t.flag(client::client_flags::ON_GROUND))
@@ -167,7 +173,12 @@ pub async fn spectators_push_nothing(t: T) -> R {
     t.secs(1.0).await?;
     let x1 = t.op(&format!("entity {}", idol.trim())).await?;
     let xz = |s: &str| {
-        let w: Vec<f64> = s.split_whitespace().skip(1).take(3).filter_map(|v| v.parse().ok()).collect();
+        let w: Vec<f64> = s
+            .split_whitespace()
+            .skip(1)
+            .take(3)
+            .filter_map(|v| v.parse().ok())
+            .collect();
         (w[0], w[2])
     };
     let (a, b) = (xz(&x0), xz(&x1));
@@ -206,7 +217,12 @@ pub async fn swings_count_on_both_sides(t: T) -> R {
         .await?;
     let health = |t: T, id: String| async move {
         let s = t.op(&format!("entity {id}")).await?;
-        Ok::<f32, String>(s.split_whitespace().last().and_then(|v| v.parse().ok()).unwrap_or(-1.0))
+        Ok::<f32, String>(
+            s.split_whitespace()
+                .last()
+                .and_then(|v| v.parse().ok())
+                .unwrap_or(-1.0),
+        )
     };
     t.secs(1.5).await?;
     // Up at the sky: it hits nothing, and leaves the swing spent.
@@ -293,7 +309,8 @@ pub async fn bed_drop_in_its_table(t: T) -> R {
     let drops = t.op("loot base:bed 1").await?;
     t.check(drops.contains("base:bed"), format!("the table gives a bed: {drops}"));
     let foot = super::gameplay::place_bed(&t).await?;
-    t.op(&format!("break {}", at(add(foot, [0, 0, -1])))).await?;
+    t.op(&format!("break {}", at(add(foot, [0, 0, -1]))))
+        .await?;
     t.secs(0.5).await?;
     t.check_eq(t.block(foot).await?, "core:air".into(), "the other half goes");
     let near = t.op(&format!("near {} 4", at(foot))).await?;
@@ -318,8 +335,10 @@ pub async fn beds_every_way(t: T) -> R {
         t.press("core:use");
         t.secs(0.2).await?;
     }
-    t.sync_blocks(add(f, [-4, 0, -4]), add(f, [4, 0, 4])).await?;
-    t.c().teleport([f[0] as f64 + 0.5, f[1] as f64 + 6.0, f[2] as f64 + 0.5]);
+    t.sync_blocks(add(f, [-4, 0, -4]), add(f, [4, 0, 4]))
+        .await?;
+    t.c()
+        .teleport([f[0] as f64 + 0.5, f[1] as f64 + 6.0, f[2] as f64 + 0.5]);
     t.c().look(0.0, -89.0);
     t.secs(0.5).await?;
     t.shot("from_above").await?;

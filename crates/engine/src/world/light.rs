@@ -86,7 +86,14 @@ pub fn sky_of(v: u32) -> u8 {
 
 /// What a block changing at `p` from `old` does to the light around it, what bodies' lights give
 /// included, on the server and in a client's guess alike. Returns the cubes that changed.
-pub fn block_changed(map: &mut impl CubeMap, c: &crate::content::Content, sky: bool, glow: &rustc_hash::FxHashMap<IVec3, [u8; 3]>, p: IVec3, old: u32) -> Vec<IVec3> {
+pub fn block_changed(
+    map: &mut impl CubeMap,
+    c: &crate::content::Content,
+    sky: bool,
+    glow: &rustc_hash::FxHashMap<IVec3, [u8; 3]>,
+    p: IVec3,
+    old: u32,
+) -> Vec<IVec3> {
     let mut lighter = Lighter::new(map, c, sky).with_extra(glow);
     lighter.block_changed(p, old);
     std::mem::take(&mut lighter.changed).into_iter().collect()

@@ -221,7 +221,9 @@ impl WireSet {
     fn rescan(&mut self, c: &Content, world: &mut ClientWorld) -> bool {
         let dirty = world.take_wire_dirty();
         for &cp in &dirty {
-            let cells = world.cube_rev(cp).map_or(Vec::new(), |(cube, _)| wire::cells(c, cp, cube));
+            let cells = world
+                .cube_rev(cp)
+                .map_or(Vec::new(), |(cube, _)| wire::cells(c, cp, cube));
             if cells.is_empty() {
                 self.cubes.remove(&cp);
             } else {

@@ -238,8 +238,15 @@ pub fn resolve<'a>(names: impl Iterator<Item = &'a String> + Clone, typed: &str)
         [one] => Some((*one).clone()),
         [] => None,
         many => {
-            let order = |n: &&&String| crate::content::content().mods.iter().position(|m| n.split_once(':').is_some_and(|(ns, _)| ns == m.id));
-            many.iter().min_by_key(|n| order(n).unwrap_or(usize::MAX)).map(|n| (**n).clone())
+            let order = |n: &&&String| {
+                crate::content::content()
+                    .mods
+                    .iter()
+                    .position(|m| n.split_once(':').is_some_and(|(ns, _)| ns == m.id))
+            };
+            many.iter()
+                .min_by_key(|n| order(n).unwrap_or(usize::MAX))
+                .map(|n| (**n).clone())
         }
     }
 }

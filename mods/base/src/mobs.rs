@@ -383,7 +383,9 @@ fn blast(w: &World, id: u64, at: [f64; 3], radius: f64) {
     }
     // Vanilla's: one going off in a liquid breaks nothing, and liquids don't break at all.
     if w.flags(block_at(at)) & abi::block_flags::LIQUID == 0 {
-        w.fill_sphere(at, radius, 0).keep_unbreakable().keep_liquids();
+        w.fill_sphere(at, radius, 0)
+            .keep_unbreakable()
+            .keep_liquids();
     }
     w.spawn_particles(&Particle::named("core:poof"), at)
         .count(40)

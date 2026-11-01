@@ -1871,8 +1871,15 @@ pub struct Host {
     ) -> u32,
     pub in_liquid: unsafe extern "C" fn(world: *mut WorldCtx, pos: *const [f64; 3]) -> u32,
     pub entity_swing_strength: unsafe extern "C" fn(world: *mut WorldCtx, id: u64) -> f32,
-    pub entities_near:
-        unsafe extern "C" fn(world: *mut WorldCtx, pos: *const [f64; 3], radius: f64, kind: u32, flags: u32, out: *mut u64, max: usize) -> usize,
+    pub entities_near: unsafe extern "C" fn(
+        world: *mut WorldCtx,
+        pos: *const [f64; 3],
+        radius: f64,
+        kind: u32,
+        flags: u32,
+        out: *mut u64,
+        max: usize,
+    ) -> usize,
     /// An entity's component bytes, null if it has none. Changes are found by comparing with
     /// what was last sent, so writing through the pointer is enough.
     pub component: unsafe extern "C" fn(world: *mut WorldCtx, id: u64, comp: u32) -> *mut u8,

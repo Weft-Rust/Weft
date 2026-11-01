@@ -700,7 +700,11 @@ impl UiRenderer {
         let Some(s) = c.states.get(state as usize) else { return };
         let looks = crate::client::looks::current();
         if let Some(t) = looks.block_sprite(state, s) {
-            let tint = if crate::content::face_paint(s, 0, false).base_tinted { crate::content::item_tint(s.tint) << 8 | 0xFF } else { 0xFFFFFFFF };
+            let tint = if crate::content::face_paint(s, 0, false).base_tinted {
+                crate::content::item_tint(s.tint) << 8 | 0xFF
+            } else {
+                0xFFFFFFFF
+            };
             self.quads.push(Quad {
                 p0: [x, y],
                 u: [size, 0.0],
@@ -756,7 +760,10 @@ impl UiRenderer {
                 let u = [top_right[0] - p0[0], top_right[1] - p0[1]];
                 let v = [bottom_left[0] - p0[0], bottom_left[1] - p0[1]];
                 let uv = uv.map(|t| t / 16.0);
-                let overlay = tex.overlays.get(b.textures[face] as usize).filter(|&&ov| ov != 0);
+                let overlay = tex
+                    .overlays
+                    .get(b.textures[face] as usize)
+                    .filter(|&&ov| ov != 0);
                 let paint = crate::content::face_paint(s, face, overlay.is_some());
                 self.quads.push(Quad {
                     p0,
@@ -1192,10 +1199,12 @@ impl UiRenderer {
             let ticks = crate::shaders::time() * crate::world::TPS as f32;
             for q in &mut self.quads {
                 if q.mode != ui_mode::FONT {
-                    let strip = self.strips.get(&q.tex).map(|a| (a.frame_at(ticks), a.frame_count));
-                    (q.layer, q.index) = strip.map_or((0, 0.0), |((frame, next, blend), count)| {
-                        (crate::gpu_layout::ui_strip_record(frame, next, count), blend)
-                    });
+                    let strip = self
+                        .strips
+                        .get(&q.tex)
+                        .map(|a| (a.frame_at(ticks), a.frame_count));
+                    (q.layer, q.index) = strip
+                        .map_or((0, 0.0), |((frame, next, blend), count)| (crate::gpu_layout::ui_strip_record(frame, next, count), blend));
                 }
             }
         }

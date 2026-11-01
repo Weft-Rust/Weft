@@ -101,7 +101,6 @@ impl Frame {
     }
 }
 
-
 /// The direction along a face closest to where a player looks.
 pub(crate) fn along(attach: Dir, look: [f32; 3]) -> Dir {
     let mut best = (Dir::North, -1.0f32);

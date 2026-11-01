@@ -313,7 +313,15 @@ mod tests {
     fn server_messages_roundtrip() {
         let msgs = [
             ToServer::Join { name: "Ann".into(), key: "k".into() },
-            ToServer::Use { pos: IVec3::new(-5, 70, 3), part: 7, face: 3, hit: [0.5, 1.0, 0.25], look: [0.1, -0.5, 0.8], sneak: true, frame: 0 },
+            ToServer::Use {
+                pos: IVec3::new(-5, 70, 3),
+                part: 7,
+                face: 3,
+                hit: [0.5, 1.0, 0.25],
+                look: [0.1, -0.5, 0.8],
+                sneak: true,
+                frame: 0,
+            },
             ToServer::Move {
                 jumped: false,
                 pos: DVec3::new(1.5, 64.0, -3.25),
@@ -389,7 +397,9 @@ mod named_tests {
     /// More than a save's list ever got back whole: what follows it must still read right.
     #[test]
     fn long_lists_keep_what_follows() {
-        let list: Vec<(String, Vec<u8>)> = (0..100).map(|i| (format!("c{i}"), vec![i as u8; 3])).collect();
+        let list: Vec<(String, Vec<u8>)> = (0..100)
+            .map(|i| (format!("c{i}"), vec![i as u8; 3]))
+            .collect();
         let mut w = W::default();
         list.put(&mut w);
         7u32.put(&mut w);

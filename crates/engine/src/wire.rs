@@ -1,4 +1,4 @@
-﻿//! The shape of redstone wire, the same for the server's simulation and the client's picture. A
+//! The shape of redstone wire, the same for the server's simulation and the client's picture. A
 //! wire block lies on any of a cell's six faces, a face being named by the direction of the block
 //! holding it up. Nothing here knows which way is up, so a build works the same whichever way it
 //! is turned.
@@ -86,7 +86,9 @@ pub fn reads(s: &Signal, dir: u8) -> bool {
 
 /// Whether a cube has wire.
 pub fn has_wire(c: &Content, cube: &Cube) -> bool {
-    cube.palette().iter().any(|&s| c.states[s as usize].signal.kind == sk::WIRE)
+    cube.palette()
+        .iter()
+        .any(|&s| c.states[s as usize].signal.kind == sk::WIRE)
 }
 
 /// The cells with wire in the cube at `pos`.

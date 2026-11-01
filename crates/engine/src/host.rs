@@ -1359,10 +1359,17 @@ unsafe extern "C" fn state_next(state: u32, name: Str) -> u32 {
     let c = content();
     let Some(s) = c.states.get(state as usize) else { return u32::MAX };
     let name = unsafe { name.as_str() };
-    let Some(prop) = c.blocks[s.block as usize].props.iter().find(|p| p.name == name) else { return u32::MAX };
+    let Some(prop) = c.blocks[s.block as usize]
+        .props
+        .iter()
+        .find(|p| p.name == name)
+    else {
+        return u32::MAX;
+    };
     let at = (state - c.blocks[s.block as usize].first_state) / prop.stride.max(1);
     let next = (at as usize % prop.values.len().max(1) + 1) % prop.values.len().max(1);
-    c.state_with(state, name, &prop.values[next]).unwrap_or(u32::MAX)
+    c.state_with(state, name, &prop.values[next])
+        .unwrap_or(u32::MAX)
 }
 
 unsafe extern "C" fn block_of(state: u32) -> u32 {

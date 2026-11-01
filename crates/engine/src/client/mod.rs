@@ -183,7 +183,11 @@ impl ClientEntity {
 
     /// Half width, height and eye height of its box, like the server's `Entity::dims`.
     pub fn dims(&self) -> (f64, f64, f64) {
-        physics::posed(self.size.unwrap_or(content().game.entities[self.kind as usize].size()), self.pose)
+        physics::posed(
+            self.size
+                .unwrap_or(content().game.entities[self.kind as usize].size()),
+            self.pose,
+        )
     }
 
     /// The kind whose model, texture and animations draw it.
@@ -947,7 +951,12 @@ impl Client {
         // Walking waits for the ground under the player to arrive; flying goes on, taking cubes
         // that are not here yet for air (the next ones are usually on their way).
         let flying = self.player.flying || self.player.noclip;
-        let ready = self.joined && !self.dead && (flying || world.block_or_air(self.player.pos.floor().as_ivec3()).is_some());
+        let ready = self.joined
+            && !self.dead
+            && (flying
+                || world
+                    .block_or_air(self.player.pos.floor().as_ivec3())
+                    .is_some());
         // The clock bodies are predicted by runs on while the player waits, or they would stop.
         let mut ambient_steps = 0;
         if self.joined {
@@ -1098,7 +1107,10 @@ impl Client {
         self.use_delay -= dt as f32;
         // The server judges actions by where the player looks, which it only hears 20 times a
         // second: a turn made just before a click must arrive first.
-        let mut send_look = LookOnce(self.joined.then(|| self.move_message(self.player.landed, false)));
+        let mut send_look = LookOnce(
+            self.joined
+                .then(|| self.move_message(self.player.landed, false)),
+        );
         if !input.captured || self.dead {
             self.breaking = None;
             return;
@@ -1200,10 +1212,19 @@ impl Client {
                 self.conn.send(ToServer::Interact(id));
             } else if let Some(hit) = self.target {
                 let sneak = self.player.sneak;
-                let at = self.frame_place(hit.frame).to_local(self.camera().pos + self.camera().forward().as_dvec3() * hit.dist);
+                let at = self
+                    .frame_place(hit.frame)
+                    .to_local(self.camera().pos + self.camera().forward().as_dvec3() * hit.dist);
                 let at = (at - hit.block.as_dvec3()).as_vec3().to_array();
-                self.conn
-                    .send(ToServer::Use { pos: hit.block, part: hit.state, face: hit.face, look: look.as_vec3().to_array(), hit: at, sneak, frame: hit.frame });
+                self.conn.send(ToServer::Use {
+                    pos: hit.block,
+                    part: hit.state,
+                    face: hit.face,
+                    look: look.as_vec3().to_array(),
+                    hit: at,
+                    sneak,
+                    frame: hit.frame,
+                });
             } else {
                 self.conn.send(ToServer::UseItem { target: None });
             }
@@ -1747,7 +1768,9 @@ impl Client {
             pos: cam.pos,
             yaw: cam.yaw,
             pitch: cam.pitch,
-            underwater: self.eye_liquid().is_some_and(|l| !c.liquids[l as usize].burns()),
+            underwater: self
+                .eye_liquid()
+                .is_some_and(|l| !c.liquids[l as usize].burns()),
             enclosed: weft_abi::light::sky(self.world.light(eye)) < 6 && c.dims[self.world.dim as usize].sky_light,
             dim: self.world.dim,
             day: self.daylight() > 0.5,
@@ -2189,12 +2212,15 @@ impl Client {
             .iter()
             .map(|&(_, pos, state, progress)| entity_render::Crack { pos, progress, at: DVec3::ZERO, state })
             .collect();
-        cracks.extend(self.breaking.map(|(f, pos, progress)| entity_render::Crack {
-            pos,
-            progress,
-            at: self.frame_place(f).origin(),
-            state: self.breaking_part,
-        }));
+        cracks.extend(
+            self.breaking
+                .map(|(f, pos, progress)| entity_render::Crack {
+                    pos,
+                    progress,
+                    at: self.frame_place(f).origin(),
+                    state: self.breaking_part,
+                }),
+        );
         self.entity_render.draw(
             gpu,
             list,
@@ -2325,9 +2351,8 @@ fn step_player(p: &mut LocalPlayer, input: &Input, block: &impl physics::Cells, 
     } else {
         Pose::Stand
     };
-    let fits = |pose: Pose| {
-        p.noclip || !physics::collides(c, block, physics::Aabb::around(p.pos, hw - 1e-3, physics::posed(p.size, pose).1))
-    };
+    let fits =
+        |pose: Pose| p.noclip || !physics::collides(c, block, physics::Aabb::around(p.pos, hw - 1e-3, physics::posed(p.size, pose).1));
     p.pose = if fits(want) {
         want
     } else if fits(Pose::Crouch) {

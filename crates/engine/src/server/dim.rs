@@ -868,7 +868,9 @@ impl Dim {
                 cube.set_extras(i, extras.clone());
             }
             if old != state {
-                self.space.extra_changes.push((p, if same { extras } else { Vec::new() }));
+                self.space
+                    .extra_changes
+                    .push((p, if same { extras } else { Vec::new() }));
             }
         }
         if old == state {
@@ -938,7 +940,9 @@ impl Dim {
     /// All that is in the cell at `p`, the block `get` gives first. Air has none.
     pub fn parts(&self, p: IVec3) -> Vec<u32> {
         let Some(main) = self.get(p).filter(|&s| s != AIR) else { return Vec::new() };
-        std::iter::once(main).chain(self.space.extras(p).iter().copied()).collect()
+        std::iter::once(main)
+            .chain(self.space.extras(p).iter().copied())
+            .collect()
     }
 
     /// Whether `part` is in the cell at `p`.
@@ -1054,14 +1058,24 @@ impl Dim {
     /// Whether a liquid source may be in the cell at `p` along with what is in it.
     pub(super) fn can_hold_liquid(&self, c: &Content, p: IVec3) -> bool {
         let parts = self.parts(p);
-        let solids = parts.iter().filter(|&&s| c.states[s as usize].liquid.is_none());
-        solids.clone().all(|&s| c.states[s as usize].flags & bf::HOLDS_LIQUID != 0)
+        let solids = parts
+            .iter()
+            .filter(|&&s| c.states[s as usize].liquid.is_none());
+        solids
+            .clone()
+            .all(|&s| c.states[s as usize].flags & bf::HOLDS_LIQUID != 0)
             && solids.map(|&s| Self::fill_of(c, s)).sum::<f32>() < 0.999
     }
 
     /// A liquid goes from a cell that can't hold it (any more), or that it just flowed through.
     fn drain_if_no_room(&mut self, c: &'static Content, p: IVec3) {
-        let Some(liquid) = self.parts(p).into_iter().find(|&s| c.states[s as usize].liquid.is_some()) else { return };
+        let Some(liquid) = self
+            .parts(p)
+            .into_iter()
+            .find(|&s| c.states[s as usize].liquid.is_some())
+        else {
+            return;
+        };
         let source = c.liquids[c.states[liquid as usize].liquid.unwrap_or(0) as usize].first_state == liquid;
         if self.parts(p).len() > 1 && !(source && self.can_hold_liquid(c, p)) {
             self.replace_part(c, p, liquid, AIR);
@@ -1429,7 +1443,10 @@ impl Dim {
         }
         let mut knocked = None;
         if let Some(from) = knock {
-            let away = (e.pos - from).with_y(0.0).try_normalize().unwrap_or(DVec3::X);
+            let away = (e.pos - from)
+                .with_y(0.0)
+                .try_normalize()
+                .unwrap_or(DVec3::X);
             if e.player {
                 knocked = Some(away.as_vec3().to_array());
             } else {
@@ -1988,7 +2005,9 @@ impl Dim {
                 e.swing_ticks = e.swing_ticks.saturating_add(1);
                 e.attack_cooldown = e.attack_cooldown.saturating_sub(1);
                 if e.player {
-                    let held = inventories.get(&e.id).and_then(|i| i.get(e.selected as usize));
+                    let held = inventories
+                        .get(&e.id)
+                        .and_then(|i| i.get(e.selected as usize));
                     e.notice_hand(held.copied().unwrap_or_default());
                     // Mods saw it this tick; the next `Move` tells of the next.
                     e.jumped = false;
@@ -2372,9 +2391,16 @@ impl Dim {
         // Something the support must stand next to (water by sugar cane); a stack of the same
         // block is held by the one at its bottom.
         match c.states[state as usize].support_near {
-            Some(t) if c.states[n as usize].block != c.states[state as usize].block => [IVec3::X, -IVec3::X, IVec3::Z, -IVec3::Z]
-                .iter()
-                .any(|d| self.get(at + *d).is_none_or(|s| c.block_has(s, Some(t))) || self.space.extras(at + *d).iter().any(|&s| c.block_has(s, Some(t)))),
+            Some(t) if c.states[n as usize].block != c.states[state as usize].block => {
+                [IVec3::X, -IVec3::X, IVec3::Z, -IVec3::Z].iter().any(|d| {
+                    self.get(at + *d).is_none_or(|s| c.block_has(s, Some(t)))
+                        || self
+                            .space
+                            .extras(at + *d)
+                            .iter()
+                            .any(|&s| c.block_has(s, Some(t)))
+                })
+            }
             _ => true,
         }
     }
@@ -2456,7 +2482,9 @@ impl Dim {
         let (wet, on_ground, creative) = (self.head_in_liquid(c, e), e.on_ground, e.mode == crate::world::GameMode::Creative);
         let tool = self.entities.held(player).item;
         let speed = self.attribute(c, player, super::extend::MINING_SPEED, false) as f32;
-        let state = self.in_frame(frame, |d| d.aimed_part(c, pos, part)).unwrap_or(AIR);
+        let state = self
+            .in_frame(frame, |d| d.aimed_part(c, pos, part))
+            .unwrap_or(AIR);
         mining_rate(c, state, tool, wet, on_ground, speed, creative)
     }
 
@@ -2516,13 +2544,18 @@ impl Dim {
     pub(super) fn resend_cell(&mut self, p: IVec3) {
         if let Some(state) = self.get(p) {
             self.space.changes.push((p, state));
-            self.space.extra_changes.push((p, self.space.extras(p).to_vec()));
+            self.space
+                .extra_changes
+                .push((p, self.space.extras(p).to_vec()));
         }
     }
 
     /// The part a client says it aimed at, if it is there and can be; the block of the cell if not.
     pub fn aimed_part(&self, c: &Content, p: IVec3, part: u32) -> u32 {
-        let can = self.has_part(p, part) && c.states.get(part as usize).is_some_and(|s| s.flags & bf::NOT_TARGETABLE == 0);
+        let can = self.has_part(p, part)
+            && c.states
+                .get(part as usize)
+                .is_some_and(|s| s.flags & bf::NOT_TARGETABLE == 0);
         if can { part } else { self.get(p).unwrap_or(AIR) }
     }
 
@@ -2533,7 +2566,11 @@ impl Dim {
             return self.break_part(c, p, main, tool, player, drops);
         }
         let mut any = false;
-        for part in self.parts(p).into_iter().filter(|&s| c.states[s as usize].liquid.is_none()) {
+        for part in self
+            .parts(p)
+            .into_iter()
+            .filter(|&s| c.states[s as usize].liquid.is_none())
+        {
             any |= self.break_part(c, p, part, tool, player, drops);
         }
         any
@@ -2570,20 +2607,30 @@ impl Dim {
     /// does. It goes where the point just outside the surface is, a bottom slab's top being still
     /// in its own cell; something with no room there goes in the next.
     #[allow(clippy::too_many_arguments)]
-    pub fn place_clicked(&mut self, c: &'static Content, clicked: IVec3, face: u8, state: u32, look: [f32; 3], hit: [f32; 3], player: u64, item: u32) -> Option<IVec3> {
+    pub fn place_clicked(
+        &mut self,
+        c: &'static Content,
+        clicked: IVec3,
+        face: u8,
+        state: u32,
+        look: [f32; 3],
+        hit: [f32; 3],
+        player: u64,
+        item: u32,
+    ) -> Option<IVec3> {
         const OUTSIDE: f32 = 1e-3;
         let normal = DIRS[face as usize];
         let (axis, up) = ((face / 2) as usize, face % 2 == 1);
         let parts = self.parts(clicked);
         // What placing replaces counts as not there: the click is on what it stands on.
-        let replacing = self.get(clicked).is_some_and(|m| c.states[m as usize].flags & bf::REPLACEABLE != 0)
-            && parts.iter().all(|&s| c.states[s as usize].flags & bf::REPLACEABLE != 0);
+        let replacing = self
+            .get(clicked)
+            .is_some_and(|m| c.states[m as usize].flags & bf::REPLACEABLE != 0)
+            && parts
+                .iter()
+                .all(|&s| c.states[s as usize].flags & bf::REPLACEABLE != 0);
         let mut point = hit;
-        point[axis] = if replacing {
-            if up { OUTSIDE } else { 1.0 - OUTSIDE }
-        } else {
-            hit[axis] + if up { OUTSIDE } else { -OUTSIDE }
-        };
+        point[axis] = if replacing { if up { OUTSIDE } else { 1.0 - OUTSIDE } } else { hit[axis] + if up { OUTSIDE } else { -OUTSIDE } };
         let is_wire = c.states[state as usize].signal.kind == abi::signal_kind::WIRE;
         let inside = !is_wire && (0.0..1.0).contains(&point[axis]) && !replacing;
         let beside = |off: IVec3| std::array::from_fn(|a| point[a] - off[a] as f32);
@@ -2596,7 +2643,8 @@ impl Dim {
             }
         }
         let next = clicked + normal;
-        self.place(c, next, face, state, look, beside(normal), player, item).then_some(next)
+        self.place(c, next, face, state, look, beside(normal), player, item)
+            .then_some(next)
     }
 
     /// `state`'s item placed in the cell at `p`, with `hit` from its corner. It joins what is
@@ -2604,7 +2652,17 @@ impl Dim {
     /// where their shapes don't overlap or they said they may. What placing replaces (a flower,
     /// tall grass) goes where they do.
     #[allow(clippy::too_many_arguments)]
-    pub fn place(&mut self, c: &'static Content, p: IVec3, face: u8, state: u32, look: [f32; 3], hit: [f32; 3], player: u64, item: u32) -> bool {
+    pub fn place(
+        &mut self,
+        c: &'static Content,
+        p: IVec3,
+        face: u8,
+        state: u32,
+        look: [f32; 3],
+        hit: [f32; 3],
+        player: u64,
+        item: u32,
+    ) -> bool {
         // Wire goes on the clicked face, next to any already in the cell.
         if self.get(p).is_none() || self.space.signals.reserved(p) {
             return false;
@@ -2617,7 +2675,15 @@ impl Dim {
         let def = c.block_of(state);
         let mut chosen = on_wire.unwrap_or(def.first_state);
         if let (Some(cb), false) = (def.cb.placement, is_wire) {
-            let mut args = abi::PlaceArgs { pos: p.to_array(), face: face as u32, look, state: def.first_state, first: def.first_state, hit, placed: 0 };
+            let mut args = abi::PlaceArgs {
+                pos: p.to_array(),
+                face: face as u32,
+                look,
+                state: def.first_state,
+                first: def.first_state,
+                hit,
+                placed: 0,
+            };
             host::invoke(def.owner, cb, &mut args);
             if args.state >= def.first_state && args.state < def.first_state + def.states {
                 chosen = args.state;
@@ -2629,8 +2695,12 @@ impl Dim {
         // The same block may take it in.
         let mut merged = None;
         if !is_wire && let Some(cb) = def.cb.merge {
-            for &part in parts.iter().filter(|&&s| c.states[s as usize].block == c.states[chosen as usize].block) {
-                let mut args = abi::PlaceArgs { pos: p.to_array(), face: face as u32, look, state: part, first: def.first_state, hit, placed: chosen };
+            for &part in parts
+                .iter()
+                .filter(|&&s| c.states[s as usize].block == c.states[chosen as usize].block)
+            {
+                let mut args =
+                    abi::PlaceArgs { pos: p.to_array(), face: face as u32, look, state: part, first: def.first_state, hit, placed: chosen };
                 host::invoke(def.owner, cb, &mut args);
                 if args.state != part && args.state >= def.first_state && args.state < def.first_state + def.states {
                     merged = Some((part, args.state));
@@ -2974,7 +3044,9 @@ impl Dim {
             .position(|i| i.block == Some(b.first_state))
             .map(|i| i as u32);
         for _ in 0..c.block_value::<u32>(state, c.ids.loot_rolls).unwrap_or(1) {
-            for s in self.roll_loot(c, &b.name, &crate::loot::Ctx { tool, mined: if mined { state } else { 0 }, state, ..Default::default() }) {
+            for s in
+                self.roll_loot(c, &b.name, &crate::loot::Ctx { tool, mined: if mined { state } else { 0 }, state, ..Default::default() })
+            {
                 let s = if Some(s.item) == own_item { crate::stack::with_name(s, own_name) } else { s };
                 self.spawn_item(c, p.as_dvec3() + DVec3::splat(0.5), s);
             }

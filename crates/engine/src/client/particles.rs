@@ -119,7 +119,10 @@ fn span_of(s: &crate::content::StateInfo) -> u32 {
     if s.collision.is_empty() {
         return 0;
     }
-    let (lo, hi) = s.collision.iter().fold((1.0f32, 0.0f32), |(l, h), b| (l.min(b[1]), h.max(b[4])));
+    let (lo, hi) = s
+        .collision
+        .iter()
+        .fold((1.0f32, 0.0f32), |(l, h), b| (l.min(b[1]), h.max(b[4])));
     let sixteenths = |v: f32| (v.clamp(0.0, 1.0) * 16.0).round() as u32;
     sixteenths(lo) << 16 | sixteenths(hi) << 21
 }

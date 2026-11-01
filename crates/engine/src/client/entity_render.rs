@@ -471,7 +471,9 @@ impl EntityRenderer {
                     boxes_shape(&mut self.item_boxes, textures, Mat4::IDENTITY, &looks.block_shape(state, s), s, white);
                 }
                 if crate::content::face_paint(s, 0, false).base_tinted {
-                    let [r, g, b, _] = (crate::content::item_tint(s.tint) << 8).to_be_bytes().map(|v| v as f32 / 255.0);
+                    let [r, g, b, _] = (crate::content::item_tint(s.tint) << 8)
+                        .to_be_bytes()
+                        .map(|v| v as f32 / 255.0);
                     sprite_color = Vec4::new(r, g, b, 0.0);
                 }
                 sprite
@@ -931,7 +933,10 @@ impl EntityRenderer {
                 let stage = ((progress * 10.0) as usize).min(9);
                 let l = textures.texture(c.crack_textures[stage]);
                 let lit = shade(p.as_dvec3() + at + DVec3::splat(0.5));
-                let shape = c.states.get(state as usize).map_or(&[][..], |s| &s.selection[..]);
+                let shape = c
+                    .states
+                    .get(state as usize)
+                    .map_or(&[][..], |s| &s.selection[..]);
                 for b in shape {
                     let (mn, mx) = (Vec3::new(b[0], b[1], b[2]), Vec3::new(b[3], b[4], b[5]));
                     let (a, b) = (mn - Vec3::splat(0.004), mx + Vec3::splat(0.004));

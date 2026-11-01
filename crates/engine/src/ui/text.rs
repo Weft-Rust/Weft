@@ -701,7 +701,12 @@ fn shape_of(n: &Name) -> Option<(u32, String)> {
         _ => return None,
     };
     let (source, key) = c.shapes.get(name)?;
-    Some((c.block_names.get(source).map(|&b| c.blocks[b as usize].first_state)?, key.clone()))
+    Some((
+        c.block_names
+            .get(source)
+            .map(|&b| c.blocks[b as usize].first_state)?,
+        key.clone(),
+    ))
 }
 
 /// Re-evaluates conditional spans; `test` answers a condition without its `!`. True if anything

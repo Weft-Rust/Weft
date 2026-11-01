@@ -1105,8 +1105,14 @@ pub async fn block_shapes(t: T) -> R {
     let centre = |p: [i32; 3], dx: f64, dy: f64, dz: f64| [p[0] as f64 + dx, p[1] as f64 + dy, p[2] as f64 + dz];
 
     // Another mod's block, tagged in that mod.
-    t.set(add(f, [0, 3, 5]), "testmod:reinforced_stone_stairs").await?;
-    t.check(t.block(add(f, [0, 3, 5])).await?.contains("reinforced_stone_stairs"), "a block of another mod has its stairs");
+    t.set(add(f, [0, 3, 5]), "testmod:reinforced_stone_stairs")
+        .await?;
+    t.check(
+        t.block(add(f, [0, 3, 5]))
+            .await?
+            .contains("reinforced_stone_stairs"),
+        "a block of another mod has its stairs",
+    );
     t.set(add(f, [0, 3, 5]), "air").await?;
 
     // How they look, for whoever is looking.
@@ -1126,14 +1132,16 @@ pub async fn block_shapes(t: T) -> R {
     for (i, b) in shown.into_iter().enumerate() {
         t.set(add(row, [i as i32, 0, 0]), b).await?;
     }
-    t.set(add(row, [1, 0, 1]), "base:stone_stairs[facing=west]").await?;
+    t.set(add(row, [1, 0, 1]), "base:stone_stairs[facing=west]")
+        .await?;
     aim(&t, centre(row, 5.0, 0.5, 0.5));
     t.secs(0.3).await?;
     t.shot("shapes").await?;
     t.fill(row, add(row, [9, 0, 1]), "air").await?;
 
     let wall = add(f, [0, 0, -3]);
-    t.fill(add(wall, [-1, 0, 0]), add(wall, [1, 2, 0]), "stone").await?;
+    t.fill(add(wall, [-1, 0, 0]), add(wall, [1, 2, 0]), "stone")
+        .await?;
     t.op("put me 0 base:oak_planks_slab 16").await?;
     t.c().select(0);
     t.frames(4).await?;
@@ -1173,11 +1181,13 @@ pub async fn block_shapes(t: T) -> R {
     t.op("mode creative").await?;
     t.c().fly(true);
     let floor = add(f, [8, -1, -8]);
-    t.fill(add(floor, [-3, 0, -3]), add(floor, [3, 0, 3]), "stone").await?;
+    t.fill(add(floor, [-3, 0, -3]), add(floor, [3, 0, 3]), "stone")
+        .await?;
     for (name, over, height) in [("flying over", [0.5, 0.5], 3.0), ("off to a side", [1.5, 0.5], 1.0), ("next to it", [0.5, 1.4], 0.0)] {
         t.op("put me 0 base:sandstone_slab 16").await?;
         t.c().select(0);
-        t.c().teleport(centre(floor, over[0], 1.0 + height, over[1]));
+        t.c()
+            .teleport(centre(floor, over[0], 1.0 + height, over[1]));
         t.secs(0.4).await?;
         aim(&t, centre(floor, 0.5, 1.0, 0.45));
         t.frames(4).await?;
@@ -1240,7 +1250,8 @@ pub async fn block_shapes(t: T) -> R {
     t.c().teleport(centre(mix, 0.5, 0.0, 2.4));
     t.secs(0.3).await?;
     // Each part by what it asks of the tool, as it would on its own: sandstone wants a pickaxe.
-    t.op(&format!("break {} base:iron_pickaxe", at(mix))).await?;
+    t.op(&format!("break {} base:iron_pickaxe", at(mix)))
+        .await?;
     t.c().teleport(centre(mix, 0.5, 0.0, 0.5));
     t.secs(1.5).await?;
     t.check_eq(t.slot("me", 2).await?.1, 8, "it gives back the one");
@@ -1270,24 +1281,30 @@ pub async fn block_shapes(t: T) -> R {
     // is in front of it an inner one.
     let a = add(f, [6, 0, 6]);
     t.set(a, "base:stone_stairs[facing=east]").await?;
-    t.set(add(a, [1, 0, 0]), "base:stone_stairs[facing=south]").await?;
+    t.set(add(a, [1, 0, 0]), "base:stone_stairs[facing=south]")
+        .await?;
     t.frames(4).await?;
     t.check(t.block(a).await?.contains("shape=outer_right"), format!("an outer corner: {}", t.block(a).await?));
     t.set(add(a, [1, 0, 0]), "air").await?;
     t.frames(4).await?;
     t.check(t.block(a).await?.contains("shape=straight"), format!("and straight again: {}", t.block(a).await?));
-    t.set(add(a, [-1, 0, 0]), "base:stone_stairs[facing=north]").await?;
+    t.set(add(a, [-1, 0, 0]), "base:stone_stairs[facing=north]")
+        .await?;
     t.frames(4).await?;
     t.check(t.block(a).await?.contains("shape=inner_left"), format!("an inner corner: {}", t.block(a).await?));
     let top = add(a, [0, 0, 3]);
-    t.set(top, "base:stone_stairs[facing=east,half=top]").await?;
-    t.set(add(top, [1, 0, 0]), "base:stone_stairs[facing=south]").await?;
+    t.set(top, "base:stone_stairs[facing=east,half=top]")
+        .await?;
+    t.set(add(top, [1, 0, 0]), "base:stone_stairs[facing=south]")
+        .await?;
     t.frames(4).await?;
     t.check(t.block(top).await?.contains("shape=straight"), "only with those of its own half");
 
     // They carry you up, and stop you where they stand.
-    t.set(add(f, [-12, 0, 2]), "base:oak_planks_stairs[facing=north]").await?;
-    t.fill(add(f, [-12, 0, -4]), add(f, [-12, 0, 1]), "stone").await?;
+    t.set(add(f, [-12, 0, 2]), "base:oak_planks_stairs[facing=north]")
+        .await?;
+    t.fill(add(f, [-12, 0, -4]), add(f, [-12, 0, 1]), "stone")
+        .await?;
     t.c().teleport(centre(f, -11.5, 0.0, 4.5));
     t.c().look(0.0, 0.0);
     t.secs(0.3).await?;
@@ -1296,8 +1313,10 @@ pub async fn block_shapes(t: T) -> R {
     let up = t.state().pos;
     t.check(up[1] >= f[1] as f64 + 0.99, format!("up the stairs, one block: {up:?}"));
     let v = add(f, [-16, 0, 2]);
-    t.set(v, "base:oak_planks_vertical_slab[side=north]").await?;
-    t.set(add(v, [0, 1, 0]), "base:oak_planks_vertical_slab[side=north]").await?;
+    t.set(v, "base:oak_planks_vertical_slab[side=north]")
+        .await?;
+    t.set(add(v, [0, 1, 0]), "base:oak_planks_vertical_slab[side=north]")
+        .await?;
     t.c().teleport(centre(v, 0.5, 0.0, 2.5));
     t.c().look(0.0, 0.0);
     t.secs(0.3).await?;
@@ -1307,9 +1326,15 @@ pub async fn block_shapes(t: T) -> R {
     t.check((stopped - (v[2] as f64 + 0.8)).abs() < 0.05, format!("up to the half it fills: z {stopped:.2}, it is at {}", v[2]));
 
     // One recipe for all of them.
-    t.check_eq(t.op("craft 3 1 base:oak_planks base:oak_planks base:oak_planks").await?, "base:oak_planks_slab 6".to_string(), "a slab's recipe");
     t.check_eq(
-        t.op("craft 3 3 base:bricks air air base:bricks base:bricks air base:bricks base:bricks base:bricks").await?,
+        t.op("craft 3 1 base:oak_planks base:oak_planks base:oak_planks")
+            .await?,
+        "base:oak_planks_slab 6".to_string(),
+        "a slab's recipe",
+    );
+    t.check_eq(
+        t.op("craft 3 3 base:bricks air air base:bricks base:bricks air base:bricks base:bricks base:bricks")
+            .await?,
         "base:bricks_stairs 4".to_string(),
         "a stair's",
     );
@@ -1331,7 +1356,8 @@ pub async fn cell_parts(t: T) -> R {
     // Aimed at, each by itself.
     let cell = add(f, [0, 0, -3]);
     t.set(cell, "base:oak_planks_slab").await?;
-    t.op(&format!("addpart {} base:sandstone_slab[type=top]", at(cell))).await?;
+    t.op(&format!("addpart {} base:sandstone_slab[type=top]", at(cell)))
+        .await?;
     t.c().teleport(centre(cell, 0.5, 0.0, 2.5));
     t.secs(0.3).await?;
     aim(&t, centre(cell, 0.5, 0.8, 0.5));
@@ -1342,7 +1368,8 @@ pub async fn cell_parts(t: T) -> R {
     let left = t.op(&parts(cell)).await?;
     t.check(left.contains("oak_planks_slab") && !left.contains("sandstone"), format!("the one aimed at goes: {left}"));
     // The other one, when what the cell stands for goes.
-    t.op(&format!("addpart {} base:sandstone_slab[type=top]", at(cell))).await?;
+    t.op(&format!("addpart {} base:sandstone_slab[type=top]", at(cell)))
+        .await?;
     t.frames(3).await?;
     aim(&t, centre(cell, 0.5, 0.2, 1.0));
     t.secs(0.2).await?;
@@ -1353,7 +1380,8 @@ pub async fn cell_parts(t: T) -> R {
 
     // Water in a slab, from a bucket: it stays a source and flows out sideways, not through.
     let pool = add(f, [6, 0, -6]);
-    t.fill(add(pool, [-3, -2, -3]), add(pool, [3, -1, 3]), "stone").await?;
+    t.fill(add(pool, [-3, -2, -3]), add(pool, [3, -1, 3]), "stone")
+        .await?;
     t.set(add(pool, [0, -1, 0]), "air").await?;
     t.set(pool, "base:stone_slab").await?;
     t.op("put me 0 base:water_bucket 1").await?;
@@ -1371,7 +1399,9 @@ pub async fn cell_parts(t: T) -> R {
     t.shot("slab_in_water").await?;
     t.c().teleport(centre(pool, 0.5, 0.2, 0.5));
     t.secs(0.2).await?;
-    let in_it = t.op(&format!("in_liquid {} {} {}", pool[0] as f64 + 0.5, pool[1] as f64 + 0.7, pool[2] as f64 + 0.5)).await?;
+    let in_it = t
+        .op(&format!("in_liquid {} {} {}", pool[0] as f64 + 0.5, pool[1] as f64 + 0.7, pool[2] as f64 + 0.5))
+        .await?;
     t.check_eq(in_it, "1".to_string(), "over the slab is in water");
     t.c().teleport(centre(pool, 0.5, 0.0, 4.5));
     t.secs(0.2).await?;
@@ -1380,12 +1410,14 @@ pub async fn cell_parts(t: T) -> R {
     t.frames(3).await?;
     t.check(t.block(pool).await?.contains("water"), format!("the water stays: {}", t.block(pool).await?));
     // A slab put in a source keeps it, and two of them leave no room.
-    t.fill(add(pool, [-1, 0, -1]), add(pool, [1, 0, 1]), "air").await?;
+    t.fill(add(pool, [-1, 0, -1]), add(pool, [1, 0, 1]), "air")
+        .await?;
     t.set(pool, "base:water").await?;
     t.frames(2).await?;
     t.op("put me 1 base:stone_slab 8").await?;
     t.c().select(1);
-    t.fill(add(pool, [-1, 0, 0]), add(pool, [-1, 1, 0]), "stone").await?;
+    t.fill(add(pool, [-1, 0, 0]), add(pool, [-1, 1, 0]), "stone")
+        .await?;
     t.c().teleport(centre(pool, 0.5, 0.0, 3.5));
     t.secs(0.3).await?;
     aim(&t, centre(add(pool, [-1, 0, 0]), 1.0, 0.8, 0.5));
@@ -1422,7 +1454,8 @@ pub async fn cell_parts(t: T) -> R {
     t.secs(0.3).await?;
     let dry = t.op(&parts(steps)).await?;
     t.check(dry.contains("stone_stairs") && !dry.contains("water"), format!("a bucket takes it back: {dry}"));
-    t.fill(add(pool, [2, 0, -1]), add(pool, [8, 0, 3]), "air").await?;
+    t.fill(add(pool, [2, 0, -1]), add(pool, [8, 0, 3]), "air")
+        .await?;
 
     // A plant and a layer over it: their shapes overlap, and they said so.
     let bed = add(f, [-6, 0, -6]);
@@ -1450,8 +1483,10 @@ pub async fn cell_parts(t: T) -> R {
     let a = add(f, [6, 0, 6]);
     t.set(add(a, [0, -1, 0]), "stone").await?;
     t.set(a, "base:torch[facing=up]").await?;
-    t.op(&format!("addpart {} base:stone_stairs[facing=east]", at(a))).await?;
-    t.set(add(a, [1, 0, 0]), "base:stone_stairs[facing=south]").await?;
+    t.op(&format!("addpart {} base:stone_stairs[facing=east]", at(a)))
+        .await?;
+    t.set(add(a, [1, 0, 0]), "base:stone_stairs[facing=south]")
+        .await?;
     t.frames(4).await?;
     let stair = t.op(&parts(a)).await?;
     t.check(stair.contains("torch") && stair.contains("shape=outer_right"), format!("a part keeps up with its neighbors: {stair}"));
@@ -1460,10 +1495,12 @@ pub async fn cell_parts(t: T) -> R {
 
     // A piston moves all of a cell.
     let row = add(f, [-6, 0, 6]);
-    t.fill(add(row, [0, -1, 0]), add(row, [4, -1, 0]), "stone").await?;
+    t.fill(add(row, [0, -1, 0]), add(row, [4, -1, 0]), "stone")
+        .await?;
     t.set(row, "base:piston[facing=east]").await?;
     t.set(add(row, [1, 0, 0]), "base:oak_planks_slab").await?;
-    t.op(&format!("addpart {} base:sandstone_slab[type=top]", at(add(row, [1, 0, 0])))).await?;
+    t.op(&format!("addpart {} base:sandstone_slab[type=top]", at(add(row, [1, 0, 0]))))
+        .await?;
     t.set(add(row, [0, 0, 1]), "base:redstone_block").await?;
     t.secs(1.0).await?;
     let moved = t.op(&parts(add(row, [2, 0, 0]))).await?;
@@ -2111,7 +2148,11 @@ pub async fn names_translated(t: T) -> R {
             if let Some(n) = name
                 .strip_prefix("base:")
                 // Named after what hatches from them, or what they are made of.
-                .filter(|n| !["_spawn_egg", "_stairs", "_slab"].iter().any(|end| n.ends_with(end)))
+                .filter(|n| {
+                    !["_spawn_egg", "_stairs", "_slab"]
+                        .iter()
+                        .any(|end| n.ends_with(end))
+                })
             {
                 if !has(format!("item.base.{n}")) && !has(format!("block.base.{n}")) {
                     missing.push(name.to_string());

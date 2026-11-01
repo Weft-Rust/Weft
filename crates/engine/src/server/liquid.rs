@@ -51,12 +51,21 @@ impl Dim {
         if self.space.extras(p).is_empty() {
             return false;
         }
-        let axis = if d.x != 0 { 0 } else if d.y != 0 { 1 } else { 2 };
+        let axis = if d.x != 0 {
+            0
+        } else if d.y != 0 {
+            1
+        } else {
+            2
+        };
         let up = d[axis] > 0;
         self.parts(p).into_iter().any(|s| {
             c.states[s as usize].collision.iter().any(|b| {
                 let at_side = if up { b[axis + 3] >= 1.0 } else { b[axis] <= 0.0 };
-                at_side && (0..3).filter(|&a| a != axis).all(|a| b[a] <= 0.0 && b[a + 3] >= 1.0)
+                at_side
+                    && (0..3)
+                        .filter(|&a| a != axis)
+                        .all(|a| b[a] <= 0.0 && b[a + 3] >= 1.0)
             })
         })
     }
@@ -88,7 +97,10 @@ impl Dim {
                 return Some(def.first_state);
             }
         }
-        if self.fluid_towards(c, p - down, down).is_some_and(|f| f.id == l) {
+        if self
+            .fluid_towards(c, p - down, down)
+            .is_some_and(|f| f.id == l)
+        {
             return Some(encode(def, 8, true));
         }
         let k = max as i32 - def.drop_off as i32;
@@ -280,8 +292,13 @@ impl Dim {
                 && self.fluid(c, hit.block).is_none()
                 && self.can_hold_liquid(c, hit.block)
             {
-                let mut q =
-                    weft_abi::Query { entity: player, pos: hit.block.to_array(), state: source, item: held.item, ..weft_abi::Query::DEFAULT };
+                let mut q = weft_abi::Query {
+                    entity: player,
+                    pos: hit.block.to_array(),
+                    state: source,
+                    item: held.item,
+                    ..weft_abi::Query::DEFAULT
+                };
                 if !self.ask(c, weft_abi::question::PLACE_BLOCK, &mut q) || !self.add_part(c, hit.block, source) {
                     return None;
                 }
@@ -354,5 +371,3 @@ impl Dim {
         crate::physics::pick(c, &*self.space, &structures, eye, dir, max, liquids)
     }
 }
-
-

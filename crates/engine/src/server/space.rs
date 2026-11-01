@@ -95,7 +95,9 @@ impl crate::physics::Cells for CubeCells<'_> {
         self.0.get(&cube_of(p)).map(|cube| cube.get(local_index(p)))
     }
     fn extras(&self, p: IVec3) -> &[u32] {
-        self.0.get(&cube_of(p)).map_or(&[], |cube| cube.extras(local_index(p)))
+        self.0
+            .get(&cube_of(p))
+            .map_or(&[], |cube| cube.extras(local_index(p)))
     }
     #[inline]
     fn cell(&self, p: IVec3) -> Option<(u32, &[u32])> {
@@ -243,7 +245,6 @@ impl Space {
             }
         }
     }
-
 
     /// The blocks of a structure for saving: (position, state name), air left out.
     pub fn structure_blocks(&self, c: &Content) -> Vec<(IVec3, String)> {

@@ -131,7 +131,11 @@ pub fn register(r: &mut Registry) {
                 .model_box_faces([0.0, 0.0, 0.0], [16.0, 2.0, 16.0], slab(top))
                 .model_box_faces([4.0, 2.0, 11.0], [6.0, 7.0, 13.0], short_post(torch))
                 .model_box_faces([10.0, 2.0, 11.0], [12.0, 7.0, 13.0], short_post(torch))
-                .model_box_faces([7.0, 2.0, 2.0], [9.0, 5.0, 4.0], short_post(if subtract { "redstone_torch" } else { "redstone_torch_off" }))
+                .model_box_faces(
+                    [7.0, 2.0, 2.0],
+                    [9.0, 5.0, 4.0],
+                    short_post(if subtract { "redstone_torch" } else { "redstone_torch_off" }),
+                )
         })
         .on_use(|u| {
             u.world().cycle_prop(u.pos(), "mode");
@@ -174,7 +178,8 @@ pub fn register(r: &mut Registry) {
         .signal_switch()
         .states(|p, s| {
             let height = if p.is("power", "on") { 1.0 } else { 2.0 };
-            s.frame(p.frame()).model_box_faces([5.0, 0.0, 6.0], [11.0, height, 10.0], all("button"))
+            s.frame(p.frame())
+                .model_box_faces([5.0, 0.0, 6.0], [11.0, height, 10.0], all("button"))
         })
         .on_use(|u| {
             let (w, p) = (u.world(), u.pos());
@@ -211,7 +216,8 @@ pub fn register(r: &mut Registry) {
                     s.model_box_faces([0.0, 0.0, 0.0], [16.0, 12.0, 16.0], f)
                 } else {
                     f[3].0 = top;
-                    s.model_box_faces([0.0, 0.0, 0.0], [16.0, 16.0, 16.0], f).opacity(15)
+                    s.model_box_faces([0.0, 0.0, 0.0], [16.0, 16.0, 16.0], f)
+                        .opacity(15)
                 }
             })
             .sound_group("stone")

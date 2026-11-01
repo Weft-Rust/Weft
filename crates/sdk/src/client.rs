@@ -136,7 +136,11 @@ impl Client {
     /// Lies down with its feet toward `yaw` (degrees) and stays there, or gets up with `None`. Other
     /// players see it. Where it lies is the server's to say (`World::teleport`).
     pub fn lie_down(&self, yaw: Option<f32>) {
-        self.control(&abi::PlayerControl { mask: abi::control_mask::LYING, lying: yaw.map_or(f32::NAN, f32::to_radians), ..abi::PlayerControl::DEFAULT });
+        self.control(&abi::PlayerControl {
+            mask: abi::control_mask::LYING,
+            lying: yaw.map_or(f32::NAN, f32::to_radians),
+            ..abi::PlayerControl::DEFAULT
+        });
     }
 
     pub fn fly_speed(&self, mul: f32) {

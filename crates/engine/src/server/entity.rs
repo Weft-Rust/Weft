@@ -144,7 +144,11 @@ impl Entity {
     /// Half width, height and eye height of its box: its own size if a mod gave it one, else
     /// its kind's; crouching lowers either.
     pub fn dims(&self, c: &Content) -> (f64, f64, f64) {
-        physics::posed(self.size.unwrap_or(c.game.entities[self.kind as usize].size()), self.pose)
+        physics::posed(
+            self.size
+                .unwrap_or(c.game.entities[self.kind as usize].size()),
+            self.pose,
+        )
     }
 
     /// Another thing in hand starts the swing over; the same item again (a count, damage or slot

@@ -848,10 +848,11 @@ impl Server {
                     if let Some(cube) = r.space.cubes.get(&pos) {
                         let mut bytes = entities_in(c, r, pos);
                         let ticks = r.ticks_in(pos);
-                        let holds =
-                            r.entities.list.iter().any(|e| {
-                                e.saved_with_cube(c) && cube_of(e.pos.floor().as_ivec3()) == pos
-                            });
+                        let holds = r
+                            .entities
+                            .list
+                            .iter()
+                            .any(|e| e.saved_with_cube(c) && cube_of(e.pos.floor().as_ivec3()) == pos);
                         persist::append_ticks(&mut bytes, &ticks);
                         s.save(c, r.id, pos, cube, &bytes);
                         if holds || !ticks.is_empty() {
@@ -1291,9 +1292,7 @@ fn entities_in(c: &Content, d: &Dim, cube: IVec3) -> Vec<u8> {
         .entities
         .list
         .iter()
-        .filter(|e| {
-            e.saved_with_cube(c) && cube_of(e.pos.floor().as_ivec3()) == cube
-        })
+        .filter(|e| e.saved_with_cube(c) && cube_of(e.pos.floor().as_ivec3()) == cube)
         .map(|e| e.id)
         .collect();
     serialize(c, d, &ids)

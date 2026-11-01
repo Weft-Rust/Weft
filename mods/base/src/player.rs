@@ -123,7 +123,8 @@ pub fn register(r: &mut Registry) {
 
     // Survival bars; a negative value hides them (creative).
     r.hud_element(&HUD_HEALTH, hud_anchor::HOTBAR_LEFT, 0, |ui| {
-        ui.icons("heart", 10, |c| if c.exempt() { -1.0 } else { c.me().map_or(20.0, |s| s.health.ceil()) }).shaking();
+        ui.icons("heart", 10, |c| if c.exempt() { -1.0 } else { c.me().map_or(20.0, |s| s.health.ceil()) })
+            .shaking();
     });
     r.hud_element(&HUD_ARMOR, hud_anchor::HOTBAR_LEFT, 1, |ui| {
         ui.icons("armor", 10, |c| {
@@ -138,10 +139,12 @@ pub fn register(r: &mut Registry) {
         });
     });
     r.hud_element(&HUD_FOOD, hud_anchor::HOTBAR_RIGHT, 0, |ui| {
-        ui.icons("food", 10, |c| if c.exempt() { -1.0 } else { c.component(&HUNGER).map_or(20.0, |h| h.food.ceil()) }).rtl();
+        ui.icons("food", 10, |c| if c.exempt() { -1.0 } else { c.component(&HUNGER).map_or(20.0, |h| h.food.ceil()) })
+            .rtl();
     });
     r.hud_element(&HUD_AIR, hud_anchor::HOTBAR_RIGHT, 1, |ui| {
-        ui.icons("air", 10, |c| if c.exempt() { -1.0 } else { c.component(&HUNGER).map_or(-1.0, |h| air_bubbles(h.air)) }).rtl();
+        ui.icons("air", 10, |c| if c.exempt() { -1.0 } else { c.component(&HUNGER).map_or(-1.0, |h| air_bubbles(h.air)) })
+            .rtl();
     });
 
     // While a swing charges.

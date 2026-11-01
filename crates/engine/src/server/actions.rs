@@ -16,7 +16,9 @@ impl Server {
     pub(super) fn finish_uses(&mut self, c: &'static Content) {
         for pi in 0..self.players.len() {
             let Some((item, done)) = self.players[pi].using else { continue };
-            let held = self.region(pi).map_or(ItemStack::EMPTY, |(r, id)| r.entities.held(id));
+            let held = self
+                .region(pi)
+                .map_or(ItemStack::EMPTY, |(r, id)| r.entities.held(id));
             if held.item != item || held.is_empty() {
                 self.players[pi].using = None;
                 self.players[pi].conn.send(ToClient::Using(None));
@@ -158,8 +160,14 @@ impl Server {
                     let part = d.aimed_part(c, pos, part);
                     let too_soon = rate < 1.0 && progress + 2.0 * rate < 0.7;
                     let keeps = creative && c.no_creative_break(held.item);
-                    let free = c.states.get(part as usize).is_some_and(|s| s.hardness <= 0.0);
-                    let done = within(o.to_local(eye), pos, reach) && !too_soon && !keeps && d.break_face(c, pos, part, face, held, entity, !creative);
+                    let free = c
+                        .states
+                        .get(part as usize)
+                        .is_some_and(|s| s.hardness <= 0.0);
+                    let done = within(o.to_local(eye), pos, reach)
+                        && !too_soon
+                        && !keeps
+                        && d.break_face(c, pos, part, face, held, entity, !creative);
                     // The client already shows air: a refused break sends the block back.
                     if !done && d.get(pos).is_some() {
                         d.resend_cell(pos);

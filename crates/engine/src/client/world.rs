@@ -151,7 +151,9 @@ pub struct SeenCells<'a> {
 
 impl crate::physics::Cells for SeenCells<'_> {
     fn main(&self, p: IVec3) -> Option<u32> {
-        self.world.block_or_air(p).or(self.air_if_missing.then_some(AIR))
+        self.world
+            .block_or_air(p)
+            .or(self.air_if_missing.then_some(AIR))
     }
     fn extras(&self, p: IVec3) -> &[u32] {
         self.world.extras(p)
@@ -584,7 +586,9 @@ impl ClientWorld {
 
     /// What else is in the cell at `p`.
     pub fn extras(&self, p: IVec3) -> &[u32] {
-        self.cubes.get(&cube_of(p)).map_or(&[], |slot| slot.cube.extras(local_index(p)))
+        self.cubes
+            .get(&cube_of(p))
+            .map_or(&[], |slot| slot.cube.extras(local_index(p)))
     }
 
     /// What else is in the cell at `p` is now `extras`.
@@ -735,7 +739,9 @@ impl ClientWorld {
 
     /// `light` for what asks whether there is anything there at all.
     pub fn light_loaded(&self, p: IVec3) -> Option<u32> {
-        self.cubes.get(&cube_of(p)).map(|s| s.cube.light(local_index(p)))
+        self.cubes
+            .get(&cube_of(p))
+            .map(|s| s.cube.light(local_index(p)))
     }
 
     pub fn body_glow_changed(&mut self, cells: Vec<(IVec3, [u8; 3])>) {

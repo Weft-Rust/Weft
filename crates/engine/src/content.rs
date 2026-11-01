@@ -655,7 +655,8 @@ impl Content {
     /// Whether a block in `state` has growth steps ahead of it: (mean ticks, light needed).
     pub fn grows(&self, state: u32) -> Option<(f64, u32)> {
         let b = self.block_of(state);
-        self.states[state as usize].grow
+        self.states[state as usize]
+            .grow
             .filter(|_| b.cb.on_grow.is_some() || self.grown(state).is_some())
     }
 
@@ -702,7 +703,11 @@ impl Content {
 
     /// Whether either of two states said it may be in a cell with the other.
     pub fn may_share(&self, a: u32, b: u32) -> bool {
-        let says = |x: u32, y: u32| self.shares_cell.get(&self.states[x as usize].block).is_some_and(|m| self.matches(m, y));
+        let says = |x: u32, y: u32| {
+            self.shares_cell
+                .get(&self.states[x as usize].block)
+                .is_some_and(|m| self.matches(m, y))
+        };
         says(a, b) || says(b, a)
     }
 
@@ -1017,7 +1022,9 @@ fn expand_templates(
     items: &mut Vec<(ModId, RawItem)>,
     games: &[crate::registry::RawGame],
 ) -> Vec<(String, String, String)> {
-    let templates: Vec<usize> = (0..blocks.len()).filter(|&i| blocks[i].1.derive.is_some()).collect();
+    let templates: Vec<usize> = (0..blocks.len())
+        .filter(|&i| blocks[i].1.derive.is_some())
+        .collect();
     if templates.is_empty() {
         return Vec::new();
     }
@@ -1025,13 +1032,21 @@ fn expand_templates(
     let mut given: FxHashMap<&str, Vec<&str>> = FxHashMap::default();
     for set in games.iter().flat_map(|g| &g.sets).filter(|s| !s.remove) {
         if let crate::components::Target::Name(n) = &set.target {
-            given.entry(n.split('[').next().unwrap_or(n)).or_default().push(&set.value.name);
+            given
+                .entry(n.split('[').next().unwrap_or(n))
+                .or_default()
+                .push(&set.value.name);
         }
     }
     let matches = |b: &RawBlock, wanted: &str| match wanted.strip_prefix('#') {
         Some(pattern) => {
-            let own = b.components.iter().chain(b.states.iter().flat_map(|s| &s.components)).map(|v| v.name.as_str());
-            own.chain(given.get(b.name.as_str()).into_iter().flatten().copied()).any(|t| tag_fits(pattern, t))
+            let own = b
+                .components
+                .iter()
+                .chain(b.states.iter().flat_map(|s| &s.components))
+                .map(|v| v.name.as_str());
+            own.chain(given.get(b.name.as_str()).into_iter().flatten().copied())
+                .any(|t| tag_fits(pattern, t))
         }
         None => b.name == wanted,
     };
@@ -1043,7 +1058,10 @@ fn expand_templates(
     for &t in &templates {
         let (owner, template) = &blocks[t];
         let Some((sources, suffix)) = &template.derive else { continue };
-        let short = template.name.split_once(':').map_or(template.name.as_str(), |x| x.1);
+        let short = template
+            .name
+            .split_once(':')
+            .map_or(template.name.as_str(), |x| x.1);
         let item = items.iter().find(|i| i.1.block == template.name);
         for (s, (_, source)) in blocks.iter().enumerate() {
             let cube = source.states[0].model == Model::Cube && source.derive.is_none();
@@ -1071,12 +1089,22 @@ fn expand_templates(
                         st.layer = from.layer;
                         st.flags |= from.flags & abi::block_flags::CULL_SAME;
                     }
-                    st.components = from.components.iter().filter(|v| carries_over(v)).cloned().collect();
+                    st.components = from
+                        .components
+                        .iter()
+                        .filter(|v| carries_over(v))
+                        .cloned()
+                        .collect();
                     st.components.extend(own.components.iter().cloned());
                     st
                 })
                 .collect();
-            let mut components: Vec<RawValue> = source.components.iter().filter(|v| carries_over(v)).cloned().collect();
+            let mut components: Vec<RawValue> = source
+                .components
+                .iter()
+                .filter(|v| carries_over(v))
+                .cloned()
+                .collect();
             components.extend(template.components.iter().cloned());
             components.push(tag(format!("{short}/{id}")));
             shapes.push((name.clone(), source.name.clone(), format!("shape.{short}")));
@@ -1117,7 +1145,10 @@ fn expand_templates(
     for (s, value) in source_tags {
         blocks[s].1.components.push(value);
     }
-    let names: Vec<String> = templates.iter().map(|&t| blocks[t].1.name.clone()).collect();
+    let names: Vec<String> = templates
+        .iter()
+        .map(|&t| blocks[t].1.name.clone())
+        .collect();
     blocks.retain(|b| b.1.derive.is_none());
     items.retain(|i| !names.contains(&i.1.block));
     blocks.append(&mut made);
@@ -1169,7 +1200,12 @@ pub(crate) unsafe fn copy_block(d: &abi::BlockDesc) -> RawBlock {
                 model: s.model,
                 textures: std::array::from_fn(|i| s.textures[i].as_str().to_string()),
                 boxes,
-                hitbox: s.hitbox.as_slice().iter().map(|b| b.map(|v| v / 16.0)).collect(),
+                hitbox: s
+                    .hitbox
+                    .as_slice()
+                    .iter()
+                    .map(|b| b.map(|v| v / 16.0))
+                    .collect(),
                 signal: RawSignal {
                     kind: s.signal.kind,
                     attach: s.signal.attach as u8,
@@ -1184,8 +1220,14 @@ pub(crate) unsafe fn copy_block(d: &abi::BlockDesc) -> RawBlock {
         RawBlock {
             name: d.name.as_str().to_string(),
             cell: d.cell as usize,
-            derive: (!d.derive_from.as_str().is_empty()).then(|| (d.derive_from.as_str().to_string(), d.derive_suffix.as_str().to_string())),
-            shares_cell: d.shares_cell.as_slice().iter().map(|x| x.as_str().to_string()).collect(),
+            derive: (!d.derive_from.as_str().is_empty())
+                .then(|| (d.derive_from.as_str().to_string(), d.derive_suffix.as_str().to_string())),
+            shares_cell: d
+                .shares_cell
+                .as_slice()
+                .iter()
+                .map(|x| x.as_str().to_string())
+                .collect(),
             states,
             props: d
                 .props
@@ -1572,14 +1614,21 @@ pub fn freeze(mut mods: Vec<ModMeta>, regs: Vec<RawRegistrar>) -> Result<Content
     let mut errors: Vec<String> = Vec::new();
     let Merged { blocks, mut items, mut biomes, mut dims, tint_kinds, biome_tints, mut games } = merge_registrars(&mods, regs, &mut errors);
     let mut blocks = apply_replacements(&mods, blocks, &mut items);
-    for (name, _, _) in games.iter().flat_map(|g| &g.liquids).filter(|(_, _, d)| d.temperature >= BURNING) {
+    for (name, _, _) in games
+        .iter()
+        .flat_map(|g| &g.liquids)
+        .filter(|(_, _, d)| d.temperature >= BURNING)
+    {
         if let Some(b) = blocks.iter_mut().find(|b| b.1.name == *name) {
             b.1.components.push(RawValue::tag(abi::comp::HOT));
         }
     }
     let shapes = expand_templates(&mut blocks, &mut items, &games);
-    let shares_specs: Vec<(String, Vec<String>)> =
-        blocks.iter().filter(|b| !b.1.shares_cell.is_empty()).map(|b| (b.1.name.clone(), b.1.shares_cell.clone())).collect();
+    let shares_specs: Vec<(String, Vec<String>)> = blocks
+        .iter()
+        .filter(|b| !b.1.shares_cell.is_empty())
+        .map(|b| (b.1.name.clone(), b.1.shares_cell.clone()))
+        .collect();
     apply_block_models(&mods, &mut blocks, &mut errors);
     let tint_kinds = freeze_tints(tint_kinds, biome_tints, &mut biomes, &mut errors);
     check_unique(&mods, &blocks, &mut items, &mut biomes, &mut dims, &mut errors);
@@ -1623,7 +1672,9 @@ pub fn freeze(mut mods: Vec<ModMeta>, regs: Vec<RawRegistrar>) -> Result<Content
     for b in &block_defs {
         let grows = (b.first_state..b.first_state + b.states).any(|s| states[s as usize].grow.is_some());
         if grows && b.cb.on_grow.is_none() && !b.props.iter().any(|p| p.name == "age") {
-            let owner = mods.get(b.owner.0 as usize).map_or("engine", |m| m.id.as_str());
+            let owner = mods
+                .get(b.owner.0 as usize)
+                .map_or("engine", |m| m.id.as_str());
             errors.push(format!("{owner}: block {} grows, but has no `age` property and no on_grow", b.name));
         }
     }
@@ -1981,7 +2032,11 @@ fn number_blocks(mods: &[ModMeta], blocks: Vec<(ModId, RawBlock)>, textures: &mu
             };
             for bx in &s.hitbox {
                 if bx.iter().any(|v| !(-1.0..=2.0).contains(v)) {
-                    errors.push(format!("{}: hitbox {:?} reaches more than a block out of its cell (it is in sixteenths)", b.name, bx.map(|v| v * 16.0)));
+                    errors.push(format!(
+                        "{}: hitbox {:?} reaches more than a block out of its cell (it is in sixteenths)",
+                        b.name,
+                        bx.map(|v| v * 16.0)
+                    ));
                 }
             }
             // What stops a walker: nothing at all unless it is solid, decided here once for

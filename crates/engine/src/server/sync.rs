@@ -150,11 +150,8 @@ impl Server {
 fn send_block_changes(p: &mut Player, dim: &DimSet) {
     for reg in &dim.regions {
         // For what the client works out itself; all of it when it gets here, then what changes.
-        let glow: Vec<(IVec3, [u8; 3])> = if !p.glow_sent {
-            reg.space.body_light.iter().map(|(c, v)| (*c, *v)).collect()
-        } else {
-            reg.space.body_light_changes.clone()
-        };
+        let glow: Vec<(IVec3, [u8; 3])> =
+            if !p.glow_sent { reg.space.body_light.iter().map(|(c, v)| (*c, *v)).collect() } else { reg.space.body_light_changes.clone() };
         if !glow.is_empty() {
             p.conn.send(ToClient::BodyGlow { dim: p.dim, cells: glow });
         }

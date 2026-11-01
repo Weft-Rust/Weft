@@ -38,7 +38,6 @@ impl FileBox {
     }
 }
 
-
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct FileModel {
     /// Elements, if the model (or a parent) has any.

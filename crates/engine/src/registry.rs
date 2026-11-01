@@ -1144,7 +1144,6 @@ fn write_cell(cell: usize, id: u32) {
     }
 }
 
-
 pub use weft_abi::EYE_SHARE as EYE;
 
 /// What an entity kind's `sounds` hold.

@@ -82,9 +82,15 @@ pub fn register(r: &mut Registry) {
     static AND_GATE: Block = Block::named("and_gate");
     static BLUE_WIRE: Block = Block::named("blue_wire");
     static UNBREAKABLE: Block = Block::named("unbreakable");
-    r.block(&UNBREAKABLE).texture("varied").unbreakable().no_item();
+    r.block(&UNBREAKABLE)
+        .texture("varied")
+        .unbreakable()
+        .no_item();
     static TINTED_PLANT: Block = Block::named("tinted_plant");
-    r.block(&TINTED_PLANT).texture("base:tallgrass").plant().tint(&tints::GRASS);
+    r.block(&TINTED_PLANT)
+        .texture("base:tallgrass")
+        .plant()
+        .tint(&tints::GRASS);
     r.block(&DRILL)
         .on_pass(|_| {
             PASSES.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
@@ -132,7 +138,10 @@ pub fn register(r: &mut Registry) {
     r.intercept(&question::HURT, move |q| if player(&q.world(), q.entity()) && NO_HURT.get() { Verdict::Deny } else { Verdict::Abstain });
     r.intercept(&question::USE_ITEM, |_| if NO_USE.get() { Verdict::Deny } else { Verdict::Abstain });
     r.world_tick(|w| {
-        let jumped = w.each_player().filter(|&p| w.entity(p).is_some_and(|s| s.jumped != 0)).count();
+        let jumped = w
+            .each_player()
+            .filter(|&p| w.entity(p).is_some_and(|s| s.jumped != 0))
+            .count();
         JUMPS.fetch_add(jumped as u32, Ordering::Relaxed);
     });
     r.on(&RANG, |b| {
@@ -388,7 +397,11 @@ const OPS: &[(&str, &str, Run)] = &[
     }),
     ("get", "<pos:pos>", |w, cmd, _, _| Ok(block_name(w.get(pos(cmd, "pos")?)).to_string())),
     ("parts", "<pos:pos>", |w, cmd, _, _| {
-        Ok(w.parts(pos(cmd, "pos")?).into_iter().map(block_name).collect::<Vec<_>>().join(" "))
+        Ok(w.parts(pos(cmd, "pos")?)
+            .into_iter()
+            .map(block_name)
+            .collect::<Vec<_>>()
+            .join(" "))
     }),
     ("addpart", "<pos:pos> <block:block>", |w, cmd, _, _| Ok((w.add_part(pos(cmd, "pos")?, id(cmd, "block")?) as u32).to_string())),
     ("crater", "<r:int>", |w, cmd, _, me| {
@@ -420,7 +433,8 @@ const OPS: &[(&str, &str, Run)] = &[
     ("crater_fast", "<r:int>", |w, cmd, _, me| {
         // The same through the area edit: one call, done at the end of the tick.
         let r: i32 = int(cmd, "r")?;
-        w.fill_sphere([me[0] as f64 + 0.5, me[1] as f64 + 0.5, me[2] as f64 + 0.5], r as f64, 0).keep_unbreakable();
+        w.fill_sphere([me[0] as f64 + 0.5, me[1] as f64 + 0.5, me[2] as f64 + 0.5], r as f64, 0)
+            .keep_unbreakable();
         Ok(String::new())
     }),
     ("group", "@owner <name:word>", |w, cmd, _, _| {

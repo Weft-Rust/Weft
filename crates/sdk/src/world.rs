@@ -108,7 +108,11 @@ impl World {
 
     /// The value of property `name` of the block at `pos`: `w.prop(pos, "lit")`.
     pub fn prop(&self, pos: [i32; 3], name: &str) -> Option<&'static str> {
-        state_prop(self.get(pos), name).or_else(|| self.parts(pos).into_iter().find_map(|s| state_prop(s, name)))
+        state_prop(self.get(pos), name).or_else(|| {
+            self.parts(pos)
+                .into_iter()
+                .find_map(|s| state_prop(s, name))
+        })
     }
 
     /// A number property of the block at `pos` (`age`, `fuse`).
@@ -130,7 +134,9 @@ impl World {
         if state_prop(own, name).is_some() {
             return Some(own);
         }
-        self.parts(pos).into_iter().find(|&s| state_prop(s, name).is_some())
+        self.parts(pos)
+            .into_iter()
+            .find(|&s| state_prop(s, name).is_some())
     }
 
     /// Changes one property of the block at `pos`, keeping the others (its facing stays):
@@ -184,7 +190,9 @@ pub fn state_prop(state: u32, name: &str) -> Option<&'static str> {
 /// `state` with property `name` set to `value`, its other properties kept.
 /// The `facing` property of a state, up if it has none.
 pub fn state_facing(state: u32) -> crate::Dir {
-    state_prop(state, "facing").and_then(crate::Dir::from_name).unwrap_or(crate::Dir::Up)
+    state_prop(state, "facing")
+        .and_then(crate::Dir::from_name)
+        .unwrap_or(crate::Dir::Up)
 }
 
 /// Where the other part of a `two_part` block is, from the part `state` at `pos`.

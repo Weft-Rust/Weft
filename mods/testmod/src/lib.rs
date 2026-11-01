@@ -441,7 +441,8 @@ fn machine_screen(ui: &mut Ui, slots: impl FnOnce(&mut Ui)) {
                     out.set("testmod.energy", &[Arg::Int(e.stored), Arg::Int(e.capacity)]);
                 });
                 ui.progress_bind("energy", S::default().size(80.0, 8.0), |c| {
-                    c.menu_component(&ENERGY).map_or(0.0, |e| ratio(e.stored as u32, e.capacity as u32))
+                    c.menu_component(&ENERGY)
+                        .map_or(0.0, |e| ratio(e.stored as u32, e.capacity as u32))
                 });
             });
             ui.spacer();
@@ -450,7 +451,6 @@ fn machine_screen(ui: &mut Ui, slots: impl FnOnce(&mut Ui)) {
         ui.player_inventory(true);
     });
 }
-
 
 /// `/gizmo testmod:energy`: stored energy above every machine, the mod-side use of gizmos.
 fn energy_gizmos(w: &World, ids: &[u64]) {
@@ -504,7 +504,8 @@ fn dynamite(r: &mut Registry) {
                 w.schedule(pos, 10);
             } else {
                 w.play_sound(&BOOM, center, 4.0);
-                w.fill_sphere(center, DYNAMITE_RADIUS.get() as f64, 0).keep_unbreakable();
+                w.fill_sphere(center, DYNAMITE_RADIUS.get() as f64, 0)
+                    .keep_unbreakable();
             }
         });
 }

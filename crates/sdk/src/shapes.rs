@@ -2,8 +2,8 @@
 //! block found gets its own, with its textures and what it is like to mine, also from mods this
 //! one has never heard of. `.tab(..)` and the rest go on what they return, as on any block.
 
-use crate::component::Tag;
 use crate::Dir;
+use crate::component::Tag;
 use crate::content::{Block, BlockBuilder, Place, Props, Registry, WithComponents};
 use crate::world::state_prop;
 
@@ -63,7 +63,8 @@ impl Registry {
     /// tagged `<name>/<source>` and its source `<name>_of/<source>`, for one recipe to cover all:
     /// `r.shaped(C, "#wall/{m}", 6, &["###", "###"], &[('#', "#wall_of/{m}")])`.
     pub fn shapes_of<'a>(&'a mut self, name: &str, sources: &str, suffix: &str) -> BlockBuilder<'a> {
-        self.block(Block::generated(name.to_string())).made_of(sources, suffix)
+        self.block(Block::generated(name.to_string()))
+            .made_of(sources, suffix)
     }
 
     /// Stairs of `sources` (see `shapes_of`): `<name>_stairs`, turned the way the player looks,
@@ -173,7 +174,10 @@ impl Registry {
             })
             .merge(|p, props| {
                 let there = Dir::from_name(props.get("side"));
-                if p.placed("side").and_then(Dir::from_name).is_some_and(|side| Some(side.opposite()) == there) {
+                if p.placed("side")
+                    .and_then(Dir::from_name)
+                    .is_some_and(|side| Some(side.opposite()) == there)
+                {
                     props.set("side", "double");
                 }
             })

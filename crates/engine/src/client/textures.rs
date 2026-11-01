@@ -169,8 +169,12 @@ impl GameTextures {
     /// isn't loaded.
     pub fn strip_frame(&self, id: u32, ticks: f32) -> u32 {
         let i = self.inner.borrow();
-        let en = i.ids.get(id as usize).and_then(|&e| i.entries.get(e as usize));
-        en.and_then(|en| en.anim.as_ref()).map_or(0, |a| a.frame_at(ticks).0)
+        let en = i
+            .ids
+            .get(id as usize)
+            .and_then(|&e| i.entries.get(e as usize));
+        en.and_then(|en| en.anim.as_ref())
+            .map_or(0, |a| a.frame_at(ticks).0)
     }
 
     /// Texture ids there are: the content's and the connected texture tiles.

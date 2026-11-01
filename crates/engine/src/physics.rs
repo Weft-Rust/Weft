@@ -162,7 +162,12 @@ impl Cells for BodyCells<'_> {
 
 /// Collision boxes of a state in block-local coordinates.
 pub fn boxes(c: &Content, state: u32, out: &mut Vec<[f64; 6]>) {
-    out.extend(c.states[state as usize].collision.iter().map(|b| b.map(|v| v as f64)));
+    out.extend(
+        c.states[state as usize]
+            .collision
+            .iter()
+            .map(|b| b.map(|v| v as f64)),
+    );
 }
 
 /// A solid body this step: its box after its move (around all its blocks for a structure), how
@@ -449,15 +454,7 @@ pub struct MoveResult {
 
 /// Moves a box with feet at `pos` by `delta`. `block(p)` returns the state at p, or `None` for
 /// unloaded positions which are treated as solid so nothing falls out of the world while loading.
-pub fn move_box(
-    c: &Content,
-    block: &impl Cells,
-    pos: DVec3,
-    half_width: f64,
-    height: f64,
-    delta: DVec3,
-    step_height: f64,
-) -> MoveResult {
+pub fn move_box(c: &Content, block: &impl Cells, pos: DVec3, half_width: f64, height: f64, delta: DVec3, step_height: f64) -> MoveResult {
     move_box_with(c, block, &[], 0, pos, half_width, height, delta, step_height)
 }
 
@@ -691,7 +688,9 @@ fn ray_box(o: DVec3, d: DVec3, b: &[f32; 6], max: f64) -> Option<(f64, u8)> {
 /// Whether liquid fills the block `level` above the feet at `pos` (0 the feet, the eye height for
 /// eyes): the one question of "in water", asked at the height the caller means.
 pub fn in_liquid(c: &Content, block: &impl Cells, pos: DVec3, level: f64) -> bool {
-    block.liquid(c, (pos + DVec3::Y * level).floor().as_ivec3()).is_some()
+    block
+        .liquid(c, (pos + DVec3::Y * level).floor().as_ivec3())
+        .is_some()
 }
 
 /// What the cells a box of that height stands in do to it, by all that is in them: the one answer
@@ -732,7 +731,9 @@ pub fn liquid_at(c: &Content, block: &impl Cells, p: DVec3) -> Option<u16> {
     let at = p.floor().as_ivec3();
     let st = &c.states[block.liquid(c, at)? as usize];
     let liquid = st.liquid?;
-    let covered = block.liquid(c, at + IVec3::Y).is_some_and(|s| c.states[s as usize].liquid == Some(liquid));
+    let covered = block
+        .liquid(c, at + IVec3::Y)
+        .is_some_and(|s| c.states[s as usize].liquid == Some(liquid));
     let surface = if covered { 1.0 } else { (8.0 - st.level as f64) / 9.0 };
     (p.y - at.y as f64 <= surface).then_some(liquid)
 }
@@ -798,9 +799,15 @@ pub fn walk(
     let feet = pos.floor().as_ivec3();
     let started_in = around(c, block, *pos, f.height);
     let Around { in_liquid: liquid, climbing } = started_in;
-    let drag = block.liquid(c, feet).or(block.main(feet)).map_or(1.0, |s| c.states[s as usize].drag as f64);
-    let slip_at =
-        |y: f64| block.main(IVec3::new(feet.x, (y - 0.5).floor() as i32, feet.z)).map_or(0.6, |s| c.states[s as usize].friction as f64);
+    let drag = block
+        .liquid(c, feet)
+        .or(block.main(feet))
+        .map_or(1.0, |s| c.states[s as usize].drag as f64);
+    let slip_at = |y: f64| {
+        block
+            .main(IVec3::new(feet.x, (y - 0.5).floor() as i32, feet.z))
+            .map_or(0.6, |s| c.states[s as usize].friction as f64)
+    };
     let accelerate = |vel: &mut DVec3, k: f64| {
         let len2 = ctl.wish.length_squared();
         if len2 > 1e-7 {
@@ -904,7 +911,11 @@ pub fn nudge(d: DVec3) -> DVec3 {
 /// The top of a state's collision boxes in the block (a slab 0.5, a fence 1.5), `None` when
 /// nothing there stops a walker.
 pub fn collision_top(c: &Content, state: u32) -> Option<f64> {
-    c.states[state as usize].collision.iter().map(|b| b[4] as f64).reduce(f64::max)
+    c.states[state as usize]
+        .collision
+        .iter()
+        .map(|b| b[4] as f64)
+        .reduce(f64::max)
 }
 
 #[cfg(test)]

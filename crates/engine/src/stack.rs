@@ -145,7 +145,13 @@ pub fn to_names(data: u32) -> Vec<(String, Vec<u8>)> {
 
 /// `amount` more damage, nothing left when that uses it up; what has no durability stays.
 pub fn worn(c: &crate::content::Content, stack: ItemStack, amount: u32) -> ItemStack {
-    let Some(def) = c.items.get(stack.item as usize).filter(|d| d.durability != 0 && !stack.is_empty()) else { return stack };
+    let Some(def) = c
+        .items
+        .get(stack.item as usize)
+        .filter(|d| d.durability != 0 && !stack.is_empty())
+    else {
+        return stack;
+    };
     let total = damage(&stack) + amount;
     if total >= def.durability { ItemStack::EMPTY } else { with_damage(stack, total) }
 }

@@ -565,7 +565,10 @@ impl Dim {
                 .bodies
                 .get(&body)
                 .map_or_else(Moved::default, |s| s.signals.carry_out(b.local));
-            let extras = self.bodies.get(&body).map_or(Vec::new(), |s| s.extras(b.local).to_vec());
+            let extras = self
+                .bodies
+                .get(&body)
+                .map_or(Vec::new(), |s| s.extras(b.local).to_vec());
             self.land_block(c, b.to, b.state, b.entity, signal);
             if self.get(b.to) == Some(b.state) {
                 self.set_extras(b.to, extras);

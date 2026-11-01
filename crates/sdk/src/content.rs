@@ -601,13 +601,15 @@ impl StateDef {
             self.layer = Layer::Cutout;
         }
         let Some(frame) = self.frame else {
-            self.boxes.push((min, max, textures, uv, [0; 6], abi::BoxTilt::NONE));
+            self.boxes
+                .push((min, max, textures, uv, [0; 6], abi::BoxTilt::NONE));
             return;
         };
         // From where the box is on the floor, before it turns.
         let uv: [[f32; 4]; 6] = std::array::from_fn(|i| if uv[i] == abi::UV_FROM_BOX { abi::box_face_uv(i, min, max) } else { uv[i] });
         let (lo, hi, own, turn) = frame.place(min, max, [0usize, 1, 2, 3, 4, 5]);
-        self.boxes.push((lo, hi, std::array::from_fn(|i| textures[own[i]].clone()), own.map(|i| uv[i]), turn, abi::BoxTilt::NONE));
+        self.boxes
+            .push((lo, hi, std::array::from_fn(|i| textures[own[i]].clone()), own.map(|i| uv[i]), turn, abi::BoxTilt::NONE));
     }
 
     fn new(tex: &str) -> Self {
@@ -834,7 +836,9 @@ macro_rules! state_setters {
         /// `Dir`) by degrees, right-handed, like a model file's element.
         pub fn tilted(mut self, origin: [f32; 3], axis: crate::Dir, degrees: f32) -> Self {
             self.each(|s, _| {
-                let frame = s.frame.unwrap_or(crate::signal::Frame::new(crate::Dir::Down, crate::Dir::North));
+                let frame = s
+                    .frame
+                    .unwrap_or(crate::signal::Frame::new(crate::Dir::Down, crate::Dir::North));
                 let Some(last) = s.boxes.last_mut() else { return };
                 last.5 = abi::BoxTilt { origin: frame.at(origin), axis: frame.along(axis), degrees };
             });
@@ -1260,7 +1264,12 @@ impl<'a> BlockBuilder<'a> {
     /// `parts[1]` goes where `way` says from there (given the state), which needs room. Breaking
     /// one takes the other, whatever took the one (an explosion doesn't break it): `drops` and
     /// the like are for the two together.
-    pub fn two_part(self, prop: &'static str, parts: [&'static str; 2], way: impl Fn(u32) -> crate::Dir + Copy + Send + Sync + 'static) -> Self {
+    pub fn two_part(
+        self,
+        prop: &'static str,
+        parts: [&'static str; 2],
+        way: impl Fn(u32) -> crate::Dir + Copy + Send + Sync + 'static,
+    ) -> Self {
         let Some(block) = self.handle else {
             crate::mistake("two_part needs a block registered by its handle");
             return self;
@@ -1535,7 +1544,12 @@ impl Drop for BlockBuilder<'_> {
         if let Some(f) = self.merge.take() {
             let props = self.props.clone();
             self.callbacks.merge = Some(callback(move |a: &mut abi::PlaceArgs| {
-                let Some(mut p) = combinations(&props).into_iter().nth((a.state - a.first) as usize) else { return };
+                let Some(mut p) = combinations(&props)
+                    .into_iter()
+                    .nth((a.state - a.first) as usize)
+                else {
+                    return;
+                };
                 f(Place::wrap(a), &mut p);
                 a.state = a.first + index_of(&props, &p);
             }));
@@ -1584,7 +1598,9 @@ impl Drop for BlockBuilder<'_> {
             .map(|((s, b), v)| abi::StateDesc {
                 flags: s.flags,
                 filter: s.filter,
-                opacity: s.opacity.unwrap_or(if s.flags & bf::OPAQUE != 0 { 15 } else { 0 }),
+                opacity: s
+                    .opacity
+                    .unwrap_or(if s.flags & bf::OPAQUE != 0 { 15 } else { 0 }),
                 layer: s.layer,
                 model: s.model,
                 textures: std::array::from_fn(|i| Str::new(&s.textures[i])),
@@ -2741,7 +2757,11 @@ mod order_tests {
     #[test]
     fn a_frame_turns_boxes_and_hitboxes() {
         let f = crate::signal::Frame::new(crate::Dir::Down, crate::Dir::South);
-        let d = built(|s| s.frame(f).model_box([0.0; 3], [16.0, 16.0, 1.0]).hitbox([0.0; 3], [16.0, 16.0, 1.0]));
+        let d = built(|s| {
+            s.frame(f)
+                .model_box([0.0; 3], [16.0, 16.0, 1.0])
+                .hitbox([0.0; 3], [16.0, 16.0, 1.0])
+        });
         // Its north end comes to the south.
         assert_eq!((d.boxes[0].0, d.boxes[0].1), ([0.0, 0.0, 15.0], [16.0, 16.0, 16.0]));
         assert_eq!(d.hitbox[0], [0.0, 0.0, 15.0, 16.0, 16.0, 16.0]);

@@ -41,7 +41,9 @@ impl Neighborhood {
     fn liquid_view(&self, c: &Content, i: usize) -> u32 {
         if !self.extras.is_empty()
             && let Some(parts) = self.extras.get(&i)
-            && let Some(&l) = parts.iter().find(|&&s| c.states[s as usize].liquid.is_some())
+            && let Some(&l) = parts
+                .iter()
+                .find(|&&s| c.states[s as usize].liquid.is_some())
         {
             return l;
         }
@@ -210,8 +212,7 @@ fn draw_block(
                 for dir in 0..6 {
                     let [dx, dy, dz] = NORMALS[dir];
                     let axis = dir / 2;
-                    let at_edge =
-                        bx.tilt.degrees == 0.0 && if dir % 2 == 0 { bx.min[axis] <= 0.0 } else { bx.max[axis] >= 1.0 };
+                    let at_edge = bx.tilt.degrees == 0.0 && if dir % 2 == 0 { bx.min[axis] <= 0.0 } else { bx.max[axis] >= 1.0 };
                     let (ns, nl) = (n.states[pidx(x + dx, y + dy, z + dz)], n.light[pidx(x + dx, y + dy, z + dz)]);
                     if at_edge && ctm.hides(c.states[ns as usize].flags, ns) {
                         continue;
@@ -260,7 +261,6 @@ fn tilted(p: [f32; 3], t: &weft_abi::BoxTilt) -> [f32; 3] {
     let turn = glam::Quat::from_axis_angle(glam::Vec3::from_array(t.axis).normalize(), t.degrees.to_radians());
     (o + turn * (glam::Vec3::from_array(p) - o)).to_array()
 }
-
 
 fn corner_data(
     n: &Neighborhood,
@@ -380,7 +380,9 @@ fn liquid(c: &Content, n: &Neighborhood, ctm: &super::ctm::Ctm, mesh: &mut Mesh,
         if same(xx, y + 1, zz) {
             return Some(1.0);
         }
-        let lvl = c.states[n.liquid_view(c, pidx(xx, y, zz)) as usize].level.min(7) as f32;
+        let lvl = c.states[n.liquid_view(c, pidx(xx, y, zz)) as usize]
+            .level
+            .min(7) as f32;
         Some((8.0 - lvl) / 9.0)
     };
     let corner_h = |cx: i32, cz: i32| -> f32 {
