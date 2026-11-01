@@ -229,7 +229,13 @@ pub fn register(r: &mut Registry) {
         .tab(&crate::tabs::FUNCTIONAL);
     r.block(&GLOWSTONE).sound_group("glass").tag("glowstone").light(15).hardness(0.3).tab(&crate::tabs::NATURAL);
     r.block(&BRICKS).sound_group("stone").hardness(2.0).mineable("pickaxe").needs_tool(0).tab(&crate::tabs::BUILDING);
-    r.block(&STONE_BRICKS).sound_group("stone").texture("stonebrick").hardness(1.5).mineable("pickaxe").needs_tool(0).tab(&crate::tabs::BUILDING);
+    r.block(&STONE_BRICKS)
+        .sound_group("stone")
+        .faces(["stonebrick_side_1", "stonebrick_side_4", "stonebrick_bottom", "stonebrick_top", "stonebrick_side_3", "stonebrick_side_2"])
+        .hardness(1.5)
+        .mineable("pickaxe")
+        .needs_tool(0)
+        .tab(&crate::tabs::BUILDING);
     r.block(&IRON_BLOCK).sound_group("stone").hardness(5.0).mineable("pickaxe").needs_tool(tool_tier::STONE).tag("ore_blocks/iron").tab(&crate::tabs::BUILDING);
     r.block(&GOLD_BLOCK).sound_group("stone").hardness(3.0).mineable("pickaxe").needs_tool(tool_tier::IRON).tag("ore_blocks/gold").tab(&crate::tabs::BUILDING);
     r.block(&DIAMOND_BLOCK).sound_group("stone").hardness(5.0).mineable("pickaxe").needs_tool(tool_tier::IRON).tag("ore_blocks/diamond").tab(&crate::tabs::BUILDING);
