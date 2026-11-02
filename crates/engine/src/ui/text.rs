@@ -341,10 +341,8 @@ fn subject_value(name: &str, cx: &Ctx) -> Option<f32> {
         },
     };
     let schema = c.components.schemas.get(comp as usize)?;
-    let bytes = crate::stack::value(subject.stack.data, comp).or_else(|| {
-        c.components
-            .bytes(crate::components::ITEM, subject.stack.item, comp)
-    })?;
+    let stack = c.stack(&subject.stack);
+    let bytes = stack.bytes(Some(comp))?;
     crate::components::number_in(schema, bytes, field)
 }
 

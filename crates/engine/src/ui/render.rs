@@ -866,10 +866,10 @@ impl UiRenderer {
         if !self.model_icon(x, y, s, stack) {
             self.plain_icon(c, textures, x, y, s, stack.item);
         }
-        let def = &c.items[stack.item as usize];
-        let damage = crate::stack::damage(&stack);
-        if def.durability > 0 && damage > 0 {
-            let f = 1.0 - damage as f32 / def.durability as f32;
+        let durability = c.stack(&stack).get::<u32>(c.ids.durability).unwrap_or_default();
+        let damage = c.stack(&stack).get::<u32>(c.ids.damage).unwrap_or_default();
+        if durability > 0 && damage > 0 {
+            let f = 1.0 - damage as f32 / durability as f32;
             let bar = Rect { x: x + scale, y: y + s - 2.0 * scale, w: 14.0 * scale, h: 2.0 * scale };
             self.rect(bar, 0x000000FF);
             let g = (f * 255.0) as u32;
