@@ -76,17 +76,6 @@ pub fn with(data: u32, comp: u32, bytes: Option<&[u8]>) -> u32 {
     intern(comps)
 }
 
-pub fn u32_of(stack: &ItemStack, comp: Option<u32>) -> u32 {
-    comp.and_then(|c| value(stack.data, c))
-        .filter(|b| b.len() >= 4)
-        .map_or(0, |b| u32::from_le_bytes([b[0], b[1], b[2], b[3]]))
-}
-
-/// Damage taken (the `damage` stack component), 0 for a fresh stack.
-pub fn damage(stack: &ItemStack) -> u32 {
-    u32_of(stack, crate::content::try_content().and_then(|c| c.ids.damage))
-}
-
 /// The stack's own name, if a player gave it one.
 pub fn name(stack: &ItemStack) -> Option<String> {
     let c = crate::content::try_content()?;
@@ -194,12 +183,23 @@ pub fn worn(c: &crate::content::Content, stack: ItemStack, amount: u32) -> ItemS
     let Some(def) = c
         .items
         .get(stack.item as usize)
-        .filter(|d| d.durability != 0 && !stack.is_empty())
+        .filter(|_| !stack.is_empty())
     else {
         return stack;
     };
-    let total = damage(&stack) + amount;
-    if total >= def.durability { ItemStack::EMPTY } else { with_damage(stack, total) }
+    let durability = c
+        .stack(&stack)
+        .get::<u32>(c.ids.durability)
+        .unwrap_or(def.durability);
+    if durability == 0 {
+        return stack;
+    }
+    let total = c
+        .stack(&stack)
+        .get::<u32>(c.ids.damage)
+        .unwrap_or_default()
+        .saturating_add(amount);
+    if total >= durability { ItemStack::EMPTY } else { with_damage(stack, total) }
 }
 
 /// Stack data by component name, for what outlasts the handles of one process: saves and the

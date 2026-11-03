@@ -259,8 +259,8 @@ pub struct ItemDef {
 /// A creative inventory tab: translated as `tab.<ns>.<name>`, or the mod's name for the tab a mod
 /// gets automatically for items it put in no tab.
 /// Ticks of holding the use button an item asks for, 0 for at once.
-pub fn use_ticks(c: &Content, item: u32) -> u32 {
-    c.item_value::<u32>(item, c.ids.use_ticks).unwrap_or(0)
+pub fn use_ticks(c: &Content, stack: &weft_abi::ItemStack) -> u32 {
+    c.stack(stack).get(c.ids.use_ticks).unwrap_or(0)
 }
 
 /// Needs both hands.
@@ -326,14 +326,14 @@ pub fn hands_in_order(c: &Content, inventory: &[weft_abi::ItemStack], selected: 
 }
 
 /// Full swings per second with an item in hand.
-pub fn swings_per_second(c: &Content, item: u32) -> f32 {
-    c.item_value::<f32>(item, c.ids.attack_speed).unwrap_or(4.0)
+pub fn swings_per_second(c: &Content, stack: &weft_abi::ItemStack) -> f32 {
+    c.stack(stack).get(c.ids.attack_speed).unwrap_or(4.0)
 }
 
 /// How charged a swing is after that many ticks, 0..1. Client and server have to agree, with
 /// `speed` the `core:attack_speed` attribute.
-pub fn swing_charge(c: &Content, item: u32, ticks: f32, speed: f32) -> f32 {
-    ((ticks + 0.5) * swings_per_second(c, item) * speed / crate::world::TPS as f32).clamp(0.0, 1.0)
+pub fn swing_charge(c: &Content, stack: &weft_abi::ItemStack, ticks: f32, speed: f32) -> f32 {
+    ((ticks + 0.5) * swings_per_second(c, stack) * speed / crate::world::TPS as f32).clamp(0.0, 1.0)
 }
 
 /// What a block's tint goes on, on one face of it, wherever that is drawn.
@@ -907,6 +907,11 @@ impl Content {
         self.components.get(comps::ITEM, item, comp?)
     }
 
+    /// Component data for one stack, preferring its own value over its item's default.
+    pub fn stack<'a>(&'a self, stack: &'a weft_abi::ItemStack) -> StackComponents<'a> {
+        StackComponents { content: self, stack }
+    }
+
     pub fn block_value<T: Copy>(&self, state: u32, comp: Option<u32>) -> Option<T> {
         self.components.get(comps::BLOCK, state, comp?)
     }
@@ -972,6 +977,14 @@ impl Content {
                 .any(|&(mineable, tools)| self.components.has(comps::BLOCK, state, mineable) && self.item_has(tool, tools))
     }
 
+    pub fn tool_fits_stack(&self, state: u32, tool: &weft_abi::ItemStack) -> bool {
+        !tool.is_empty()
+            && self
+                .tool_classes
+                .iter()
+                .any(|&(mineable, tools)| self.components.has(comps::BLOCK, state, mineable) && self.stack(tool).has(tools))
+    }
+
     /// Mining the block with `tool` (0 = hand) harvests it: it needs no tool, or this one fits
     /// and is of a high enough level.
     pub fn harvests(&self, state: u32, tool: u32) -> bool {
@@ -979,6 +992,16 @@ impl Content {
             || (self.tool_fits(state, tool)
                 && self
                     .item_value::<u32>(tool, self.ids.tool_level)
+                    .unwrap_or(0)
+                    >= self.harvest_level(state))
+    }
+
+    pub fn harvests_stack(&self, state: u32, tool: &weft_abi::ItemStack) -> bool {
+        !self.needs_tool(state)
+            || (self.tool_fits_stack(state, tool)
+                && self
+                    .stack(tool)
+                    .get::<u32>(self.ids.tool_level)
                     .unwrap_or(0)
                     >= self.harvest_level(state))
     }
@@ -1028,6 +1051,47 @@ impl Content {
         let pi = b.props.iter().position(|p| p.name == name)?;
         let v = b.props[pi].values.iter().position(|x| x == value)?;
         Some(b.with_value(state, pi, v as u32))
+    }
+}
+
+pub struct StackComponents<'a> {
+    content: &'a Content,
+    stack: &'a weft_abi::ItemStack,
+}
+
+impl StackComponents<'_> {
+    /// Whether either the stack or its item carries this component.
+    pub fn has(&self, comp: Option<u32>) -> bool {
+        comp.is_some_and(|id| {
+            crate::stack::value(self.stack.data, id).is_some()
+                || self
+                    .content
+                    .components
+                    .has(comps::ITEM, self.stack.item, id)
+        })
+    }
+
+    /// Raw value bytes, preferring the stack over the item's registered value.
+    pub fn bytes(&self, comp: Option<u32>) -> Option<&[u8]> {
+        let id = comp?;
+        crate::stack::value(self.stack.data, id).or_else(|| {
+            self.content
+                .components
+                .bytes(comps::ITEM, self.stack.item, id)
+        })
+    }
+
+    /// Typed value; the caller knows the component schema.
+    pub fn get<T: Copy>(&self, comp: Option<u32>) -> Option<T> {
+        let id = comp?;
+        crate::stack::value(self.stack.data, id)
+            .filter(|bytes| bytes.len() >= std::mem::size_of::<T>())
+            .map(|bytes| unsafe { std::ptr::read_unaligned(bytes.as_ptr() as *const T) })
+            .or_else(|| {
+                self.content
+                    .components
+                    .get(comps::ITEM, self.stack.item, id)
+            })
     }
 }
 
