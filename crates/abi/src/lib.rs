@@ -3520,9 +3520,14 @@ pub struct OreDesc {
     pub veins: u32,
     /// Blocks per vein.
     pub blocks: u32,
+    /// Width of the distribution's central plateau, as a fraction of the Y range (0..1).
+    /// 1.0 => Uniform (default)
+    /// 0.0 => Triangular
+    pub plateau: f32,
     /// Only in biomes with this tag (the block's own column of its cube), empty: anywhere.
     pub biome: Str,
 }
+
 defaults!(OreDesc {
     dimensions: Str::EMPTY,
     block: Str::EMPTY,
@@ -3531,6 +3536,7 @@ defaults!(OreDesc {
     max_y: i32::MAX,
     veins: 4,
     blocks: 8,
+    plateau: 1.0,
     biome: Str::EMPTY
 });
 

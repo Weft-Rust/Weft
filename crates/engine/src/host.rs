@@ -1752,6 +1752,7 @@ unsafe extern "C" fn reg_ore(r: *mut abi::Registrar, d: *const abi::OreDesc) {
             max_y: d.max_y,
             veins: d.veins,
             size: d.blocks,
+            plateau: d.plateau.clamp(0.0, 1.0),
             biome: d.biome.as_str().to_string(),
         });
     }

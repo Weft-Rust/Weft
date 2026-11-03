@@ -251,6 +251,30 @@ pub fn finish_generated(
 
 use weft_noise::hash;
 
+/// Relative density at `y` for a triangular or trapezoidal distribution.
+/// The result is in 0..1, with zero density at either endpoint.
+fn ore_height_density(y: i32, min_y: i32, max_y: i32, plateau: f32) -> f32 {
+    let range = (max_y as i64 - min_y as i64) as f32;
+    if range <= 0.0 {
+        return 1.0;
+    }
+
+    let t = (y as i64 - min_y as i64) as f32 / range;
+    let ramp = (1.0 - plateau.clamp(0.0, 1.0)) * 0.5;
+
+    if ramp <= 0.0 {
+        return 1.0;
+    }
+
+    if t < ramp {
+        t / ramp
+    } else if t > 1.0 - ramp {
+        (1.0 - t) / ramp
+    } else {
+        1.0
+    }
+}
+
 /// Veins start in this and the 26 neighboring cubes and wander a block per step, so the result
 /// does not depend on which cube is generated first.
 /// Returns whether any went in. `uniform`: the cube is all one state.
@@ -302,6 +326,14 @@ fn place_ores(
                         let far = (o - p).max(p - o - IVec3::splat(15)).max_element();
                         if p.y > ore.max_y || p.y < ore.min_y || far > reach {
                             continue;
+                        }
+
+                        let density = ore_height_density(p.y, ore.min_y, ore.max_y, ore.plateau);
+                        if density < 1.0 {
+                            let roll = weft_noise::unit(hash(h, 1, 0, 0)) as f32;
+                            if roll >= density {
+                                continue;
+                            }
                         }
                         for k in 0..ore.size {
                             let hk = hash(h, k as i64, 0, 0);

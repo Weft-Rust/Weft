@@ -548,6 +548,7 @@ pub struct OreDef {
     pub max_y: i32,
     pub veins: u32,
     pub size: u32,
+    pub plateau: f32,
     /// Derived from the block name, so adding an ore does not move the others.
     pub salt: u64,
     /// Biome tag the block's column must carry.
@@ -2804,6 +2805,7 @@ fn place_features(games: &mut [crate::registry::RawGame], dim_defs: &mut [Dimens
                 max_y: o.max_y,
                 veins: o.veins,
                 size: o.size,
+                plateau: o.plateau.clamp(0.0, 1.0),
                 salt,
                 biome,
             },

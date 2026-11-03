@@ -955,6 +955,7 @@ pub struct RawOre {
     pub max_y: i32,
     pub veins: u32,
     pub size: u32,
+    pub plateau: f32,
     pub biome: String,
 }
 

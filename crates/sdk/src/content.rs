@@ -2331,6 +2331,13 @@ impl OreBuilder<'_> {
         (self.desc.min_y, self.desc.max_y) = (min, max);
         self
     }
+    /// Size of the plateau of the ore distribution
+    /// <= 0.0 => Triangular distribution
+    /// >= 1.0 => uniform distribution (default)
+    pub fn plateau(mut self, range_percent: f32) -> Self {
+        self.desc.plateau = range_percent;
+        self
+    }
     /// Veins started per cube.
     pub fn veins(mut self, n: u32) -> Self {
         self.desc.veins = n;
