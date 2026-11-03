@@ -173,6 +173,11 @@ fn events(r: &mut Registry) {
 /// The usage string is parsed, checked, completed with Tab and shown in `/help` by the engine
 /// you only read the values by name.
 fn commands(_r: &mut Registry) {
+    // Text on a player's screen, all one call with different defaults (docs: Text on the screen).
+    // r.on(&PLAYER_JOINED, |b| for e in b.iter() {
+    //     b.world().hint(e.player, "examplemod.hello", &[]);
+    //     b.world().show(e.player, "examplemod.hello", &[]).at(0.5, 0.1).scale(2.0).times(0.5, 2.0, 0.5);
+    // });
     // r.command("example", "[times:int]", |cmd| {
     //     let n = cmd.int("times").unwrap_or(1);
     //     cmd.reply("examplemod.hello", &[Arg::Int(n)]);    // `examplemod.hello = hello {0} times` in lang
@@ -218,6 +223,12 @@ fn client(_r: &mut Registry) {
     // r.on_entity_frame(&PLAYER, |c, e| {
     //     c.turn_bone(e.id(), "tail1", [0.0, (e.age() * 6.0).sin() * 20.0, 0.0]);
     // });
+    //
+    // A stack with data of its own, what a custom workbench might make:
+    // static GRADE: Component<u32> = Component::named("grade");
+    // static CHISEL: Item = Item::named("chisel");
+    // r.stack_component(&GRADE, 0);
+    // fn made(grade: u32) -> ItemStack { CHISEL.stack(1).with(&GRADE, grade).with_damage(5) }
     //
     // Sparks around a mob while it lives, the engine's steps and idle noises kept:
     // static WISP: Entity = Entity::named("wisp");

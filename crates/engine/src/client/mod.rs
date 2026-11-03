@@ -470,7 +470,11 @@ pub struct Client {
     /// Components of other entities the server shares.
     pub entity_components: FxHashMap<(u64, u32), Vec<u8>>,
     /// Formatted when drawn, in the language shown then.
-    pub chat: Vec<(Msg, Instant)>,
+    pub chat: Vec<(crate::net::Shown, Instant)>,
+    /// Text on the screen other than the chat, some of it possibly over by now.
+    pub shown: Vec<(crate::net::Shown, Instant)>,
+    /// Goes up with every change to `chat` and `shown`, for the HUD to notice.
+    pub shown_changes: u32,
     /// Answers to commands run from code, by their id, until read.
     pub command_replies: rustc_hash::FxHashMap<u32, Vec<Msg>>,
     pub next_command: u32,
@@ -548,9 +552,35 @@ impl Client {
 
     /// Shows a line in the chat as if the server had sent it.
     pub fn chat_line(&mut self, line: Msg) {
-        self.chat.push((line, Instant::now()));
-        let extra = self.chat.len().saturating_sub(100);
-        self.chat.drain(..extra);
+        self.show(crate::net::Shown::chat(line));
+    }
+
+    /// Puts text on the screen. The chat keeps what is over as its history.
+    pub fn show(&mut self, s: crate::net::Shown) {
+        let now = Instant::now();
+        let s = s.settled();
+        self.shown_changes += 1;
+        let in_chat = s.place == weft_abi::show_place::CHAT && s.at.is_none();
+        let list = if in_chat { &mut self.chat } else { &mut self.shown };
+        let replaced = (!s.look().stacks || !s.id.is_empty())
+            .then(|| {
+                list.iter()
+                    .position(|(o, _)| o.place == s.place && o.id == s.id)
+            })
+            .flatten();
+        match replaced {
+            Some(i) if s.clears() => drop(list.remove(i)),
+            Some(i) => list[i] = (s, now),
+            None if s.clears() => {}
+            None => list.push((s, now)),
+        }
+        if in_chat {
+            let extra = list.len().saturating_sub(100);
+            list.drain(..extra);
+        } else {
+            // Not by alpha: that is 0 too at the start of a fade in.
+            list.retain(|(o, at)| now.duration_since(*at).as_secs_f32() < o.times.iter().sum::<f32>());
+        }
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -730,6 +760,8 @@ impl Client {
             packets: Vec::new(),
             entity_components: FxHashMap::default(),
             chat: Vec::new(),
+            shown: Vec::new(),
+            shown_changes: 0,
             command_replies: Default::default(),
             next_command: 0,
             gizmos: Default::default(),
@@ -771,6 +803,11 @@ impl Client {
 
     pub fn held(&self) -> ItemStack {
         crate::content::in_main_hand(content(), &self.inventory, self.selected as u32)
+    }
+
+    /// What the main hand shows: from the eyes the old stack, until the hand has gone down with it.
+    pub fn shown_held(&self) -> ItemStack {
+        if self.view == 0 { self.hand_stack } else { self.held() }
     }
 
     pub fn off_held(&self) -> ItemStack {
@@ -1329,7 +1366,15 @@ impl Client {
                 .filter(|(_, e)| c.game.entities[e.kind as usize].is(weft_abi::entity_flags::SOLID))
                 .map(|(&id, e)| (id, e.pose(at))),
         );
-        for e in self.entities.values_mut().filter(|e| e.pulled.is_none()) {
+        // A crowd's worth on all cores: nothing here depends on another entity.
+        let mut moving: Vec<&mut ClientEntity> = self
+            .entities
+            .values_mut()
+            .filter(|e| e.pulled.is_none())
+            .collect();
+        let frames_ref = &frames;
+        let step = |e: &mut &mut ClientEntity| {
+            let frames = frames_ref;
             let before = e.pos;
             let body = e
                 .rel_target
@@ -1346,7 +1391,9 @@ impl Client {
                 e.pos.lerp(e.target, k)
             };
             let mut dyaw = e.target_yaw - e.yaw;
-            dyaw = (dyaw + std::f32::consts::PI).rem_euclid(std::f32::consts::TAU) - std::f32::consts::PI;
+            if dyaw.abs() > std::f32::consts::PI {
+                dyaw = (dyaw + std::f32::consts::PI).rem_euclid(std::f32::consts::TAU) - std::f32::consts::PI;
+            }
             e.yaw += dyaw * k as f32;
             e.body_yaw = turn_body(e.body_yaw, e.yaw, walked.unwrap_or(e.pos - before), dt as f32);
             advance_swing(&mut e.arm_swing, dt as f32);
@@ -1365,6 +1412,12 @@ impl Client {
                 e.hurt = 0.4;
                 e.burning = false;
             }
+        };
+        if moving.len() >= 512 {
+            use rayon::prelude::*;
+            moving.par_iter_mut().with_min_len(128).for_each(step);
+        } else {
+            moving.iter_mut().for_each(step);
         }
         self.frames = frames;
     }
@@ -2079,7 +2132,7 @@ impl Client {
             health: self.health,
             hurt: self.hurt_flash,
             worn,
-            held: if self.view == 0 { self.hand_stack.item } else { self.held().item },
+            held: self.shown_held().item,
             off_held: self.off_held().item,
             using: self
                 .using
@@ -2207,7 +2260,14 @@ impl Client {
     }
 
     /// `list` goes in the world's pass, `early` before it.
-    pub fn render(&mut self, gpu: &mut dyn Backend, list: &mut CommandList, early: &mut CommandList, frame: &FrameInfo, textures: &GameTextures) {
+    pub fn render(
+        &mut self,
+        gpu: &mut dyn Backend,
+        list: &mut CommandList,
+        early: &mut CommandList,
+        frame: &FrameInfo,
+        textures: &GameTextures,
+    ) {
         self.entity_render.local = self.player_id;
         for (entity, png) in std::mem::take(&mut self.entity_render.skin_pending) {
             self.entity_render.set_skin(gpu, entity, &png);
@@ -2232,10 +2292,10 @@ impl Client {
             .map(|(&id, e)| (id, physics::Transform::of(e.pos).origin()))
             .collect();
         // The world's light on each, as the server worked it out when it got there.
-        let lights: rustc_hash::FxHashMap<(u64, IVec3), u32> = self
-            .entities
+        let lights: rustc_hash::FxHashMap<(u64, IVec3), u32> = frames
             .iter()
-            .flat_map(|(&id, e)| e.world_light.iter().map(move |(cp, l)| ((id, *cp), *l)))
+            .filter_map(|(id, _)| self.entities.get(id).map(|e| (*id, e)))
+            .flat_map(|(id, e)| e.world_light.iter().map(move |(cp, l)| ((id, *cp), *l)))
             .collect();
         self.render
             .draw(gpu, list, early, frame, &cam, scene_buf, &frames, &lights);
@@ -2411,9 +2471,10 @@ fn step_player(p: &mut LocalPlayer, input: &Input, block: &impl physics::Cells, 
         side_in += 1.0;
     }
     let sneak = p.sneak;
+    let crawl = input.held("core:crawl");
     let jump = input.held("core:jump");
-    // Sprinting needs forward movement and stops when walking backwards or sneaking.
-    let sprint = p.sprint && fwd_in > 0.0 && !sneak && !p.using && (p.can_sprint || p.flying);
+    // Sprinting needs forward movement and stops when walking backwards, sneaking or crawling.
+    let sprint = p.sprint && fwd_in > 0.0 && !sneak && !crawl && !p.using && (p.can_sprint || p.flying);
     // Sprinting swims once the eyes are in a liquid that can be swum in, and keeps at it while the
     // body is. In a liquid it is no use otherwise.
     let can_swim = |at: DVec3| physics::liquid_at(c, block, at).is_some_and(|l| p.swim_anywhere || c.liquids[l as usize].swimmable);
@@ -2425,6 +2486,8 @@ fn step_player(p: &mut LocalPlayer, input: &Input, block: &impl physics::Cells, 
     // A pose where it fits, and if nothing else fits it crawls (a swimming box under a trapdoor).
     let want = if swimming {
         Pose::Swim
+    } else if crawl && !p.flying && !p.noclip {
+        Pose::Crawl
     } else if sneak && !p.flying && !p.noclip {
         Pose::Crouch
     } else {
