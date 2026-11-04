@@ -933,7 +933,10 @@ pub fn draw_custom(
     text_unit: f32,
 ) {
     match tag {
-        TAG_CROSSHAIR => loaded(ren, look, "crosshair", r, scale),
+        // Only in first person: from behind or in front it would sit over the player, not where
+        // a hit lands (as vanilla hides it there).
+        TAG_CROSSHAIR if client.is_none_or(|c| c.view == 0) => loaded(ren, look, "crosshair", r, scale),
+        TAG_CROSSHAIR => {}
         TAG_HOTBAR => {
             let Some(client) = client else { return };
             let selected = client.selected as u64 == data;

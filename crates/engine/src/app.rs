@@ -1819,6 +1819,10 @@ fn toggle_keys(r: &mut Running) {
         r.hud_off = !r.hud_off;
         r.quads_dirty = true;
     }
+    // The crosshair shows only in first person (`hud::draw_custom`): redraw when the view turns.
+    if r.input.pressed("core:perspective") {
+        r.quads_dirty = true;
+    }
     if let Some(g) = &mut r.game {
         g.client.hide_gui = r.hud_off;
     }
