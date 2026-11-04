@@ -919,6 +919,13 @@ fn mod_profile() -> String {
 
 /// Engine-drawn nodes: crosshair, hotbar slots, menu slots.
 #[allow(clippy::too_many_arguments)]
+/// Whether the crosshair is drawn for a client in `view` (0 first person, 1 behind, 2 in front;
+/// `None` outside a world): only in first person. From behind or in front it would sit over the
+/// player, not where a hit lands (as vanilla hides it there).
+fn crosshair_shown(view: Option<u8>) -> bool {
+    view.is_none_or(|v| v == 0)
+}
+
 pub fn draw_custom(
     ren: &mut UiRenderer,
     look: &Look,
@@ -933,9 +940,7 @@ pub fn draw_custom(
     text_unit: f32,
 ) {
     match tag {
-        // Only in first person: from behind or in front it would sit over the player, not where
-        // a hit lands (as vanilla hides it there).
-        TAG_CROSSHAIR if client.is_none_or(|c| c.view == 0) => loaded(ren, look, "crosshair", r, scale),
+        TAG_CROSSHAIR if crosshair_shown(client.map(|c| c.view)) => loaded(ren, look, "crosshair", r, scale),
         TAG_CROSSHAIR => {}
         TAG_HOTBAR => {
             let Some(client) = client else { return };
@@ -1182,4 +1187,17 @@ fn debug_help(ui: &mut Ui, groups: u32, align: Align, mods: &[(&'static str, boo
             }
         }
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::crosshair_shown;
+
+    #[test]
+    fn crosshair_only_in_first_person() {
+        assert!(crosshair_shown(Some(0)), "first person");
+        assert!(!crosshair_shown(Some(1)), "from behind");
+        assert!(!crosshair_shown(Some(2)), "from in front");
+        assert!(crosshair_shown(None), "no world: as before");
+    }
 }
