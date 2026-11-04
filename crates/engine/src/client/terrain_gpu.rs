@@ -160,6 +160,7 @@ pub fn describe_lod(c: &Content, dim: u32, seed: u64) -> Option<Vec<i32>> {
                 .unwrap_or(0.0);
             let threshold = (density as f64 * (1u64 << 53) as f64).ceil() as u64;
             let (mut tops, mut radii, mut states) = (Vec::new(), Vec::new(), rustc_hash::FxHashMap::<u32, u32>::default());
+            let mut forced = rustc_hash::FxHashMap::<u32, u32>::default();
             for k in 0..8u64 {
                 let mut args = weft_abi::ScatterArgs {
                     seed,
@@ -185,8 +186,9 @@ pub fn describe_lod(c: &Content, dim: u32, seed: u64) -> Option<Vec<i32>> {
                         .max()
                         .unwrap_or(0),
                 );
-                for b in blocks.iter().filter(|b| b.force == 0) {
-                    *states.entry(b.state).or_default() += 1;
+                for b in blocks {
+                    let counts = if b.force == 0 { &mut states } else { &mut forced };
+                    *counts.entry(b.state).or_default() += 1;
                 }
             }
             if tops.is_empty() {
@@ -195,13 +197,24 @@ pub fn describe_lod(c: &Content, dim: u32, seed: u64) -> Option<Vec<i32>> {
             }
             tops.sort_unstable();
             radii.sort_unstable();
-            let state = states.into_iter().max_by_key(|e| e.1).map_or(0, |e| e.0);
+            let state = canopy_state(states, forced);
             let entry: [i32; words::SCATTER_BIOME as usize] =
                 [threshold as u32 as i32, (threshold >> 32) as u32 as i32, radii[radii.len() / 2], tops[tops.len() / 2], state as i32];
             w.extend_from_slice(&entry);
         }
     }
     Some(w)
+}
+
+/// The block distant terrain draws a scatter's canopy with: the commonest one it puts into air (a
+/// tree's leaves), else the commonest one it forces (a boulder that forces all its blocks). Ties go
+/// to the higher state, not to the map's order. Counting only the blocks put into air gave state 0
+/// (air) for a scatter that forces everything.
+fn canopy_state(free: rustc_hash::FxHashMap<u32, u32>, forced: rustc_hash::FxHashMap<u32, u32>) -> u32 {
+    let commonest = |m: rustc_hash::FxHashMap<u32, u32>| m.into_iter().max_by_key(|&(state, n)| (n, state));
+    commonest(free)
+        .or_else(|| commonest(forced))
+        .map_or(0, |e| e.0)
 }
 
 #[derive(Default)]
@@ -572,4 +585,22 @@ fn done(c: &Content, job: Job, cube: &mut Cube) {
     let _ = job
         .done
         .send((job.epoch, job.pos, std::mem::replace(cube, Cube::uniform(0, 0))));
+}
+
+#[cfg(test)]
+mod tests {
+    use super::canopy_state;
+
+    #[test]
+    fn canopy_of_a_scatter_that_forces_everything() {
+        let map = |e: &[(u32, u32)]| e.iter().copied().collect();
+        // A tree: its leaves, put into air, not its forced trunk.
+        assert_eq!(canopy_state(map(&[(7, 40)]), map(&[(3, 60)])), 7);
+        // A boulder forces all its blocks: its stone, not air.
+        assert_eq!(canopy_state(map(&[]), map(&[(5, 30), (6, 10)])), 5);
+        // A tie goes the same way whatever the order.
+        assert_eq!(canopy_state(map(&[(2, 4), (9, 4)]), map(&[])), 9);
+        assert_eq!(canopy_state(map(&[(9, 4), (2, 4)]), map(&[])), 9);
+        assert_eq!(canopy_state(map(&[]), map(&[])), 0);
+    }
 }
