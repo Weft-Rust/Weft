@@ -1,3 +1,4 @@
+mod cli;
 use std::path::PathBuf;
 
 use weft_engine::Options;
