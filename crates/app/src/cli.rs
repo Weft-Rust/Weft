@@ -3,16 +3,17 @@ use std::{fmt::Display, path::PathBuf, str::FromStr};
 use clap::{Args, Parser, Subcommand};
 
 /// Weft is a voxel sandbox engine written in Rust.
+///
 /// The game itself is a mod, `mods/base`,
 /// built only on the public SDK:
 /// it has no private hooks into the engine,
 /// so anything it does, another mod can do or change.
+///
 /// Weft is not a Minecraft clone and does not read Minecraft worlds;
 /// it plays like one and borrows its numbers where that makes sense.
-///
 // TODO Make this better?
 #[derive(Debug, Parser)]
-#[command(version, about, long_about = None)]
+#[command(version, about, long_about, override_usage = "weft [COMMAND] [OPTIONS] [-- [EXTRAS_ARGS]...]")]
 pub struct Cli {
     /// The command to run.
     ///
@@ -70,10 +71,10 @@ pub struct ClientArgs {
     /// Enable gpu debugging.
     // NOTE: I dunno what the `gpu_debug` does
     #[arg(long)]
-    pub gpu_debug: Option<bool>,
+    pub gpu_debug: bool,
     /// Disable vsync
     #[arg(long)]
-    pub no_vsync: Option<bool>,
+    pub no_vsync: bool,
     /// Automation: Skip the menu and play this world (created if missing).
     #[arg(long)]
     pub world: Option<String>,
@@ -105,6 +106,7 @@ pub struct ServerArgs {
     pub seed: Option<u64>,
 }
 
+/// `weft` will run on `client` by default if no command is set.
 #[derive(Debug, Subcommand)]
 pub enum CliCommand {
     /// Run weft as client
@@ -142,6 +144,9 @@ pub struct BaseArguments {
     /// The directory where weft should run
     #[arg(long)]
     pub run_dir: Option<PathBuf>,
+    /// The game cache directory
+    #[arg(long)]
+    pub cache_dir: Option<PathBuf>,
     /// The mods directory.
     /// Can be repeated.
     #[arg(long)]
@@ -151,17 +156,23 @@ pub struct BaseArguments {
     /// The format is like this: `target1=level,level,...`,
     /// where the `target` is log target (can be a rust native module or a weft mod)
     /// and the `level` (the log filter level) must be one of these values:
+    ///
     /// - off: The target logs will not be shown
+    ///
     /// - error: only shows "error" logs
+    ///
     /// - warn: shows "error" and "warn" logs
+    ///
     /// - info: shows "error", "warn" and "info" logs
+    ///
     /// - debug: shows "error", "warn", "info" and debug logs
+    ///
     /// - trace: All of the target logs will be shown
     ///
     /// If the target is `all` or `*` or not even set, the `level` will be the default filter.
     #[arg(long)]
     pub log: Option<String>,
-    /// 'Verbose' weft long
+    /// 'Verbose' weft logs
     #[arg(long, default_value_t = false)]
     pub verbose: bool,
     /// The size of the game window.

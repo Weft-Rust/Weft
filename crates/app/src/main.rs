@@ -1,9 +1,13 @@
 mod cli;
 use std::path::PathBuf;
+use std::process::ExitCode;
 
+use clap::Parser;
 use weft_engine::Options;
 use weft_engine::paths::{self, Dirs};
 use weft_render::{Backend, BackendDesc, Error};
+
+use crate::cli::{BaseArguments, Cli, ClientArgs, DistArgs, PackModArgs, ServerArgs};
 
 #[global_allocator]
 static ALLOC: weft_engine::diag::CountingAlloc = weft_engine::diag::CountingAlloc;
@@ -29,7 +33,128 @@ fn game_root() -> PathBuf {
         .unwrap_or(cwd)
 }
 
+// I prefer putting this here instead of using `From`
+fn build_options_from_base_args(mut args: BaseArguments) -> Options {
+    let root = game_root();
+
+    // We build the game dir here
+    let dirs = args
+        .run_dir
+        .map_or_else(|| paths::of_install(&root), |run| Dirs::under(&run));
+
+    // Set config in advance
+    paths::set_config(dirs.config);
+
+    let opts = Options {
+        run_dir: dirs.data,
+        // Prioritize
+        cache_dir: args.cache_dir.unwrap_or(dirs.cache),
+        // Mod sources of the game itself; players' mods go into `<run dir>/mods`, added below.
+        mod_dirs: {
+            args.mods.push(root.join("mods"));
+            args.mods
+        },
+        gpu_debug: false,
+        world: None,
+        seed: None,
+        screen: None,
+        size: (args.size.0, args.size.1),
+        dev: args.dev,
+        automated: args.automated,
+        no_vsync: false,
+        view: args.view,
+    };
+    // Run test jobs
+    if let Some(code) = test_jobs(&extra, &opts.run_dir) {
+        std::process::exit(code);
+    }
+    // Init enging log
+    weft_engine::log::init(Some(&opts.run_dir.join("logs").join("latest.log")), verbose, &log_spec);
+    // crash handler
+    weft_engine::diag::install_crash_handler(&opts.run_dir);
+    log::info!("game folder {}, cache {}", opts.run_dir.display(), opts.cache_dir.display());
+    // Release builds load the game's own mods the way players get them: each packed into one
+    // file in `run/mods` (again only when it changed).
+    if !cfg!(debug_assertions) && root.join("mods").is_dir() {
+        for dir in subdirs(&root.join("mods")) {
+            match weft_engine::modloader::pack_if_stale(&dir, &player_mods) {
+                Ok((path, true)) => log::info!("packed {}", path.display()),
+                Ok(_) => {}
+                Err(e) => log::warn!("cannot pack {}: {e}", dir.display()),
+            }
+        }
+        let sources = root.join("mods");
+        opts.mod_dirs.retain(|d| *d != sources);
+    }
+    // What came with a shipped game stays with it, and a player's copy of a mod comes first.
+    let shipped = root.join("run").join("mods");
+    let separate = shipped != player_mods;
+    opts.mod_dirs.push(player_mods);
+    if separate {
+        opts.mod_dirs.push(shipped);
+    }
+    weft_engine::init_workers();
+    opts
+}
+fn client(mut args: ClientArgs, extras: Vec<(String, String)>) {
+    let mut options = build_options_from_base_args(args.base);
+    options.gpu_debug = args.gpu_debug;
+    options.no_vsync = args.no_vsync;
+    options.world = args.world;
+    options.seed = args.seed;
+    if let Err(e) = weft_engine::run(vulkan, opts) {
+        log::error!("{e}");
+        std::process::exit(1);
+    }
+    std::process::exit(weft_engine::exit_code());
+}
+
+fn server(args: ServerArgs, extras: Vec<(String, String)>) {
+    let mut options = build_options_from_base_args(args.base);
+    todo!();
+    if let Err(e) = weft_engine::dedicated::run(opts) {
+        log::error!("{e}");
+        std::process::exit(1);
+    }
+    std::process::exit(weft_engine::exit_code());
+}
+
+fn pack_mod(args: PackModArgs, extras: Vec<(String, String)>) {
+    weft_engine::set_launch_options(extras);
+    for to_pack in args.to_pack {
+        match weft_engine::modloader::pack(&to_pack, &args.player_mods) {
+            Ok(path) => println!("packed {}", path.display()),
+            Err(e) => {
+                eprintln!("cannot pack {}: {e}", to_pack.display());
+                std::process::exit(1)
+            }
+        }
+    }
+}
+
+fn dist(args: DistArgs, extras: Vec<(String, String)>) {
+    weft_engine::set_launch_options(extras);
+    match make_dist(&args.game_root, &args.out) {
+        Ok(()) => println!("game ready in {}", args.out.display()),
+        Err(e) => {
+            eprintln!("cannot make {}: {e}", args.out.display());
+            std::process::exit(1)
+        }
+    }
+}
+
 fn main() {
+    let cli = Cli::parse();
+    let (command, extra) = cli.get_command();
+    match command {
+        cli::CliCommand::Client(client_args) => client(client_args, extra),
+        cli::CliCommand::Server(server_args) => server(server_args, extra),
+        cli::CliCommand::PackMod(pack_mod_args) => pack_mod(pack_mod_args, extra),
+        cli::CliCommand::Dist(dist_args) => dist(dist_args, extra),
+    }
+}
+
+fn old_main() {
     let root = game_root();
     let mut opts = Options {
         run_dir: PathBuf::new(),
