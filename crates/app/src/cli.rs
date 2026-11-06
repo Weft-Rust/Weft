@@ -83,6 +83,9 @@ pub struct ClientArgs {
     /// Should goes in pair with `--world`.
     #[arg(long)]
     pub seed: Option<u64>,
+    /// Open the built-in screen
+    #[arg(long)]
+    pub screen: Option<String>,
 }
 
 #[derive(Debug, Args)]
