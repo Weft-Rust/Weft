@@ -32,8 +32,35 @@ pub struct Cli {
     /// weft -- --test bed --test dog --mod gregtech
     /// ```
     //
-    #[arg(last = true)]
+    #[arg(last = true, global = true)]
     pub extra_args: Vec<String>,
+}
+
+impl Cli {
+    pub fn get_command(self) -> (CliCommand, Vec<(String, String)>) {
+        let command = self
+            .command
+            .unwrap_or_else(|| CliCommand::Client(self.client_args.unwrap_or_default()));
+        let extras = {
+            let mut extras = Vec::<(String, String)>::new();
+            let mut args = self.extra_args.iter().peekable();
+            while let Some(arg) = args.next() {
+                match arg.strip_prefix("--") {
+                    Some(name) => {
+                        let v: String = if args.peek().is_some_and(|n| !n.starts_with("--")) {
+                            args.next().cloned().unwrap_or_default()
+                        } else {
+                            "1".into()
+                        };
+                        extras.push((name.to_string(), v));
+                    }
+                    None => eprintln!("unknown argument {arg}"),
+                }
+            }
+            extras
+        };
+        (command, extras)
+    }
 }
 
 #[derive(Debug, Args, Default)]
@@ -64,8 +91,18 @@ pub struct ServerArgs {
     /// The game port server.
     ///
     /// Use `host:port` to play in client.
-    #[arg(long)]
+    #[arg(long, short)]
     pub port: Option<u16>,
+    /// Play the given world (created if missing).
+    ///
+    /// By default, it is `world`.
+    #[arg(long)]
+    pub world: Option<String>,
+    /// The seed to use to use when creating a new `world`.
+    ///
+    /// Should goes in pair with `--world`.
+    #[arg(long)]
+    pub seed: Option<u64>,
 }
 
 #[derive(Debug, Subcommand)]
@@ -75,9 +112,28 @@ pub enum CliCommand {
     /// Run Weft as a server
     Server(ServerArgs),
     /// Pack a mod.
-    PackMod,
-    /// Prepare a game directory
-    Dist,
+    PackMod(PackModArgs),
+    /// Prepare a folder to hand to someone:
+    /// the executable, the engine's assets and every mod packed.
+    Dist(DistArgs),
+}
+
+#[derive(Debug, Args)]
+pub struct PackModArgs {
+    /// The player mods directory.
+    #[arg(long)]
+    pub player_mods: PathBuf,
+    #[arg(long)]
+    /// The mod to pack.
+    pub to_pack: Vec<PathBuf>,
+}
+
+#[derive(Debug, Args)]
+pub struct DistArgs {
+    /// The game root directory to copy
+    pub game_root: PathBuf,
+    /// The target directory
+    pub out: PathBuf,
 }
 
 /// All the base arguments
@@ -116,10 +172,8 @@ pub struct BaseArguments {
     /// ```
     /// weft --size 1200x698
     /// ```
-    ///
-    /// By default, it is `1600x900`.
-    #[arg(long, default_value_t = size_default_value())]
-    pub size: Option<Size>,
+    #[arg(long, default_value_t = Default::default())]
+    pub size: Size,
     /// Run weft in `dev` mode.
     ///
     /// Enabled by default if you are on rust `debug_assertions`.
@@ -137,19 +191,27 @@ fn dev_default_value() -> bool {
     cfg!(debug_assertions)
 }
 
-fn size_default_value() -> Option<Size> {
-    Some(Size(1600, 900))
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Size(pub u32, pub u32);
+
+impl Default for Size {
+    fn default() -> Self {
+        Self(1600, 900)
+    }
 }
 
-#[derive(Debug)]
-pub struct Size(pub u32, pub u32);
+impl Display for Size {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}x{}", self.0, self.1)
+    }
+}
 
 #[derive(Debug)]
 pub struct SizeParseError(());
 
 impl Display for SizeParseError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        writeln!(&mut f, "Invalid size format. It should always be in `WidthxHeigth` format")
+        writeln!(f, "Invalid size format. It should always be in `WidthxHeigth` format")
     }
 }
 
@@ -160,5 +222,93 @@ impl FromStr for Size {
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         let v: Vec<u32> = s.split('x').filter_map(|s| s.parse().ok()).collect();
         if v.len() == 2 { Ok(Self(v[0], v[1])) } else { Err(SizeParseError(())) }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_no_arg() {
+        let (command, extras) = Cli::parse_from(["weft"]).get_command();
+        assert!(matches!(command, CliCommand::Client(_)));
+        assert!(extras.is_empty());
+    }
+
+    #[test]
+    fn test_no_arg_with_extra() {
+        let (command, extras) = Cli::parse_from(["weft", "--", "--klee"]).get_command();
+        assert!(matches!(command, CliCommand::Client(_)));
+        assert_eq!(extras.len(), 1);
+        assert_eq!(extras[0], ("klee".into(), "1".into()))
+    }
+
+    #[test]
+    fn test_client() {
+        let (command, extras) = Cli::parse_from(["weft", "client"]).get_command();
+        assert!(matches!(command, CliCommand::Client(_)));
+        assert!(extras.is_empty());
+    }
+
+    #[test]
+    fn test_client_size_with_extra() {
+        let (command, extras) = Cli::try_parse_from(["weft", "client", "--size", "1234x234", "--", "--test", "zhong"])
+            .unwrap()
+            .get_command();
+
+        if let CliCommand::Client(client_arg) = command {
+            assert_eq!(client_arg.base.size, Size(1234, 234));
+        } else {
+            unreachable!("This should be `CliCommand::Client`")
+        }
+
+        assert_eq!(extras.len(), 1);
+        assert_eq!(extras[0], ("test".into(), "zhong".into()));
+    }
+
+    #[test]
+    fn test_server() {
+        let (command, extras) = Cli::parse_from(["weft", "server"]).get_command();
+        assert!(matches!(command, CliCommand::Server(_)));
+        assert!(extras.is_empty());
+    }
+
+    #[test]
+    fn test_server_with_extra() {
+        let (command, extras) =
+            Cli::parse_from(["weft", "server", "--port", "7680", "--size", "123x45", "--", "--op", "plus"]).get_command();
+        if let CliCommand::Server(arg) = command {
+            assert_eq!(arg.base.size, Size(123, 45));
+            assert_eq!(arg.port, Some(7680));
+        } else {
+            unreachable!("The parsed command should be `CliCommand::Server`");
+        }
+        assert_eq!(extras.len(), 1);
+        assert_eq!(extras[0], ("op".into(), "plus".into()));
+    }
+
+    #[test]
+    fn test_pack_mods() {
+        let (command, extras) = Cli::parse_from(["weft", "pack-mod", "--player-mods", "some/dir/aaaa"]).get_command();
+        if let CliCommand::PackMod(a) = command {
+            assert_eq!(a.player_mods.as_path(), "some/dir/aaaa");
+            assert!(a.to_pack.is_empty());
+        } else {
+            unreachable!("This should parse to `CliCommand::PackMod`")
+        }
+        assert!(extras.is_empty());
+    }
+
+    #[test]
+    fn test_dist() {
+        let (command, extras) = Cli::parse_from(["weft", "dist", "/home/alice/.weft", "/home/nicole/.weft-alice"]).get_command();
+        if let CliCommand::Dist(a) = command {
+            assert_eq!(a.game_root.as_path(), "/home/alice/.weft");
+            assert_eq!(a.out.as_path(), "/home/nicole/.weft-alice");
+        } else {
+            unreachable!("This should parse to `CliCommand::Dist`")
+        }
+        assert!(extras.is_empty());
     }
 }
