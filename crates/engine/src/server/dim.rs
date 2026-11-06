@@ -2937,9 +2937,15 @@ impl Dim {
         let (axis, up) = ((face / 2) as usize, face % 2 == 1);
         let parts = self.parts(clicked);
         // What placing replaces counts as not there: the click is on what it stands on.
+        // Same block into the same replaceable cell is not a replace — that only burns the item
+        // (#112). Try the next cell instead, as when the target is solid.
+        let placing_block = c.states[state as usize].block;
         let replacing = self
             .get(clicked)
-            .is_some_and(|m| c.states[m as usize].flags & bf::REPLACEABLE != 0)
+            .is_some_and(|m| {
+                let there = &c.states[m as usize];
+                there.flags & bf::REPLACEABLE != 0 && there.block != placing_block
+            })
             && parts
                 .iter()
                 .all(|&s| c.states[s as usize].flags & bf::REPLACEABLE != 0);
@@ -3038,6 +3044,10 @@ impl Dim {
                     continue;
                 }
                 if there.flags & bf::REPLACEABLE == 0 {
+                    return false;
+                }
+                // Replacing a block with itself only consumes the item (#112).
+                if there.block == c.states[chosen as usize].block {
                     return false;
                 }
                 replaced.push(part);
