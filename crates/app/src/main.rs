@@ -137,8 +137,9 @@ fn server(args: ServerArgs, mut extras: Vec<(String, String)>) {
 
 fn pack_mod(args: PackModArgs, extras: Vec<(String, String)>) {
     weft_engine::set_launch_options(extras);
-    for to_pack in args.to_pack {
-        match weft_engine::modloader::pack(&to_pack, &args.player_mods) {
+    let out_dir = args.out_dir.unwrap_or_default();
+    for to_pack in args.r#mod {
+        match weft_engine::modloader::pack(&to_pack, &out_dir) {
             Ok(path) => println!("packed {}", path.display()),
             Err(e) => {
                 eprintln!("cannot pack {}: {e}", to_pack.display());

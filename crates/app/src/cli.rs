@@ -125,12 +125,12 @@ pub enum CliCommand {
 
 #[derive(Debug, Args)]
 pub struct PackModArgs {
-    /// The player mods directory.
-    #[arg(long)]
-    pub player_mods: PathBuf,
-    #[arg(long)]
+    /// The directory where we put the mods.
+    #[arg(long, short)]
+    pub out_dir: Option<PathBuf>,
+    #[arg(long, short)]
     /// The mod to pack.
-    pub to_pack: Vec<PathBuf>,
+    pub r#mod: Vec<PathBuf>,
 }
 
 #[derive(Debug, Args)]
@@ -304,10 +304,10 @@ mod tests {
 
     #[test]
     fn test_pack_mods() {
-        let (command, extras) = Cli::parse_from(["weft", "pack-mod", "--player-mods", "some/dir/aaaa"]).get_command();
+        let (command, extras) = Cli::parse_from(["weft", "pack-mod", "-o", "some/dir/aaaa"]).get_command();
         if let CliCommand::PackMod(a) = command {
-            assert_eq!(a.player_mods.as_path(), "some/dir/aaaa");
-            assert!(a.to_pack.is_empty());
+            assert_eq!(a.out_dir.unwrap().as_path(), "some/dir/aaaa");
+            assert!(a.r#mod.is_empty());
         } else {
             unreachable!("This should parse to `CliCommand::PackMod`")
         }
