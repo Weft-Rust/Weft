@@ -1749,6 +1749,62 @@ pub async fn replaced_plants_drop(t: T) -> R {
     Ok(())
 }
 
+/// Clicking a replaceable plant while holding the same plant places beside it (or fails for lack
+/// of room) instead of replacing itself and burning the item (#112). A different plant still
+/// replaces, as before.
+pub async fn replaceable_not_self(t: T) -> R {
+    t.flat().await?;
+    let f = t.feet();
+    let cell = add(f, [2, 0, 0]);
+    let beside = add(cell, [0, 0, 1]);
+    t.set(cell, "dandelion").await?;
+    t.set(beside, "air").await?;
+    t.op("put me 0 dandelion 2").await?;
+    t.c().select_slot(0);
+    t.until("dandelion on the client", Duration::from_secs(2), |t| {
+        t.c()
+            .block(cell)
+            .is_some_and(|s| Block::named("base:dandelion").is(s))
+    })
+    .await?;
+    let before = t.op("inv me").await?;
+    t.look_at(cell);
+    t.frames(2).await?;
+    t.press("core:use");
+    t.secs(0.4).await?;
+    let still = t.block(cell).await?;
+    t.check(still.contains("dandelion"), format!("same plant was not replaced: {still}"));
+    let after = t.op("inv me").await?;
+    let beside_now = t.block(beside).await?;
+    let placed_beside = beside_now.contains("dandelion");
+    // Bug burned one into the same cell: stack shrank and the neighbour stayed empty.
+    t.check(
+        placed_beside || after == before,
+        format!("item not burned into itself: beside '{beside_now}', before '{before}', after '{after}'"),
+    );
+    // Different plant still replaces.
+    t.set(cell, "dandelion").await?;
+    t.cmd("/clear @s").await?;
+    t.op("put me 0 rose 1").await?;
+    t.c().select_slot(0);
+    t.until("dandelion again", Duration::from_secs(2), |t| {
+        t.c()
+            .block(cell)
+            .is_some_and(|s| Block::named("base:dandelion").is(s))
+    })
+    .await?;
+    t.look_at(cell);
+    t.frames(2).await?;
+    t.press("core:use");
+    t.until("rose replaced the dandelion", Duration::from_secs(2), |t| {
+        t.c()
+            .block(cell)
+            .is_some_and(|s| Block::named("base:rose").is(s))
+    })
+    .await?;
+    Ok(())
+}
+
 /// Sprinting under water swims in a low box at about 3.9 blocks a second, where wading does 2;
 /// lava is not swum in, unless something worn says so (`swims_in`, testkit's on a chestplate).
 pub async fn swimming(t: T) -> R {
