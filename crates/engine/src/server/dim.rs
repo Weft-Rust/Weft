@@ -1182,10 +1182,13 @@ impl Dim {
         }
     }
 
-    /// The share of the cell's room its shapes take.
+    /// The share of the cell's room its collision shapes take.
+    ///
+    /// Must not use `selection`: `outline()` is only for the crosshair, and a full-cell
+    /// outline would make a hollow waterloggable block look full (#104).
     fn fill_of(c: &Content, state: u32) -> f32 {
         c.states[state as usize]
-            .selection
+            .collision
             .iter()
             .map(|b| (b[3] - b[0]) * (b[4] - b[1]) * (b[5] - b[2]))
             .sum()
