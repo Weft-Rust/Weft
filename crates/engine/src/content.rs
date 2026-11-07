@@ -1019,15 +1019,16 @@ impl Content {
         (1..self.items.len() as u32).find(|&i| self.components.text(comps::ITEM, i, egg) == Some(name.as_str()))
     }
 
-    /// Whether the shapes of two states overlap, in one cell.
+    /// Whether the collision shapes of two states overlap, in one cell.
+    ///
+    /// Uses `collision` (hitbox / model boxes), not `selection`. `outline()` only
+    /// changes what the crosshair draws; compound placement and sharing a cell
+    /// must still follow the solid volume (#106, #104).
     pub fn overlap(&self, a: u32, b: u32) -> bool {
-        const TOUCHING: f32 = 1e-4;
-        self.states[a as usize].selection.iter().any(|x| {
-            self.states[b as usize]
-                .selection
-                .iter()
-                .any(|y| (0..3).all(|i| x[i] + TOUCHING < y[i + 3] && y[i] + TOUCHING < x[i + 3]))
-        })
+        shapes_overlap(
+            &self.states[a as usize].collision,
+            &self.states[b as usize].collision,
+        )
     }
 
     /// Whether either of two states said it may be in a cell with the other.
@@ -3116,6 +3117,17 @@ fn freeze_liquids(
     (liquids, reactions.into_iter().flatten().collect())
 }
 
+
+/// Axis-aligned boxes overlap when each axis has a positive-length intersection
+/// (touching faces do not count).
+fn shapes_overlap(a: &[[f32; 6]], b: &[[f32; 6]]) -> bool {
+    const TOUCHING: f32 = 1e-4;
+    a.iter().any(|x| {
+        b.iter()
+            .any(|y| (0..3).all(|i| x[i] + TOUCHING < y[i + 3] && y[i] + TOUCHING < x[i + 3]))
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -3135,5 +3147,34 @@ mod tests {
         // Sorted by id, as the loader lists them: "aaa" depends on "zzz".
         let mods = [meta("aaa", &["zzz"]), meta("base", &[]), meta("zzz", &["base"])];
         assert_eq!(load_order(&mods), vec![2, 0, 1]);
+    }
+
+    #[test]
+    fn compound_overlap_follows_collision_not_outline() {
+        // Hollow log: wall hitboxes, full-cell outline for the crosshair (#106).
+        let walls = [
+            [0.0, 0.0, 0.0, 0.125, 1.0, 1.0],
+            [0.875, 0.0, 0.0, 1.0, 1.0, 1.0],
+            [0.125, 0.0, 0.0, 0.875, 1.0, 0.125],
+            [0.125, 0.0, 0.875, 0.875, 1.0, 1.0],
+        ];
+        let outline = [[0.0, 0.0, 0.0, 1.0, 1.0, 1.0]];
+        // Flower: not solid → empty collision; selection is the cross.
+        let flower_sel = [[0.3, 0.0, 0.3, 0.7, 0.6, 0.7]];
+        let flower_col: [[f32; 6]; 0] = [];
+        assert!(
+            shapes_overlap(&outline, &flower_sel),
+            "outline vs flower selection would wrongly block compound place"
+        );
+        assert!(
+            !shapes_overlap(&walls, &flower_col),
+            "wall collision vs empty plant collision must allow sharing the cell"
+        );
+        // Volume for waterlogging (#104): outline fills the cell; walls do not.
+        let vol = |boxes: &[[f32; 6]]| -> f32 {
+            boxes.iter().map(|b| (b[3] - b[0]) * (b[4] - b[1]) * (b[5] - b[2])).sum()
+        };
+        assert!(vol(&outline) >= 0.999);
+        assert!(vol(&walls) < 0.999);
     }
 }
