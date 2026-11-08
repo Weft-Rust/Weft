@@ -15,14 +15,14 @@ use clap::{Args, Parser, Subcommand};
 #[derive(Debug, Parser)]
 #[command(version, about, long_about, override_usage = "weft [COMMAND] [OPTIONS] [-- [EXTRAS_ARGS]...]")]
 pub struct Cli {
+    // The client args since clap doesn't have a default subcommand feature
+    #[command(flatten)]
+    pub client_args: ClientArgs,
     /// The command to run.
     ///
     /// By default, it is `client`. See `weft client --help` for more details.
     #[command(subcommand)]
     pub command: Option<CliCommand>,
-    // The client args since clap doesn't have a default subcommand feature
-    #[command(flatten)]
-    pub client_args: Option<ClientArgs>,
     /// The extra arguments passed to mods.
     ///
     /// How to use:
@@ -41,7 +41,7 @@ impl Cli {
     pub fn get_command(self) -> (CliCommand, Vec<(String, String)>) {
         let command = self
             .command
-            .unwrap_or_else(|| CliCommand::Client(self.client_args.unwrap_or_default()));
+            .unwrap_or_else(|| CliCommand::Client(self.client_args));
         let extras = {
             let mut extras = Vec::<(String, String)>::new();
             let mut args = self.extra_args.iter().peekable();
@@ -277,6 +277,8 @@ impl FromStr for Size {
 
 #[cfg(test)]
 mod tests {
+    use clap::CommandFactory;
+
     use super::*;
 
     #[test]
@@ -360,5 +362,42 @@ mod tests {
             unreachable!("This should parse to `CliCommand::Dist`")
         }
         assert!(extras.is_empty());
+    }
+
+    #[test]
+    fn test_run_dir() {
+        let (command, extras) = Cli::parse_from([
+            "weft",
+            "--automated",
+            "--run-dir",
+            "/home/user/devel/Weft/run/test-jobs/1",
+            "--world",
+            "w",
+            "--",
+            "--test",
+            "all",
+            "--test-shard",
+            "0/2",
+        ])
+        .get_command();
+        if let CliCommand::Client(a) = command {
+            assert_eq!(a.world.expect("World should be set"), "w");
+            assert!(a.base.automated);
+            assert_eq!(
+                a.base
+                    .run_dir
+                    .expect("The run dir path should be available"),
+                String::from("/home/user/devel/Weft/run/test-jobs/1")
+            );
+        } else {
+            unreachable!("This should parse to CliCommand::Dist");
+        }
+        assert_eq!(extras[0], ("test".into(), "all".into()));
+        assert_eq!(extras[1], ("test-shard".into(), "0/2".into()));
+    }
+
+    #[test]
+    fn dbg_assert_clap() {
+        Cli::command().debug_assert();
     }
 }
