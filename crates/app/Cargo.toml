@@ -10,6 +10,7 @@ weft_vulkan.workspace = true
 weft_wgpu.workspace = true
 weft_render.workspace = true
 log.workspace = true
+clap = { workspace = true, default-features = false, features = ["std", "derive", "help", "suggestions", "color", "usage"] }
 
 [build-dependencies]
 winresource = "0.1"

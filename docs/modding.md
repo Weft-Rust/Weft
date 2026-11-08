@@ -86,10 +86,10 @@ run/mods/mymod/
         lang/en_us.lang
 ```
 
-`weft --pack-mod run/mods/mymod` makes a `mymod.zip` of the same thing, which is what you can send to anyone.\
+`weft pack-mod -m run/mods/mymod` makes a `mymod.zip` of the same thing, which is what you can send to anyone.\
 The folder has to hold the library that's what gets packed.
 
-The library is built for one system, so that zip only runs on yours, but you write your mod once and just build it three times. Put `mymod.dll`, `libmymod.so` and `libmymod.dylib` in the folder and `--pack-mod` takes them all, then the same zip works everywhere: the game picks the file of its system.\
+The library is built for one system, so that zip only runs on yours, but you write your mod once and just build it three times. Put `mymod.dll`, `libmymod.so` and `libmymod.dylib` in the folder and `pack-mod` takes them all, then the same zip works everywhere: the game picks the file of its system.\
 `examples/examplemod/.github/workflows/release.yml` builds all three on GitHub and publishes the zip when you push a tag, the top of the file says what to set up.
 
 To get your mod into the launcher, its source has to be public and its `Cargo.toml` has to take the SDK from the game's repository at a release tag, `weft_sdk = { git = "https://github.com/Weft-Rust/Weft", tag = "v26.11.3" }`. Commit, push, and run `weft --submit-mod path/to/mymod`: it builds the mod once to be sure, then sends that commit to the [mod index](https://github.com/Weft-Rust/Weft-Mods-Index) as a pull request (with the GitHub CLI logged in, by itself; otherwise in the browser, filled in). The index builds the mod there for all three systems, and builds it again for each new Weft release. It shows as not verified until a maintainer reads the source. The id is yours from the first submission.
