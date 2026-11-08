@@ -239,6 +239,7 @@ fn test_jobs(extra: &[(String, String)], run_dir: &std::path::Path) -> Option<i3
         // Or a process that dies at once passes by the last run's.
         let _ = std::fs::remove_file(dir.join("test-reports").join("report.txt"));
         let log = std::fs::File::create(dir.join("output.log")).ok()?;
+        let log_err = std::fs::File::create(dir.join("output-err.log")).ok()?;
         let mut c = std::process::Command::new(&exe);
         // Automated is required for test
         c.args(["--automated", "--run-dir"])
@@ -246,7 +247,7 @@ fn test_jobs(extra: &[(String, String)], run_dir: &std::path::Path) -> Option<i3
             .args(["--", "--test", test, "--test-shard", shard])
             .stdout(log)
             // TODO maybe move this into a file for better debugging ?
-            .stderr(std::process::Stdio::null());
+            .stderr(log_err);
         for (k, v) in extra.iter().filter(|(k, _)| k != "test" && k != "jobs") {
             c.arg(format!("--{k}"));
             if !v.is_empty() {
