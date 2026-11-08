@@ -346,11 +346,42 @@ impl std::error::Error for Error {}
 pub trait Window: HasWindowHandle + HasDisplayHandle {}
 impl<T: HasWindowHandle + HasDisplayHandle> Window for T {}
 
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+pub enum VsyncMode {
+    /// May torn but sometimes resolves issues with `Off`.
+    Uncapped = 0,
+    /// Never torn, fps capped to the refresh rate.
+    #[default]
+    On = 1,
+    /// Never torn, but some players experience an fps cap.
+    Off = 2,
+}
+
+impl VsyncMode {
+    pub const ALL: [VsyncMode; 3] = [VsyncMode::Off, VsyncMode::On, VsyncMode::Uncapped];
+
+    pub fn name(self) -> &'static str {
+        match self {
+            VsyncMode::Off => "off",
+            VsyncMode::On => "on",
+            VsyncMode::Uncapped => "uncapped",
+        }
+    }
+
+    pub fn from_index(i: u32) -> VsyncMode {
+        Self::ALL.get(i as usize).copied().unwrap_or_default()
+    }
+
+    pub fn next(self) -> VsyncMode {
+        Self::from_index((self as u32 + 1) % Self::ALL.len() as u32)
+    }
+}
+
 pub struct BackendDesc<'a> {
     pub window: &'a dyn Window,
     pub width: u32,
     pub height: u32,
-    pub vsync: bool,
+    pub vsync: VsyncMode,
     pub debug: bool,
 }
 
@@ -363,7 +394,7 @@ pub trait Backend: Send {
     fn frames_in_flight(&self) -> usize;
     fn surface_size(&self) -> (u32, u32);
     fn resize(&mut self, width: u32, height: u32);
-    fn set_vsync(&mut self, vsync: bool);
+    fn set_vsync(&mut self, vsync: VsyncMode);
 
     fn create_buffer(&mut self, size: u64, usage: u32, label: &str) -> BufferId;
     /// Only valid for `usage::HOST` buffers.

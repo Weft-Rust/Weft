@@ -779,16 +779,19 @@ impl Backend for WgpuBackend {
         }
     }
 
-    fn set_vsync(&mut self, vsync: bool) {
-        let modes = &self.present_modes;
-        let mode = if vsync {
-            wgpu::PresentMode::Fifo
-        } else if modes.contains(&wgpu::PresentMode::Mailbox) {
-            wgpu::PresentMode::Mailbox
-        } else if modes.contains(&wgpu::PresentMode::Immediate) {
-            wgpu::PresentMode::Immediate
+    fn set_vsync(&mut self, vsync: VsyncMode) {
+        use wgpu::PresentMode as P;
+        let [first, second] = match vsync {
+            VsyncMode::On => [P::Fifo; 2],
+            VsyncMode::Off => [P::Mailbox, P::Immediate],
+            VsyncMode::Uncapped => [P::Immediate, P::Mailbox],
+        };
+        let mode = if self.present_modes.contains(&first) {
+            first
+        } else if self.present_modes.contains(&second) {
+            second
         } else {
-            wgpu::PresentMode::Fifo
+            P::Fifo
         };
         if self.config.present_mode != mode {
             self.config.present_mode = mode;

@@ -10,6 +10,7 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Mutex, OnceLock, RwLock};
 
 use weft_abi::{config_kind as ck, config_scope as scope};
+use weft_render::VsyncMode;
 
 use crate::content::content;
 use crate::entries::{Entry, RawEntry};
@@ -384,7 +385,8 @@ pub fn engine_configs(keys: &[(String, String)]) -> Vec<RawEntry> {
         number("core:chat_opacity", ck::INT, 50.0, 0.0, 100.0, 1.0),
         number("core:chat_visibility", ck::CHOICE, 0.0, 0.0, 2.0, 0.0)
             .set(c::CHOICES, ["all", "system", "hidden"].map(String::from).to_vec()),
-        number("core:vsync", ck::BOOL, 1.0, 0.0, 1.0, 0.0),
+        number("core:vsync", ck::CHOICE, VsyncMode::On as u8 as f64, 0.0, 2.0, 0.0)
+            .set(c::CHOICES, VsyncMode::ALL.map(|m| m.name().to_string()).to_vec()),
         // Taken at the next start; the others are tried if it can't run.
         number("core:renderer", ck::CHOICE, 0.0, 0.0, 1.0, 0.0).set(c::CHOICES, ["vulkan", "wgpu"].map(String::from).to_vec()),
         number("core:fullscreen", ck::BOOL, 0.0, 0.0, 1.0, 0.0),

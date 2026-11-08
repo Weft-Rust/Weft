@@ -4,6 +4,8 @@
 
 use std::path::{Path, PathBuf};
 
+use weft_render::VsyncMode;
+
 use crate::config;
 use crate::input::{Binding, Input, Slots};
 
@@ -87,8 +89,8 @@ impl Settings {
     pub fn view_distance(&self) -> i32 {
         number("core:view_distance") as i32
     }
-    pub fn vsync(&self) -> bool {
-        number("core:vsync") != 0.0
+    pub fn vsync(&self) -> VsyncMode {
+        VsyncMode::from_index(number("core:vsync") as u32)
     }
     /// The chosen renderer's name (`core:renderer`).
     pub fn renderer(&self) -> String {
@@ -189,6 +191,29 @@ pub fn migrate(run_dir: &Path) {
     merge_settings(&config);
     for dir in [config, run_dir.join("test-config")] {
         migrate_bindings(&dir.join("core.txt"));
+        migrate_vsync(&dir.join("core.txt"));
+    }
+}
+
+/// `vsync` was true or false; it names a mode now. Off always preferred mailbox over immediate,
+/// which is what `off` does, so both keep working the same.
+/// TODO remove together with `migrate_bindings`
+fn migrate_vsync(path: &Path) {
+    let Ok(src) = std::fs::read_to_string(path) else { return };
+    let mut changed = false;
+    let out: String = crate::kv::pairs(&src)
+        .map(|(_, k, v)| {
+            let v = match (k, v.trim()) {
+                ("vsync", "true" | "1") => "on",
+                ("vsync", "false" | "0") => "off",
+                _ => return format!("{k} = {v}\n"),
+            };
+            changed = true;
+            format!("{k} = {v}\n")
+        })
+        .collect();
+    if changed {
+        let _ = std::fs::write(path, out);
     }
 }
 

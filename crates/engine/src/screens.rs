@@ -633,8 +633,9 @@ impl Screen for SettingsScreen {
                         let next = if r.settings.gui_scale() >= max { 0 } else { r.settings.gui_scale() + 1 };
                         r.settings.set("gui_scale", next as f64);
                     });
-                    d.button("settings.vsync", &[on_off(s.vsync())], 300.0, false, |r| {
-                        r.settings.set("vsync", !r.settings.vsync() as u8 as f64);
+                    d.button("settings.vsync", &[Arg::Key(format!("settings.vsync.{}", s.vsync().name()))], 300.0, false, |r| {
+                        r.settings
+                            .set("vsync", r.settings.vsync().next() as u8 as f64);
                         r.handle(vec![Request::Rebuild]);
                     });
                     let chosen = s.renderer();

@@ -98,7 +98,7 @@ pub struct VulkanBackend {
     slot: usize,
     image_index: Option<u32>,
     want_size: (u32, u32),
-    vsync: bool,
+    vsync: VsyncMode,
     dirty_swapchain: bool,
     buffers: Slab<Buffer>,
     textures: Slab<Texture>,
@@ -653,14 +653,18 @@ impl VulkanBackend {
                 .surface_fn
                 .get_physical_device_surface_present_modes(self.pdev, self.surface)
                 .map_err(err("present modes"))?;
-            let mode = if self.vsync {
-                vk::PresentModeKHR::FIFO
-            } else if modes.contains(&vk::PresentModeKHR::MAILBOX) {
-                vk::PresentModeKHR::MAILBOX
-            } else if modes.contains(&vk::PresentModeKHR::IMMEDIATE) {
-                vk::PresentModeKHR::IMMEDIATE
+            use vk::PresentModeKHR as P;
+            let [first, second] = match self.vsync {
+                VsyncMode::On => [P::FIFO; 2],
+                VsyncMode::Off => [P::MAILBOX, P::IMMEDIATE],
+                VsyncMode::Uncapped => [P::IMMEDIATE, P::MAILBOX],
+            };
+            let mode = if modes.contains(&first) {
+                first
+            } else if modes.contains(&second) {
+                second
             } else {
-                vk::PresentModeKHR::FIFO
+                P::FIFO
             };
             let mut count = caps.min_image_count + 1;
             if caps.max_image_count > 0 {
@@ -1171,7 +1175,7 @@ impl Backend for VulkanBackend {
         }
     }
 
-    fn set_vsync(&mut self, vsync: bool) {
+    fn set_vsync(&mut self, vsync: VsyncMode) {
         if self.vsync != vsync {
             self.vsync = vsync;
             self.dirty_swapchain = true;

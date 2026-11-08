@@ -6,7 +6,7 @@ use std::time::Instant;
 
 use glam::Vec2;
 use weft_abi as abi;
-use weft_render::{Backend, BackendDesc, Cmd, CommandList, Format, Target, TextureDesc, TextureId};
+use weft_render::{Backend, BackendDesc, Cmd, CommandList, Format, Target, TextureDesc, TextureId, VsyncMode};
 use winit::application::ApplicationHandler;
 use winit::event::{DeviceEvent, DeviceId, ElementState, MouseButton, MouseScrollDelta, WindowEvent};
 use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop};
@@ -293,7 +293,7 @@ fn engine_assets(dev: bool) -> PathBuf {
 /// The settings `Running::apply_settings` last put into effect.
 #[derive(Default, PartialEq)]
 struct Applied {
-    vsync: bool,
+    vsync: VsyncMode,
     view: i32,
     language: String,
     gui_scale: u32,
@@ -328,7 +328,7 @@ impl App {
         crate::settings::migrate(&self.opts.run_dir);
         crate::config::load(&self.opts.run_dir);
         if self.opts.no_vsync {
-            crate::config::override_for_run("core:vsync", "false");
+            crate::config::override_for_run("core:vsync", "off");
         }
         if let Some(v) = self.opts.view {
             crate::config::override_for_run("core:view_distance", &v.to_string());
