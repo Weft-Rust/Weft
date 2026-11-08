@@ -9,7 +9,7 @@ use weft_engine::Options;
 use weft_engine::paths::{self, Dirs};
 use weft_render::{Backend, BackendDesc, Error};
 
-use crate::cli::{BaseArguments, Cli, ClientArgs, DistArgs, PackModArgs, ServerArgs, SubmitModArgs};
+use crate::cli::{BaseArguments, Cli, ClientArgs, DistArgs, PackModArgs, ServerArgs, SubmitModArgs, TestAllArgs};
 
 #[global_allocator]
 static ALLOC: weft_engine::diag::CountingAlloc = weft_engine::diag::CountingAlloc;
@@ -180,7 +180,7 @@ fn submit_mod(submit_arg: SubmitModArgs) {
     }
 }
 
-fn test_all(mut args: BaseArguments, mut extras: Vec<(String, String)>) {
+fn test_all(args: TestAllArgs, mut extras: Vec<(String, String)>) {
     extras.push(("test".into(), "all".into()));
     let root = game_root();
 
@@ -192,29 +192,8 @@ fn test_all(mut args: BaseArguments, mut extras: Vec<(String, String)>) {
     // Set config in advance
     paths::set_config(dirs.config);
 
-    let opts = Options {
-        run_dir: dirs.data,
-        // Prioritize arguments cache dir first
-        cache_dir: args.cache_dir.unwrap_or(dirs.cache),
-        // Mod sources of the game itself; players' mods go into `<run dir>/mods`, added below.
-        mod_dirs: {
-            args.mods.push(root.join("mods"));
-            args.mods
-        },
-        gpu_debug: false,
-        world: None,
-        seed: None,
-        screen: None,
-        size: (args.size.0, args.size.1),
-        dev: args.dev,
-        automated: true,
-        no_vsync: false,
-        view: args.view,
-        mods_off: args.off,
-        renderer: None,
-    };
     // Run test jobs
-    if let Some(code) = test_jobs(&extras, &opts.run_dir) {
+    if let Some(code) = test_jobs(&extras, &dirs.data) {
         std::process::exit(code);
     }
 }

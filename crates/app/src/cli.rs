@@ -134,7 +134,14 @@ pub enum CliCommand {
     /// from here; otherwise the browser opens GitHub's page for the new file, filled in.
     SubmitMod(SubmitModArgs),
     /// A shortcut to `weft --automated -- --test all`
-    TestAll(BaseArguments),
+    TestAll(TestAllArgs),
+}
+
+#[derive(Debug, Args)]
+pub struct TestAllArgs {
+    /// The directory where weft should run
+    #[arg(long)]
+    pub run_dir: Option<PathBuf>,
 }
 
 #[derive(Debug, Args)]
