@@ -400,4 +400,17 @@ mod tests {
     fn dbg_assert_clap() {
         Cli::command().debug_assert();
     }
+
+    #[test]
+    fn test_submit_mod() {
+        let (command, extras) =
+            Cli::parse_from(["weft", "submit-mod", "-m", "/home/klee/devel/mod-1", "--owner", "some-token"]).get_command();
+        if let CliCommand::SubmitMod(a) = command {
+            assert_eq!(a.r#mod, "/home/klee/devel/mod-1");
+            assert_eq!(a.owner.expect("The owner should be set"), "some-token");
+        } else {
+            unreachable!("This should parse to `CliCommand::SubmitMod`")
+        }
+        assert!(extras.is_empty());
+    }
 }
