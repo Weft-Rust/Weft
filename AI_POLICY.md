@@ -11,7 +11,7 @@ You are the author of everything you submit, however it was written. If you can'
 ## In practice
 
 - **Understand every line.** I may ask why something is there. "The AI did it that way" isn't an answer, and neither is a pasted reply from it.
-- **Run it.** Start the game and look at what you changed, then run `cargo test --release --workspace` and `target/release/weft.exe --automated -- --test all`. "Should work" means you didn't check. A fixed bug comes with a test.
+- **Run it.** Start the game and look at what you changed, then run `cargo test --release --workspace` and `target/release/weft.exe test-all`. "Should work" means you didn't check. A fixed bug comes with a test.
 - **Read the code around it first.** AI tools love writing a second version of something the engine already has, and that's the most common thing I end up rejecting. Use what exists.
 - **Keep it small.** If the diff is too big for you to read carefully, it's too big for me as well. It's fine to have several features in one pr, but don't make it a 5000 lines pr when in reality you needed only a 100.
 - **Write the description and comments yourself.** Short, or in imperfect English, is completely fine, and translators are fine too. A wall of generated text tells me nothing about your changes.

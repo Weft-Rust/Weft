@@ -133,6 +133,8 @@ pub enum CliCommand {
     /// nothing is uploaded from here. With the GitHub CLI (`gh`) logged in the pull request is opened
     /// from here; otherwise the browser opens GitHub's page for the new file, filled in.
     SubmitMod(SubmitModArgs),
+    /// A shortcut to `weft --automated -- --test all`
+    TestAll(BaseArguments),
 }
 
 #[derive(Debug, Args)]
