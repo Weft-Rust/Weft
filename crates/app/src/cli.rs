@@ -86,6 +86,13 @@ pub struct ClientArgs {
     /// Open the built-in screen
     #[arg(long)]
     pub screen: Option<String>,
+    /// The renderer to use.
+    ///
+    /// Possible values:
+    /// `vulkan`
+    /// `wgpu`
+    #[arg(long)]
+    pub renderer: Option<String>,
 }
 
 #[derive(Debug, Args)]
@@ -121,6 +128,23 @@ pub enum CliCommand {
     /// Prepare a folder to hand to someone:
     /// the executable, the engine's assets and every mod packed.
     Dist(DistArgs),
+    /// Sends a mod's pushed commit to the mod index as
+    /// one new file, `mods/<id>/<version>.toml`. The index builds the mod itself from that commit, so
+    /// nothing is uploaded from here. With the GitHub CLI (`gh`) logged in the pull request is opened
+    /// from here; otherwise the browser opens GitHub's page for the new file, filled in.
+    SubmitMod(SubmitModArgs),
+}
+
+#[derive(Debug, Args)]
+pub struct SubmitModArgs {
+    /// The mod to submit
+    #[arg(short, long)]
+    pub r#mod: String,
+    /// The owner of the mod.
+    ///
+    /// Mostly the Github login credentials
+    #[arg(long)]
+    pub owner: Option<String>,
 }
 
 #[derive(Debug, Args)]
@@ -199,6 +223,9 @@ pub struct BaseArguments {
     /// Sets the "game view distance".
     #[arg(long)]
     pub view: Option<i32>,
+    /// Mods to disable
+    #[arg(long)]
+    pub off: Vec<String>,
 }
 
 fn dev_default_value() -> bool {

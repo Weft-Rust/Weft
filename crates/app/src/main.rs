@@ -1,4 +1,5 @@
 mod cli;
+mod submit;
 // use std::option;
 use std::path::PathBuf;
 // use std::process::ExitCode;
@@ -8,7 +9,7 @@ use weft_engine::Options;
 use weft_engine::paths::{self, Dirs};
 use weft_render::{Backend, BackendDesc, Error};
 
-use crate::cli::{BaseArguments, Cli, ClientArgs, DistArgs, PackModArgs, ServerArgs};
+use crate::cli::{BaseArguments, Cli, ClientArgs, DistArgs, PackModArgs, ServerArgs, SubmitModArgs};
 
 #[global_allocator]
 static ALLOC: weft_engine::diag::CountingAlloc = weft_engine::diag::CountingAlloc;
@@ -16,6 +17,12 @@ static ALLOC: weft_engine::diag::CountingAlloc = weft_engine::diag::CountingAllo
 fn vulkan(desc: &BackendDesc) -> Result<Box<dyn Backend>, Error> {
     Ok(Box::new(weft_vulkan::VulkanBackend::new(desc)?))
 }
+
+fn wgpu(desc: &BackendDesc) -> Result<Box<dyn Backend>, Error> {
+    Ok(Box::new(weft_wgpu::WgpuBackend::new(desc)?))
+}
+
+const RENDERERS: weft_engine::Renderers = &[("vulkan", vulkan), ("wgpu", wgpu)];
 
 /// Where `run` (and, in the source tree, `mods`) live: the working directory if it has either,
 /// otherwise the nearest folder above the executable that does (a development build runs from
@@ -64,6 +71,8 @@ fn build_options_from_base_args(mut args: BaseArguments, extras: Vec<(String, St
         automated: args.automated,
         no_vsync: false,
         view: args.view,
+        mods_off: args.off,
+        renderer: None,
     };
     // Run test jobs
     if let Some(code) = test_jobs(&extras, &opts.run_dir) {
@@ -112,7 +121,8 @@ fn client(args: ClientArgs, extras: Vec<(String, String)>) {
     options.world = args.world;
     options.seed = args.seed;
     options.screen = args.screen;
-    if let Err(e) = weft_engine::run(vulkan, options) {
+    options.renderer = args.renderer;
+    if let Err(e) = weft_engine::run(RENDERERS, options) {
         log::error!("{e}");
         std::process::exit(1);
     }
@@ -160,6 +170,16 @@ fn dist(args: DistArgs, extras: Vec<(String, String)>) {
     }
 }
 
+fn submit_mod(submit_arg: SubmitModArgs) {
+    match submit::run(submit_arg.r#mod.as_ref(), submit_arg.owner) {
+        Ok(done) => println!("{done}"),
+        Err(e) => {
+            eprintln!("{e}");
+            std::process::exit(1);
+        }
+    }
+}
+
 fn main() {
     let cli = Cli::parse();
     let (command, extra) = cli.get_command();
@@ -168,6 +188,7 @@ fn main() {
         cli::CliCommand::Server(server_args) => server(server_args, extra),
         cli::CliCommand::PackMod(pack_mod_args) => pack_mod(pack_mod_args, extra),
         cli::CliCommand::Dist(dist_args) => dist(dist_args, extra),
+        cli::CliCommand::SubmitMod(submit_mod_args) => submit_mod(submit_mod_args),
     }
 }
 
@@ -300,6 +321,8 @@ fn make_dist(root: &std::path::Path, out: &std::path::Path) -> Result<(), String
     let exe = std::env::current_exe().map_err(|e| e.to_string())?;
     std::fs::create_dir_all(out).map_err(|e| e.to_string())?;
     std::fs::copy(&exe, out.join(exe.file_name().unwrap())).map_err(|e| e.to_string())?;
+    // What mods have to be built against, for a launcher to read without starting the game.
+    std::fs::write(out.join("mod-abi.txt"), format!("{:016x}", weft_engine::modloader::ABI_VERSION)).map_err(|e| e.to_string())?;
     copy_dir(&root.join("crates").join("engine").join("assets"), &out.join("assets").join("core"))?;
     for dir in subdirs(&root.join("mods")) {
         // Development tools (the test kit) mark themselves `dist = false` in Cargo.toml.
