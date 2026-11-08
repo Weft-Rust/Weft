@@ -55,7 +55,7 @@ fn build_options_from_base_args(mut args: BaseArguments, extras: Vec<(String, St
 
     let mut opts = Options {
         run_dir: dirs.data,
-        // Prioritize
+        // Prioritize arguments cache dir first
         cache_dir: args.cache_dir.unwrap_or(dirs.cache),
         // Mod sources of the game itself; players' mods go into `<run dir>/mods`, added below.
         mod_dirs: {
@@ -180,6 +180,45 @@ fn submit_mod(submit_arg: SubmitModArgs) {
     }
 }
 
+fn test_all(mut args: BaseArguments, mut extras: Vec<(String, String)>) {
+    extras.push(("test".into(), "all".into()));
+    let root = game_root();
+
+    // We build the game dir here
+    let dirs = args
+        .run_dir
+        .map_or_else(|| paths::of_install(&root), |run| Dirs::under(&run));
+
+    // Set config in advance
+    paths::set_config(dirs.config);
+
+    let opts = Options {
+        run_dir: dirs.data,
+        // Prioritize arguments cache dir first
+        cache_dir: args.cache_dir.unwrap_or(dirs.cache),
+        // Mod sources of the game itself; players' mods go into `<run dir>/mods`, added below.
+        mod_dirs: {
+            args.mods.push(root.join("mods"));
+            args.mods
+        },
+        gpu_debug: false,
+        world: None,
+        seed: None,
+        screen: None,
+        size: (args.size.0, args.size.1),
+        dev: args.dev,
+        automated: true,
+        no_vsync: false,
+        view: args.view,
+        mods_off: args.off,
+        renderer: None,
+    };
+    // Run test jobs
+    if let Some(code) = test_jobs(&extras, &opts.run_dir) {
+        std::process::exit(code);
+    }
+}
+
 fn main() {
     let cli = Cli::parse();
     let (command, extra) = cli.get_command();
@@ -189,6 +228,7 @@ fn main() {
         cli::CliCommand::PackMod(pack_mod_args) => pack_mod(pack_mod_args, extra),
         cli::CliCommand::Dist(dist_args) => dist(dist_args, extra),
         cli::CliCommand::SubmitMod(submit_mod_args) => submit_mod(submit_mod_args),
+        cli::CliCommand::TestAll(args) => test_all(args, extra),
     }
 }
 
@@ -224,9 +264,12 @@ fn test_jobs(extra: &[(String, String)], run_dir: &std::path::Path) -> Option<i3
         let _ = std::fs::remove_file(dir.join("test-reports").join("report.txt"));
         let log = std::fs::File::create(dir.join("output.log")).ok()?;
         let mut c = std::process::Command::new(&exe);
-        c.args(["--test", test, "--test-shard", shard, "--run-dir"])
+        // Automated is required for test
+        c.args(["--automated", "--run-dir"])
             .arg(dir)
+            .args(["--", "--test", test, "--test-shard", shard])
             .stdout(log)
+            // TODO maybe move this into a file for better debugging ?
             .stderr(std::process::Stdio::null());
         for (k, v) in extra.iter().filter(|(k, _)| k != "test" && k != "jobs") {
             c.arg(format!("--{k}"));
