@@ -55,7 +55,7 @@ fn build_options_from_base_args(mut args: BaseArguments, extras: Vec<(String, St
 
     let mut opts = Options {
         run_dir: dirs.data,
-        // Prioritize
+        // Prioritize arguments cache dir first
         cache_dir: args.cache_dir.unwrap_or(dirs.cache),
         // Mod sources of the game itself; players' mods go into `<run dir>/mods`, added below.
         mod_dirs: {
