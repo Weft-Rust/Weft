@@ -189,9 +189,6 @@ fn test_all(args: TestAllArgs, mut extras: Vec<(String, String)>) {
         .run_dir
         .map_or_else(|| paths::of_install(&root), |run| Dirs::under(&run));
 
-    // Set config in advance
-    paths::set_config(dirs.config);
-
     // Run test jobs
     if let Some(code) = test_jobs(&extras, &dirs.data) {
         std::process::exit(code);
