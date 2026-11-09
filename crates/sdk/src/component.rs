@@ -879,6 +879,10 @@ pub(crate) fn effect(event: &str, sound: &str, particle: &str) -> abi::Effect {
 /// The stack after one of it is used up (burnt as fuel, taken by a recipe): one less, and the
 /// last one leaves its `remainder` behind (a lava bucket its bucket).
 pub fn consume_one(stack: ItemStack) -> ItemStack {
+    if let Some(damage) = REMAINDER_DAMAGE.on_item(stack.item) {
+        return stack.add_wear(damage);
+    }
+
     match REMAINDER.on_item(stack.item) {
         Some(left) if stack.count == 1 => ItemStack::new(left.0, 1),
         _ => stack.shrink(1),
