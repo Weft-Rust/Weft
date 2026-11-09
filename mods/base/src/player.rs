@@ -276,7 +276,11 @@ fn consume_grid(m: &MenuCtx) {
     for i in 0..grid.len() {
         let s = grid.get(i);
         if !s.is_empty() {
-            grid.set(i, consume_one(s));
+            if let Some(damage) = REMAINDER_DAMAGE.on_item(s.item) {
+                grid.set(i, s.add_wear(damage));
+            } else {
+                grid.set(i, consume_one(s));
+            }
         }
     }
 }

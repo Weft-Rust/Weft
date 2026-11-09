@@ -862,6 +862,7 @@ pub static WORN_MODEL: Component<Text> = Component::named(abi::comp::WORN_MODEL)
 pub static WEAR_PER_HIT: Component<u32> = Component::named(abi::comp::WEAR_PER_HIT);
 pub static LIQUID: Component<Text> = Component::named(abi::comp::LIQUID);
 pub static REMAINDER: Component<ItemRef> = Component::named(abi::comp::REMAINDER);
+pub static REMAINDER_DAMAGE: Component<u32> = Component::named(abi::comp::REMAINDER_DAMAGE);
 pub static SHADER: Component<Text> = Component::named(abi::comp::SHADER);
 pub static MODEL: Component<Text> = Component::named(abi::comp::MODEL);
 pub static ANIMATIONS: Component<Text> = Component::named(abi::comp::ANIMATIONS);

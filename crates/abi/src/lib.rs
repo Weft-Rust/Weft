@@ -1521,6 +1521,8 @@ pub mod comp {
     pub const LIQUID: &str = "liquid";
     /// Item left behind when this one is used up (fuel, crafting, pouring): `item`.
     pub const REMAINDER: &str = "remainder";
+    /// Wear applied instead of consuming the item when it is used up as a remainder.
+    pub const REMAINDER_DAMAGE: &str = "remainder_damage";
     /// Entity kinds and blocks: shaded by `shaders/entity/<name>.wgsl` or `shaders/block/<name>.wgsl`
     /// (`str`).
     pub const SHADER: &str = "shader";
