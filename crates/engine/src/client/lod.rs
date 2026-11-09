@@ -21,7 +21,7 @@ use crate::background;
 use crate::config;
 use crate::content::{Content, StateInfo, content, face_paint};
 use crate::gpu_layout::terrain::lod as lod_gpu;
-use crate::gpu_layout::{CORNERS, face, lod_box, lod_record};
+use crate::gpu_layout::{CORNERS, face, lod_box, lod_face, lod_record};
 use crate::server::lod_tops::{LodColumn, Span, shows};
 
 /// Columns that differ from the terrain, as the server said.
@@ -43,6 +43,9 @@ const SPLIT: f64 = 4.0;
 const UNDERGROUND: i32 = 32;
 /// Tiles asked for and not back yet, at most.
 const IN_FLIGHT: usize = 256;
+/// Tiles this fine or finer also get deep walls between cells (real cubes can sit lower
+/// than the neighbor sample). Coarser tiles only get them at edges. Raise if coarser tiles reach cubes.
+const DEEP_SKIRT_LEVEL: u32 = 1;
 /// Quads a tile may hold. Past this the index buffer does not cover the draw.
 const MAX_QUADS: usize = 48_000;
 /// More model boxes than this become one box around all of them.
@@ -198,6 +201,8 @@ pub fn mesh(c: &Content, key: TileKey, words: &[u32], columns: &Columns) -> (Vec
     };
     let mut out = Vec::new();
     let (mut lo, mut hi) = (i32::MAX, i32::MIN);
+    // See `DEEP_SKIRT_LEVEL`
+    let deep_skirts = key.level <= DEEP_SKIRT_LEVEL;
     for j in 0..CELLS {
         for i in 0..CELLS {
             let y = column(&h, i, j);
@@ -207,32 +212,72 @@ pub fn mesh(c: &Content, key: TileKey, words: &[u32], columns: &Columns) -> (Vec
             (lo, hi) = (lo.min(y), hi.max(y + 1));
         }
     }
-    for j in 0..CELLS {
-        for i in 0..CELLS {
-            let (top, biome, under, light) = at(i, j);
-            let y = column(&h, i, j);
-            for (dir, (di, dj)) in [(0usize, (-1, 0)), (1, (1, 0)), (4, (0, -1)), (5, (0, 1))] {
+    // Longest wall quad in cells (size field is narrow)
+    let max_run = (((1i32 << lod_face::SIZE_BITS) - 1) / s).max(1);
+    for (dir, (di, dj)) in [(0usize, (-1, 0)), (1, (1, 0)), (4, (0, -1)), (5, (0, 1))] {
+        // Walls facing z run along x, and vice versa
+        let along_x = dj != 0;
+        let emit = |out: &mut Vec<[u32; 4]>, line: i32, (w, start, len): (Wall, i32, i32)| {
+            let (x, z, size) = if along_x { (start, line, (len * s, w.h, s)) } else { (line, start, (s, w.h, len * s)) };
+            out.push(quad(dir as u32, x * s, w.y, z * s, size, w.tex, w.tint, w.biome, w.ao, w.light));
+        };
+        for line in 0..CELLS {
+            // Open runs: [step top, wall below]
+            let mut runs: [Option<(Wall, i32, i32)>; 2] = [None; 2];
+            for k in 0..CELLS {
+                let (i, j) = if along_x { (k, line) } else { (line, k) };
+                let (top, biome, under, light) = at(i, j);
+                let y = column(&h, i, j);
                 // At the tile's edge the tile beside may be of another level, its ground not
                 // where this one's sample says: the wall goes on down below it (a skirt), or
                 // the sky shows through the crack.
                 let (ni, nj) = (i + di, j + dj);
+                let inside = (0..CELLS).contains(&ni) && (0..CELLS).contains(&nj);
                 let ny = if (-1..=CELLS).contains(&ni) && (-1..=CELLS).contains(&nj) { column(&h, ni, nj) } else { y.min(y - 1) - 2 * s };
                 // Past a neighbor as high, real cubes may stand in for it lower than its sample
                 // says (it is interpolated): a skirt down below that, or the sky shows through
                 // between them.
-                if ny > y {
+                // Deep skirts only at tile edges or near real cubes. Elsewhere walls stop at the
+                // neighbor and equal neighbors get none (deep walls made flat tiles cost thousands of quads).
+                let deep = !inside || deep_skirts;
+                if ny > y || (ny == y && !deep) {
+                    for run in &mut runs {
+                        if let Some(done) = run.take() {
+                            emit(&mut out, line, done);
+                        }
+                    }
                     continue;
                 }
-                let skirt = ny.min(y - 1) - s - 2;
+                let skirt = if deep { ny.min(y - 1) - s - 2 } else { ny };
+                let mut walls: [Option<Wall>; 2] = [None; 2];
                 if ny < y {
                     let (tex, tint) = face_of(top, dir);
-                    out.push(quad(dir as u32, i * s, y, j * s, (s, 1, s), tex, tint, biome, ao_bits(&h, i, j, dir, y), light));
+                    walls[0] = Some(Wall { y, h: 1, tex, tint, biome, ao: ao_bits(&h, i, j, dir, y), light });
                 }
-                let (tex, tint) = face_of(under, dir);
-                let top_y = if ny < y { y - 1 } else { y };
-                let ao = ao_span(&h, i, j, dir, top_y, (ny + 1).min(top_y));
-                out.push(quad(dir as u32, i * s, skirt + 1, j * s, (s, y - 1 - skirt, s), tex, tint, biome, ao, light));
+                if y - 1 > skirt {
+                    let (tex, tint) = face_of(under, dir);
+                    let top_y = if ny < y { y - 1 } else { y };
+                    let ao = ao_span(&h, i, j, dir, top_y, (ny + 1).min(top_y));
+                    walls[1] = Some(Wall { y: skirt + 1, h: y - 1 - skirt, tex, tint, biome, ao, light });
+                }
                 lo = lo.min(skirt + 1);
+                // Combine nearby cells into walls
+                for (run, wall) in runs.iter_mut().zip(walls) {
+                    let same = matches!((&*run, &wall), (Some((w, _, len)), Some(n)) if w == n && *len < max_run && level_along(n.ao));
+                    if same {
+                        if let Some((_, _, len)) = run {
+                            *len += 1;
+                        }
+                    } else {
+                        if let Some(done) = run.take() {
+                            emit(&mut out, line, done);
+                        }
+                        *run = wall.map(|n| (n, k, 1));
+                    }
+                }
+            }
+            for run in runs.into_iter().flatten() {
+                emit(&mut out, line, run);
             }
         }
     }
@@ -290,6 +335,24 @@ fn ao_bits(h: &[[i32; GRID]; GRID], i: i32, j: i32, dir: usize, by: i32) -> u32 
         bits |= ao << (2 * k);
     }
     bits
+}
+
+/// One cell's wall quad, before merging along an edge
+#[derive(Clone, Copy, PartialEq)]
+struct Wall {
+    y: i32,
+    h: i32,
+    tex: u32,
+    tint: u32,
+    biome: u32,
+    ao: u32,
+    light: u32,
+}
+
+/// Whether AO matches at both ends of the wall's width (corners 0-1 bottom, 2-3 top),
+/// so merging keeps the shading
+fn level_along(ao: u32) -> bool {
+    ao & 3 == (ao >> 2) & 3 && (ao >> 4) & 3 == (ao >> 6) & 3
 }
 
 fn ao_span(h: &[[i32; GRID]; GRID], i: i32, j: i32, dir: usize, top: i32, bot: i32) -> u32 {
