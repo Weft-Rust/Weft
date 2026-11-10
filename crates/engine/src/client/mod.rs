@@ -575,6 +575,8 @@ pub struct Client {
     pub sent: Vec<String>,
     /// Mouse button and slots of a drag in progress in a menu.
     pub drag: Option<(u8, Vec<u32>)>,
+    /// The slot the drag was last over, so a right-button drag adds it again on re-entry.
+    pub drag_hover: Option<u32>,
     /// Slots shift-clicked by sweeping over them with shift and the left button held.
     pub sweep: Vec<u32>,
     /// Slots swept over with the left button still held after picking a stack up: what they
@@ -862,6 +864,7 @@ impl Client {
             sounds: Vec::new(),
             rng: weft_noise::Rng(0x9E37_79B9_7F4A_7C15),
             drag: None,
+            drag_hover: None,
             sweep: Vec::new(),
             picking: Vec::new(),
             last_click: None,
@@ -1006,6 +1009,9 @@ impl Client {
 
     pub fn close_menu(&mut self) {
         self.drag = None;
+        self.drag_hover = None;
+        self.sweep.clear();
+        self.picking.clear();
         if self.menu.take().is_some() {
             self.conn.send(ToServer::CloseMenu);
         }

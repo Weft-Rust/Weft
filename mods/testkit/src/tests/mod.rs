@@ -76,6 +76,8 @@ pub fn all() -> Vec<TestDef> {
         gameplay::slot_accepts,
         gameplay::liquid_slot,
         gameplay::slot_limit,
+        gameplay::mouse_wheel,
+        gameplay::rmb_repeat,
         gameplay::bucket,
         gameplay::advancements,
         gameplay::beds,

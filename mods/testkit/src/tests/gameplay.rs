@@ -226,6 +226,95 @@ pub async fn slot_limit(t: T) -> R {
     t.no_screen().await
 }
 
+/// Mouse Tweaks' wheel: a notch moves one item between the hovered slot and the other inventory;
+/// shift moves the whole stack, and scrolling up pulls items in.
+pub async fn mouse_wheel(t: T) -> R {
+    t.flat().await?;
+    let p = add(t.feet(), [0, 0, -2]);
+    t.set(p, "testmod:electric_furnace").await?;
+    t.op("put me 0 iron_ore 4").await?;
+    t.op("put me 1 iron_ore 4").await?;
+    t.op(&format!("menu testmod:electric_furnace {} {} {}", p[0], p[1], p[2]))
+        .await?;
+    t.screen("core:menu").await?;
+    // Menu slots: 0 input, 1 output, 2-28 main inventory, 29-37 hotbar.
+    let hover = |slot: u32| -> Result<(), String> {
+        let Rect { x, y, w, h } = t
+            .c()
+            .ui_rect(&format!("slot:{slot}"))
+            .ok_or(format!("no slot {slot}"))?;
+        t.c().input_cursor(x + w / 2.0, y + h / 2.0);
+        Ok(())
+    };
+    // Scroll down over a hotbar stack: one item moves into the furnace.
+    hover(29)?;
+    t.frames(2).await?;
+    t.c().input_scroll(-1.0);
+    t.until("one ore pushed", Duration::from_secs(3), |t| t.c().menu_slot(0).count == 1)
+        .await?;
+    t.check_eq(t.c().menu_slot(29).count, 3, "the hotbar stack lost one");
+    // Shift: the whole rest of the stack.
+    t.c().input_key("ShiftLeft", 0.3);
+    t.frames(1).await?;
+    t.c().input_scroll(-1.0);
+    t.until("the stack pushed", Duration::from_secs(3), |t| t.c().menu_slot(0).count == 4)
+        .await?;
+    t.check_eq(t.c().menu_slot(29).count, 0, "the hotbar slot is empty");
+    // Let the shift key go, or the next notch would move a whole stack.
+    t.secs(0.4).await?;
+    // Scroll up over the furnace slot: pulls an item from the player inventory.
+    hover(0)?;
+    t.frames(2).await?;
+    t.c().input_scroll(1.0);
+    t.until("one ore pulled", Duration::from_secs(3), |t| t.c().menu_slot(0).count == 5)
+        .await?;
+    t.check_eq(t.c().menu_slot(30).count, 3, "the other hotbar stack lost one");
+    t.c().menu_close();
+    t.no_screen().await
+}
+
+/// Mouse Tweaks' RMB tweak: dragging over the same slot again places another item there.
+pub async fn rmb_repeat(t: T) -> R {
+    t.flat().await?;
+    let p = add(t.feet(), [0, 0, -2]);
+    t.set(p, "testmod:electric_furnace").await?;
+    t.op("put me 0 iron_ore 4").await?;
+    t.op(&format!("menu testmod:electric_furnace {} {} {}", p[0], p[1], p[2]))
+        .await?;
+    t.screen("core:menu").await?;
+    // Menu slots: 0 input, 1 output, 2-28 main, 29-37 hotbar.
+    let hover = |slot: u32| -> Result<(), String> {
+        let Rect { x, y, w, h } = t
+            .c()
+            .ui_rect(&format!("slot:{slot}"))
+            .ok_or(format!("no slot {slot}"))?;
+        t.c().input_cursor(x + w / 2.0, y + h / 2.0);
+        Ok(())
+    };
+    // Pick the stack up.
+    hover(29)?;
+    t.frames(2).await?;
+    t.c().input_click(0, 0.1);
+    t.until("stack picked up", Duration::from_secs(3), |t| t.c().cursor_stack().count == 4)
+        .await?;
+    // Right-drag from the output slot (a drag there is ignored) over the input, off it, and back.
+    hover(1)?;
+    t.frames(1).await?;
+    t.c().input_click(1, 0.8);
+    t.frames(2).await?;
+    hover(0)?;
+    t.secs(0.15).await?;
+    t.c().input_cursor(0.02, 0.02);
+    t.secs(0.15).await?;
+    hover(0)?;
+    t.secs(1.0).await?;
+    t.until("two ores placed", Duration::from_secs(3), |t| t.c().menu_slot(0).count == 2)
+        .await?;
+    t.check_eq(t.c().cursor_stack().count, 2, "the rest stays on the cursor");
+    t.c().menu_close();
+    t.no_screen().await
+}
+
 /// A slot taking only some items: the test mod's generator burns fuel, so shift-clicked dirt
 /// stays with the player and coal goes in.
 pub async fn slot_accepts(t: T) -> R {

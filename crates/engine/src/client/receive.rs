@@ -160,6 +160,9 @@ impl Client {
             ToClient::CloseMenu => {
                 self.menu = None;
                 self.drag = None;
+                self.drag_hover = None;
+                self.sweep.clear();
+                self.picking.clear();
                 self.events.push(ClientEvent::CloseMenu);
             }
             ToClient::BreakRefused { frame, pos } => {
