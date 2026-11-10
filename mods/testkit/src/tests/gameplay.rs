@@ -336,6 +336,40 @@ pub async fn bucket(t: T) -> R {
     Ok(())
 }
 
+/// The dyed wools exist as items and blocks, and red wool is made from any wool and a red dye.
+pub async fn wool_colors(t: T) -> R {
+    t.flat().await?;
+    let f = t.feet();
+    for (i, name) in ["red_wool", "black_wool", "brown_wool"].iter().enumerate() {
+        t.op(&format!("put me {i} {name} 1")).await?;
+        let p = add(f, [i as i32 + 2, 0, 0]);
+        t.set(p, name).await?;
+        t.check_eq(t.block(p).await?, format!("base:{name}"), "the block is there");
+        t.check(t.c().inventory_slot(i as u32).item == item(&format!("base:{name}")), "the item is there");
+    }
+    // Wool of any colour plus a red dye (the rose) makes red wool.
+    t.op("put me 4 wool 1").await?;
+    t.op("put me 5 rose 1").await?;
+    t.press("core:inventory");
+    t.screen("core:menu").await?;
+    // Menu slots: 0-3 grid, 4 result, 5-8 armor, 9-35 main, 36-44 hotbar.
+    t.click_ui("slot:40", 0);
+    t.until("wool on the cursor", Duration::from_secs(5), |t| t.c().cursor_stack().item == item("base:wool"))
+        .await?;
+    t.click_ui("slot:0", 0);
+    t.until("wool in the grid", Duration::from_secs(5), |t| t.c().cursor_stack().is_empty())
+        .await?;
+    t.click_ui("slot:41", 0);
+    t.until("rose on the cursor", Duration::from_secs(5), |t| t.c().cursor_stack().item == item("base:rose"))
+        .await?;
+    t.click_ui("slot:1", 0);
+    t.until("red wool in the result", Duration::from_secs(5), |t| t.c().menu_slot(4).item == item("base:red_wool"))
+        .await?;
+    t.check_eq(t.c().menu_slot(4).count, 1, "one red wool");
+    t.c().menu_close();
+    t.no_screen().await
+}
+
 /// An ingot in the inventory and a placed torch each make an advancement, the client gets them
 /// (a toast, the list on L), and `/advancements reset` takes them back.
 pub async fn advancements(t: T) -> R {

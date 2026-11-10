@@ -73,6 +73,7 @@ pub fn all() -> Vec<TestDef> {
         gameplay::attack_charge,
         gameplay::permissions,
         gameplay::armor,
+        gameplay::wool_colors,
         gameplay::slot_accepts,
         gameplay::liquid_slot,
         gameplay::slot_limit,

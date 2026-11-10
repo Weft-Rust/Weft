@@ -499,8 +499,20 @@ pub fn register(r: &mut Registry) {
         .sound_group("cloth")
         .texture("wool_white")
         .hardness(0.8)
+        .tag("wool")
         .set(&FLAMMABLE, 30)
         .tab(&crate::tabs::COLORED);
+    // The dyed wools, from the textures that came with the game; `#wool` is the plain one too,
+    // so a recipe written against the tag dyes any of them.
+    for name in ["black", "brown", "red"] {
+        r.block(Block::generated(format!("{name}_wool")))
+            .sound_group("cloth")
+            .texture(&format!("wool_{name}"))
+            .hardness(0.8)
+            .tag("wool")
+            .set(&FLAMMABLE, 30)
+            .tab(&crate::tabs::COLORED);
+    }
 
     // What may grow or stand where, from the common `dirt` and `sand` tags like modern vanilla:
     // a mod's sand tagged `sand` gets cactus and sugar cane, in the world and from players.
