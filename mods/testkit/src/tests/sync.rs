@@ -5,7 +5,7 @@ use std::time::Duration;
 use super::add;
 use crate::runner::{R, T};
 
-use base_api::SMELTING_STATE as SMELTING;
+use base_api::{BURNER, WORKER};
 
 pub async fn menu_sync(t: T) -> R {
     t.flat().await?;
@@ -21,18 +21,26 @@ pub async fn menu_sync(t: T) -> R {
     t.until("furnace progress on the client", Duration::from_secs(5), |t| {
         t.c()
             .view()
-            .menu_component(&SMELTING)
-            .is_some_and(|s| s.cook > 0)
+            .menu_component(&WORKER)
+            .is_some_and(|s| s.progress > 0)
     })
     .await?;
-    let first = t.c().view().menu_component(&SMELTING).map_or(0, |s| s.cook);
+    let first = t
+        .c()
+        .view()
+        .menu_component(&WORKER)
+        .map_or(0, |s| s.progress);
     t.secs(1.0).await?;
-    let later = t.c().view().menu_component(&SMELTING).map_or(0, |s| s.cook);
+    let later = t
+        .c()
+        .view()
+        .menu_component(&WORKER)
+        .map_or(0, |s| s.progress);
     t.check(later > first + 10, format!("cook progress {first} -> {later} in a second (20 ticks)"));
     t.check(
         t.c()
             .view()
-            .menu_component(&SMELTING)
+            .menu_component(&BURNER)
             .is_some_and(|s| s.burn_max == 1600),
         "coal burn time synced",
     );

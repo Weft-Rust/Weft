@@ -14,10 +14,18 @@ value! {
 pub static SMELTED: Event<Smelted> = Event::named("base:smelted");
 
 value! {
-    /// A furnace's state, synced to whoever has it open.
-    pub struct Smelting { pub burn: u32, pub burn_max: u32, pub cook: u32, pub cook_max: u32, pub cooking_item: u32 }
+    /// A generator's fire.
+    #[derive(Default)]
+    pub struct Burner { pub burn: u32, pub burn_max: u32 }
 }
-pub static SMELTING_STATE: Component<Smelting> = Component::named("base:smelting");
+pub static BURNER: Component<Burner> = Component::named("base:burner");
+
+value! {
+    /// A furnace's work on the item in it.
+    #[derive(Default)]
+    pub struct Worker { pub progress: u32, pub progress_max: u32 }
+}
+pub static WORKER: Component<Worker> = Component::named("base:worker");
 
 value! {
     /// A player's hunger and air.

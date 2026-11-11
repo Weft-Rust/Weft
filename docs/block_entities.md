@@ -18,21 +18,27 @@ Three things you put together, each on its own: the **block** players see and pl
 ```rust
 static FURNACE: Block = Block::named("furnace");
 static FURNACE_MENU: Menu = Menu::named("furnace");
-static SMELTING: Component<Smelting> = Component::named("base:smelting");
+pub static BURN: Component<Burner> = Component::named("base:burner");
+pub static WORK: Component<Worker> = Component::named("base:worker");
 
-r.entity_component(&SMELTING, Smelting { burn: 0, burn_max: 0, cook: 0, cook_max: 0 }, component_flags::SAVE | component_flags::SYNC_MENU);
-r.block(&FURNACE)
-    .hardness(3.5)
-    .mined_by("pickaxe", 0)
-    .entity(|e| e.attach(&SMELTING).inventory(3))
-    .opens(&FURNACE_MENU);
-r.menu(&FURNACE_MENU)
-    .group("input", Slots::single().holder())
-    .group("fuel", Slots::single().accepts("#fuel").holder())
-    .group("output", Slots::single().output().holder())
-    .player_inventory()
-    .screen(|ui| { /* see below */ });
-r.system(&SMELTING, tick_furnaces);
+fn init(r: &mut Registry) {
+    r.system(&SMELTING, tick_furnaces);
+    r.block(&FURNACE)
+        .hardness(3.5)
+        .mined_by("pickaxe", 0)
+        .entity(|e| e
+            .attach(&BURNER)
+            .attach_with(&ENERGY, Energy { stored: 0, capacity: 2_000, max_in: 0, max_out: 0 })
+            .attach(&WORKER)
+            .inventory(3))
+        .opens(&FURNACE_MENU);
+    r.menu(&FURNACE_MENU)
+        .group("input", Slots::single().holder())
+        .group("fuel", Slots::single().accepts("#fuel").holder())
+        .group("output", Slots::single().output().holder())
+        .player_inventory()
+        .screen(|ui| { /* see below */ });
+}
 ```
 `.entity(|e| ..)` is the block entity's kind, an `EntityBuilder` like any other: `inventory(n)` its slots, which the menu's `.holder()` groups show. One that should keep its state when broken (a charged battery, a half-done job) declares that state with `r.instance_component(&C, default, flags | component_flags::CARRIED)`: the broken block's item takes the value along, and placing the item puts it back on the new block entity, the way a renamed chest keeps its name. `w.component(h, &C)` and `w.set_component(h, &C, v)` read and write such a value on any holder, the stack in a player's slot included. The block entity is named like the block, so `EntityKind::named("furnace")` finds it if your code needs to.
 
@@ -84,7 +90,7 @@ fn tick_generators(b: &mut SystemBatch<Burner>) {
     }
 }
 ```
-`w.inventory(id).group("fuel")` is one group of its slots, numbered from 0 (`get`, `set`, `len`); the whole inventory also has `insert`, which returns what didn't fit. Give each kind a state component of its own (the generator's `Burner`, the furnace's `Smelting`), so its system reaches only its own. For stacks there are `consume_one` (a lava bucket leaves its bucket), `shrink`, `grow`, `stacks_with` and `max_stack`, and the rest of the world is in `w` too (`block`, `set_block`, `play_sound`, `emit`).
+`w.inventory(id).group("fuel")` is one group of its slots, numbered from 0 (`get`, `set`, `len`); the whole inventory also has `insert`, which returns what didn't fit. Give each kind a state component of its own (the generator's `Burn`, the furnace's `Worker`), so its system reaches only its own. For stacks there are `consume_one` (a lava bucket leaves its bucket), `shrink`, `grow`, `stacks_with` and `max_stack`, and the rest of the world is in `w` too (`block`, `set_block`, `play_sound`, `emit`).
 
 To show that it is working, give the block a property and flip it from the tick. The furnace has `.facing(..)` and `.prop("lit", ["false", "true"])`, and its tick does
 ```rust

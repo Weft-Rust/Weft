@@ -5,25 +5,26 @@ use weft_sdk::*;
 use crate::blocks::{CHEST, FURNACE};
 use crate::items::FUEL;
 
-pub use base_api::{SMELT_TIME, SMELTED, SMELTING_STATE as SMELTING, Smelted, Smelting};
+pub use base_api::{BURNER, Burner, WORKER, Worker};
 pub static FURNACE_MENU: Menu = Menu::named("furnace");
 pub static CHEST_MENU: Menu = Menu::named("chest");
 
 pub fn register(r: &mut Registry) {
-    r.entity_component(
-        &SMELTING,
-        Smelting { burn: 0, burn_max: 0, cook: 0, cook_max: 0, cooking_item: 0 },
-        component_flags::SAVE | component_flags::SYNC_MENU,
-    );
-    r.system(&SMELTING, tick_furnaces);
+    r.entity_component(&BURNER, Burner::default(), component_flags::SAVE | component_flags::SYNC_MENU);
+    r.entity_component(&WORKER, Worker::default(), component_flags::SAVE | component_flags::SYNC_MENU);
+    // The components sync to open menus; screens bind to them.
+    // Each kind ticks as a system over its own state: every machine of a region in one call.
+    r.system(&BURNER, tick_burners);
+    r.system(&WORKER, tick_workers);
     // The furnace's state syncs to whoever has it open: the screen binds to it directly.
+    // The furnace is a combination burner and worker with no energy input or output
     r.block(&FURNACE)
         // Front towards the player; unlit and lit.
         .sound_group("stone")
         .facing(Facings::HORIZONTAL, Toward::Player)
-        .prop("lit", ["false", "true"])
+        .prop("active", ["false", "true"])
         .states(|p, s| {
-            let lit = p.is("lit", "true");
+            let lit = p.is("active", "true");
             let s = s
                 .texture("furnace_side")
                 .ends("furnace_top")
@@ -33,7 +34,12 @@ pub fn register(r: &mut Registry) {
         .hardness(3.5)
         .mined_by("pickaxe", 0)
         .tab(&crate::tabs::FUNCTIONAL)
-        .entity(|e| e.attach(&SMELTING).inventory(3))
+        .entity(|e| {
+            e.attach(&BURNER)
+                .attach_with(&ENERGY, Energy { stored: 0, capacity: 2_000, max_in: 0, max_out: 0 })
+                .attach(&WORKER)
+                .inventory(3)
+        })
         .opens(&FURNACE_MENU);
     r.menu(&FURNACE_MENU)
         .group("input", Slots::single().holder())
@@ -55,14 +61,14 @@ pub fn register(r: &mut Registry) {
                     ui.column(S::column().gap(2.0), |ui| {
                         ui.group("input");
                         ui.progress_bind_dir("flame", S::default().size(14.0, 14.0), abi::ui_dir::UP, |c| {
-                            c.menu_component(&SMELTING)
+                            c.menu_component(&BURNER)
                                 .map_or(0.0, |s| ratio(s.burn, s.burn_max))
                         });
                         ui.group("fuel");
                     });
                     ui.recipe_arrow_bind(|c| {
-                        c.menu_component(&SMELTING)
-                            .map_or(0.0, |s| ratio(s.cook, s.cook_max))
+                        c.menu_component(&WORKER)
+                            .map_or(0.0, |s| ratio(s.progress, s.progress_max))
                     });
                     ui.group("output");
                     ui.spacer();
@@ -90,115 +96,107 @@ pub fn register(r: &mut Registry) {
         .default_screen();
 }
 
-/// `ticks` of one furnace at once (its area was unloaded, the time jumped): it smelts while
-/// input, room and fuel last, lighting fuel as it goes, then the fire burns down and the
-/// progress cools, as tick by tick.
-fn catch_up(w: &World, id: u64, s: &mut Smelting, ticks: u32) {
-    let inv = w.inventory(id);
-    let (input_slot, fuel_slot, output_slot) = (inv.group("input"), inv.group("fuel"), inv.group("output"));
-    let (input, fuel, output) = (input_slot.get(0), fuel_slot.get(0), output_slot.get(0));
-    let mut idle = ticks as u64;
-    if let Some((out, time)) = (!input.is_empty())
-        .then(|| recipe_process(&crate::recipes::SMELTING, input.item))
-        .flatten()
-    {
-        let q = abi::Query { entity: id, item: input.item, ..query() };
-        s.cook_max = w
-            .chain_compute(&SMELT_TIME, time as f64, &q)
-            .round()
-            .max(1.0) as u32;
-        let items = (input.count).min(output.room_for(out)) as u64;
-        let per_fuel = FUEL.on_stack_item(&fuel).unwrap_or(0) as u64;
-        let fuel_items = if per_fuel > 0 { fuel.count as u64 } else { 0 };
-        let work = (items * s.cook_max as u64).saturating_sub(s.cook as u64);
-        let worked = idle.min(work).min(s.burn as u64 + fuel_items * per_fuel);
-        let lit = if worked > s.burn as u64 { (worked - s.burn as u64).div_ceil(per_fuel.max(1)) } else { 0 };
-        if lit > 0 {
-            let mut left = fuel;
-            for _ in 0..lit {
-                left = consume_one(left);
-            }
-            fuel_slot.set(0, left);
-            s.burn_max = per_fuel as u32;
-        }
-        s.burn = (s.burn as u64 + lit * per_fuel - worked) as u32;
-        let total = s.cook as u64 + worked;
-        let done = (total / s.cook_max as u64) as u32;
-        s.cook = (total % s.cook_max as u64) as u32;
-        if done > 0 {
-            input_slot.set(0, input.shrink(done));
-            output_slot.set(0, output.merged(out, done));
-            for _ in 0..done {
-                w.emit(&SMELTED, Smelted { furnace: id, input: input.item, output: out });
-            }
-        }
-        idle -= worked;
-    }
-    s.burn = (s.burn as u64).saturating_sub(idle) as u32;
-    s.cook = (s.cook as u64).saturating_sub(idle * 2) as u32;
-}
+const PER_TICK: i64 = 40;
+const FURNACE_USE: i64 = 20;
 
-/// Every furnace of a region at once, through its state (a system: no host call to reach it).
-fn tick_furnaces(b: &mut SystemBatch<Smelting>) {
+pub fn tick_burners(b: &mut SystemBatch<Burner>) {
     let w = b.world();
-    for (id, s, ticks) in b.iter_mut() {
-        let Some(st) = w.entity(id) else { continue };
+    for (id, m, ticks) in b.iter_mut() {
+        let Some(e) = w.component(id, &ENERGY) else { continue };
+        let room = e.capacity - e.stored;
         if ticks > 1 {
-            let was_lit = s.burn > 0;
-            catch_up(&w, id, s, ticks);
-            let pos = st.block_pos();
-            if (s.burn > 0) != was_lit && FURNACE.is(w.block(pos)) {
-                w.prop_set(pos, "lit", if s.burn > 0 { "true" } else { "false" });
+            // Catching up: it runs while there is room for what it makes, lighting fuel as it
+            // goes (the network takes from it between parts of the catch-up).
+            let mut want = (ticks as i64).min(room / PER_TICK).max(0) as u32;
+            let mut ran = want.min(m.burn);
+            m.burn -= ran;
+            want -= ran;
+            let slot = w.inventory(id).group("fuel");
+            while want > 0 {
+                let fuel = slot.get(0);
+                let Some(t) = FUEL.on_stack_item(&fuel) else { break };
+                (m.burn, m.burn_max) = (t, t);
+                slot.set(0, consume_one(fuel));
+                let r = want.min(m.burn);
+                m.burn -= r;
+                ran += r;
+                want -= r;
+            }
+            if let Some(mut e) = w.component(id, &ENERGY) {
+                e.stored = (e.stored + ran as i64 * PER_TICK).min(e.capacity);
+                w.set_component(id, &ENERGY, e);
             }
             continue;
         }
-        let pos = st.block_pos();
+        if m.burn == 0 && room >= PER_TICK {
+            let slot = w.inventory(id).group("fuel");
+            let fuel = slot.get(0);
+            // Any mod's fuel works: the value is the common `fuel` component.
+            if let Some(ticks) = FUEL.on_item(fuel.item).filter(|_| !fuel.is_empty()) {
+                m.burn = ticks;
+                m.burn_max = ticks;
+                // A lava bucket leaves its bucket, like in the furnace.
+                slot.set(0, consume_one(fuel));
+            }
+        }
+        if m.burn > 0 {
+            m.burn -= 1;
+            if let Some(mut e) = w.component(id, &ENERGY) {
+                e.stored = (e.stored + PER_TICK).min(e.capacity);
+                w.set_component(id, &ENERGY, e);
+            }
+        }
+    }
+}
+
+pub fn tick_workers(b: &mut SystemBatch<Worker>) {
+    let w = b.world();
+    for (id, m, ticks) in b.iter_mut() {
+        let Some(e) = w.component(id, &ENERGY) else { continue };
+        let stored = e.stored;
         let inv = w.inventory(id);
-        let (input_slot, fuel_slot, output_slot) = (inv.group("input"), inv.group("fuel"), inv.group("output"));
-        let (input, fuel, output) = (input_slot.get(0), fuel_slot.get(0), output_slot.get(0));
-        let was_lit = s.burn > 0;
-        if s.burn > 0 {
-            s.burn -= 1;
-        }
-        // Another item in the input starts over, before this tick counts for it.
-        if input.item != s.cooking_item {
-            s.cooking_item = input.item;
-            s.cook = 0;
-        }
+        let (input_slot, output_slot) = (inv.group("input"), inv.group("output"));
+        let (input, output) = (input_slot.get(0), output_slot.get(0));
         let recipe = (!input.is_empty())
             .then(|| recipe_process(&crate::recipes::SMELTING, input.item))
             .flatten();
         let fits = recipe.is_some_and(|(out, _)| output.room_for(out) > 0);
-        if s.burn == 0 && fits {
-            if let Some(ticks) = FUEL.on_stack_item(&fuel) {
-                s.burn = ticks;
-                s.burn_max = ticks;
-                fuel_slot.set(0, consume_one(fuel));
-            }
+        if !fits || stored < FURNACE_USE {
+            m.progress = 0;
+            continue;
         }
-        if s.burn > 0 && fits {
-            let (out, time) = recipe.unwrap();
-            let q = abi::Query { entity: id, item: input.item, ..query() };
-            s.cook_max = w
-                .chain_compute(&SMELT_TIME, time as f64, &q)
-                .round()
-                .max(1.0) as u32;
-            s.cook += 1;
-            if s.cook >= s.cook_max {
-                s.cook = 0;
-                input_slot.set(0, input.shrink(1));
-                output_slot.set(0, output.merged(out, 1));
-                w.emit(&SMELTED, Smelted { furnace: id, input: input.item, output: out });
+        let (out, time) = recipe.unwrap();
+        // Twice as fast as the base furnace, paid for in energy.
+        m.progress_max = (time / 2).max(1);
+        if ticks > 1 {
+            // Catching up: as many steps as the energy, the input and the room allow.
+            let work = (input.count.min(output.room_for(out)) * m.progress_max).saturating_sub(m.progress) as i64;
+            let steps = (ticks as i64).min(stored / FURNACE_USE).min(work);
+            let total = m.progress + steps as u32;
+            let done = total / m.progress_max;
+            m.progress = total % m.progress_max;
+            if let Some(mut e) = w.component(id, &ENERGY) {
+                e.stored -= steps * FURNACE_USE;
+                w.set_component(id, &ENERGY, e);
             }
-        } else if s.burn > 0 {
-            // Modern's: burning with nothing it can do starts over; out of fuel it cools down.
-            s.cook = 0;
-        } else {
-            s.cook = s.cook.saturating_sub(2);
+            if done > 0 {
+                input_slot.set(0, input.shrink(done));
+                output_slot.set(0, output.merged(out, done));
+            }
+            continue;
         }
-        let lit = s.burn > 0;
-        if lit != was_lit && FURNACE.is(w.block(pos)) {
-            w.prop_set(pos, "lit", if lit { "true" } else { "false" });
+        m.progress += 1;
+        let done = m.progress >= m.progress_max;
+        if done {
+            m.progress = 0;
+        }
+        if let Some(mut e) = w.component(id, &ENERGY) {
+            e.stored -= FURNACE_USE;
+            w.set_component(id, &ENERGY, e);
+        }
+        if done {
+            input_slot.set(0, input.shrink(1));
+            output_slot.set(0, output.merged(out, 1));
         }
     }
 }
