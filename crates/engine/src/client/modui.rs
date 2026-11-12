@@ -252,7 +252,7 @@ pub unsafe extern "C" fn ui_open(u: *mut abi::UiCtx, node: *const abi::UiNode) {
                 let max = if n.count == 0 { usize::MAX } else { n.count as usize };
                 let on_change: Rc<dyn Fn(&mut Ctx, &str)> = Rc::new(move |ctx: &mut Ctx, t: &str| on_change(ctx, t.to_string(), 0.0));
                 let id =
-                    b.ui.open(Kind::Input { caret: value.chars().count(), value, max, on_change: Some(on_change) }, style);
+                    b.ui.open(Kind::Input { caret: value.chars().count(), value, max, on_change: Some(on_change), area: None }, style);
                 // Its class names it, for the chat line of a screen that shows the chat.
                 if !class.is_empty() {
                     b.ui.nodes[id].id = Some(class);

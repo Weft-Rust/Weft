@@ -195,7 +195,7 @@ fn mod_picture(ui: &mut Ui, icon: &Option<String>, name: &[Span], id: &str, side
 }
 
 /// A badge: words on a colored plate, with a tooltip if it says more.
-fn badge(ui: &mut Ui, cx: &BuildCx, class: &str, key: &str, args: &[Arg], tip: Option<&str>) -> NodeId {
+pub(crate) fn badge(ui: &mut Ui, cx: &BuildCx, class: &str, key: &str, args: &[Arg], tip: Option<&str>) -> NodeId {
     let b = ui.panel(class, Style::row().pad_xy(3.0, 1.0), |ui| {
         let t = label(ui, cx, key, args, "badge");
         if let Some(t) = ui.text_mut(t) {
@@ -209,7 +209,15 @@ fn badge(ui: &mut Ui, cx: &BuildCx, class: &str, key: &str, args: &[Arg], tip: O
 }
 
 /// An icon button with its words in a tooltip.
-fn icon_button(ui: &mut Ui, cx: &BuildCx, class: &str, icon: &str, tip: &str, args: &[Arg], action: impl Fn(&mut Ctx) + 'static) -> NodeId {
+pub(crate) fn icon_button(
+    ui: &mut Ui,
+    cx: &BuildCx,
+    class: &str,
+    icon: &str,
+    tip: &str,
+    args: &[Arg],
+    action: impl Fn(&mut Ctx) + 'static,
+) -> NodeId {
     let b = ui.button(class, Style::default().size(17.0, 17.0).center(), Rc::new(action), |ui| {
         ui.add(Kind::Image { texture: format!("core:gui/{icon}"), color: 0xFFFFFFFF }, Style::default().size(9.0, 9.0));
     });
@@ -223,7 +231,7 @@ fn set_enabled(ui: &mut Ui, b: NodeId, on: bool) {
     }
 }
 
-fn separator(ui: &mut Ui) {
+pub(crate) fn separator(ui: &mut Ui) {
     ui.add(Kind::Container { class: Some("separator".into()) }, Style::default().h(1.0).stretch());
 }
 

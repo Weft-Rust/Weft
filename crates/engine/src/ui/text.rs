@@ -960,6 +960,29 @@ pub fn plain(s: &str) -> Vec<Span> {
     vec![Span::text(s, None)]
 }
 
+/// The spans holding chars `from..to` of their text, cut where a span crosses either end.
+pub fn slice(spans: &[Span], from: usize, to: usize) -> Vec<Span> {
+    let mut out = Vec::new();
+    let mut at = 0;
+    for s in spans {
+        match &s.piece {
+            Piece::Text(t) => {
+                let n = t.chars().count();
+                let (a, b) = (from.max(at), to.min(at + n));
+                if a < b {
+                    let mut part = s.clone();
+                    part.piece = Piece::Text(t.chars().skip(a - at).take(b - a).collect());
+                    out.push(part);
+                }
+                at += n;
+            }
+            _ if (from..to).contains(&at) => out.push(s.clone()),
+            _ => {}
+        }
+    }
+    out
+}
+
 /// The text of spans, without icons or formatting.
 pub fn plain_text(spans: &[Span]) -> String {
     spans

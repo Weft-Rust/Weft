@@ -69,7 +69,12 @@ def main():
     ndk_env = os.environ.get("ANDROID_NDK_LATEST_HOME") or os.environ.get("ANDROID_NDK_HOME") or os.environ.get("ANDROID_NDK_ROOT")
     ndk = Path(ndk_env) if ndk_env else newest(sdk / "ndk", "*")
     tools = newest(sdk / "build-tools", "*")
-    android_jar = newest(sdk / "platforms", "android-*") / "android.jar"
+    # A released platform: a preview's (android-37.2, codename DEV) makes an APK only that preview
+    # installs.
+    stable = [p for p in (sdk / "platforms").glob("android-*") if p.name.split("-", 1)[1].isdigit()]
+    if not stable:
+        sys.exit(f"no released platform in {sdk / 'platforms'}")
+    android_jar = max(stable, key=lambda p: int(p.name.split("-", 1)[1])) / "android.jar"
     windows = platform.system() == "Windows"
     host = {"Windows": "windows-x86_64", "Linux": "linux-x86_64", "Darwin": "darwin-x86_64"}[platform.system()]
     bin = ndk / "toolchains/llvm/prebuilt" / host / "bin"

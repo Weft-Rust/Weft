@@ -6,7 +6,7 @@
 //! idle                # until nothing is left to generate, light, send or mesh
 //! press core:inventory
 //! hold core:forward 1.5
-//! click 0             # mouse button
+//! click 0             # mouse button; `click 0 1.5` holds it that long (drag meanwhile)
 //! cursor 0.5 0.4      # mouse at fractions of the window
 //! scroll -3
 //! type /give dia      # text into the focused field
@@ -80,7 +80,7 @@ pub async fn run(t: T, src: String) -> R {
                 let (a, secs) = rest.rsplit_once(' ').unwrap_or((rest, "1"));
                 t.hold(a.trim(), secs.parse().unwrap_or(1.0));
             }
-            "click" => t.c().input_click(num(0, 0.0) as u32, 0.0),
+            "click" => t.c().input_click(num(0, 0.0) as u32, num(1, 0.0)),
             "cursor" => t.c().input_cursor(num(0, 0.5), num(1, 0.5)),
             "scroll" => t.c().input_scroll(num(0, -1.0)),
             "type" => t.c().input_type(rest),

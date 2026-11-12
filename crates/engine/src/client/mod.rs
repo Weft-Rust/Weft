@@ -1066,6 +1066,15 @@ impl Client {
         (self.render.lod_draw.len(), made, quads, self.lod.pending())
     }
 
+    /// Light around the player made again from nothing, as far as the view reaches.
+    pub fn relight(&mut self) {
+        let center = crate::world::cube_of(self.player.pos.floor().as_ivec3());
+        let _ = self
+            .terrain
+            .tx
+            .send(terrain::In::Relight { center, reach: self.view_radius + 2 });
+    }
+
     /// Meshes still to come or to upload.
     pub fn pending_meshes(&self) -> usize {
         self.world.pending_meshes() + self.meshes.len()
@@ -1648,7 +1657,7 @@ impl Client {
             && (-reach..=reach).all(|x| {
                 (-reach..=reach).all(|z| {
                     self.world
-                        .column_shown(glam::IVec2::new(at.x + x, at.z + z), self.seed)
+                        .column_shown(glam::IVec2::new(at.x + x, at.z + z), self.seed, false)
                 })
             })
     }

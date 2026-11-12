@@ -1096,6 +1096,12 @@ pub fn draw_custom(
             // Inset frame; the model itself is drawn in a later pass.
             loaded(ren, look, "well", r, scale);
         }
+        crate::editor::TAG_BLOCK => {
+            if let Some(c) = crate::content::try_content() {
+                crate::editor::draw_block(ren, c, textures, r, data);
+            }
+        }
+        crate::editor::TAG_PICTURE => ren.picture_icon(textures, r, data as u32),
         modui::TAG_ICON => stack_icon(ren, textures, r, ItemStack::new(data as u32, 1), scale, text_unit),
         modui::TAG_CREATIVE => {
             slot_background(ren, look, "slot", r, false, scale);
@@ -1355,7 +1361,7 @@ fn debug_help(ui: &mut Ui, groups: u32, align: Align, mods: &[(&'static str, boo
                 t.wrap = false;
             }
         }
-        for key in ["hud.debug.options", "hud.debug.gamemode", "hud.debug.cubes", "hud.debug.hitboxes"] {
+        for key in ["hud.debug.options", "hud.debug.gamemode", "hud.debug.cubes", "hud.debug.hitboxes", "hud.debug.relight"] {
             let n = ui.text_bound("debug", Box::new(move |_: &Ctx| (key.into(), vec![])));
             if let Some(t) = ui.text_mut(n) {
                 t.wrap = false;

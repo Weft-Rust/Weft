@@ -784,6 +784,59 @@ impl UiRenderer {
         self.boxes_icon(c, tex, x, y, size, &looks.block_shape(state, s), s);
     }
 
+    /// Texture `texture` (`Content::textures`) flat over `r`, as an item's picture shows.
+    pub fn picture_icon(&mut self, tex: &GameTextures, r: crate::ui::Rect, texture: u32) {
+        let q = Quad {
+            p0: [r.x, r.y],
+            u: [r.w, 0.0],
+            v: [0.0, r.h],
+            uv: [0.0, 0.0, 1.0, 1.0],
+            color: 0xFFFFFFFF,
+            tex: tex.texture(texture),
+            mode: ui_mode::ICON,
+            ..Default::default()
+        };
+        self.quads.push(q);
+    }
+
+    /// Model boxes as a slot shows a block: for what isn't registered yet, drawn the same way as
+    /// what is.
+    pub fn block_icon(&mut self, c: &Content, tex: &GameTextures, r: crate::ui::Rect, boxes: &[crate::content::ModelBox]) {
+        self.boxes_icon(c, tex, r.x, r.y, r.w.min(r.h), boxes, &c.states[0]);
+    }
+
+    /// The char index in text field `node` nearest to `p` (GUI units), where a click puts the caret.
+    pub fn caret_at(&self, ui: &crate::ui::Ui, node: usize, p: glam::Vec2) -> Option<usize> {
+        let n = ui.nodes.get(node)?;
+        let Kind::Input { value, caret, area, .. } = &n.kind else { return None };
+        let px = ui.text_unit;
+        if let Some(a) = area {
+            // Rows as drawn, the nearest boundary in the row under the click.
+            let [sx, sy] = a.scroll.get();
+            let lh = self.font.line_height * px;
+            let rows = a.rows(value, &self.font, Some((n.rect.w - 8.0 - a.inset) / px));
+            let ri = (((p.y - n.rect.y - 4.0 + sy) / lh).floor().max(0.0) as usize).min(rows.len() - 1);
+            let row = &rows[ri];
+            let x = p.x - n.rect.x - 4.0 + sx;
+            let col = (0..=row.widths.len()).min_by(|&i, &j| {
+                (row.x(i) * px - x)
+                    .abs()
+                    .total_cmp(&(row.x(j) * px - x).abs())
+            });
+            return Some(row.at + col.unwrap_or(0));
+        }
+        let width = |s: &str| super::text::layout(&super::text::plain(s), &self.font, None).width * px;
+        // As drawn: slid left so the caret is in sight.
+        let before: String = value.chars().take(*caret).collect();
+        let x = p.x - n.rect.x - 4.0 + (width(&before) - (n.rect.w - 8.0) + px).max(0.0);
+        let chars: Vec<char> = value.chars().collect();
+        // The boundary between two chars the click is nearest to.
+        (0..=chars.len()).min_by(|&i, &j| {
+            let d = |k: usize| (width(&chars[..k].iter().collect::<String>()) - x).abs();
+            d(i).total_cmp(&d(j))
+        })
+    }
+
     /// Model boxes drawn isometric, each face's layers one over the other as in the world (`s` is
     /// air for an item's own model).
     #[allow(clippy::too_many_arguments)]
@@ -1182,6 +1235,59 @@ impl UiRenderer {
                 let k = Rect { x: r.x + (r.w - 8.0 * scale) * value.clamp(0.0, 1.0), y: r.y, w: 8.0 * scale, h: r.h };
                 self.class_background(gpu, assets, look, "slider", "", r, scale);
                 self.class_background(gpu, assets, look, "slider_knob", if hovered { "hover" } else { "" }, k, scale);
+            }
+            Kind::Input { value, caret, area: Some(area), .. } => {
+                background(self, "input", if ui.focused == Some(id) { "focused" } else { "" });
+                let px = scale * ui.text_unit;
+                let lh = self.font.line_height * px;
+                let (room_w, room_h) = (r.w - (8.0 + area.inset) * scale, r.h - 8.0 * scale);
+                let rows = area.rows(value, &self.font, Some(room_w / px));
+                let ri = super::row_of(&rows, *caret);
+                let caret_x = rows[ri].x(*caret - rows[ri].at) * px;
+                let caret_y = ri as f32 * lh;
+                // Moved only as far as keeps the caret in sight, so the text stays put while it
+                // moves about inside.
+                let [mut sx, mut sy] = area.scroll.get().map(|v| v * scale);
+                if ui.focused == Some(id) {
+                    sx = if area.wrap { 0.0 } else { sx.min(caret_x).max(caret_x + px - room_w).max(0.0) };
+                    sy = sy.min(caret_y).max(caret_y + lh - room_h).max(0.0);
+                    area.scroll.set([sx / scale, sy / scale]);
+                }
+                let (tx, ty) = (r.x + 4.0 * scale - sx, r.y + 4.0 * scale - sy);
+                let start = self.quads.len();
+                if let Some(a) = ui.anchor.filter(|&a| ui.focused == Some(id) && a != *caret) {
+                    let (lo, hi) = (a.min(*caret), a.max(*caret));
+                    for (i, row) in rows.iter().enumerate() {
+                        let len = row.end - row.start;
+                        if hi < row.at || lo > row.at + len {
+                            continue;
+                        }
+                        let x0 = row.x(lo.saturating_sub(row.at)) * px;
+                        // Past a line's end the selection takes the line break too.
+                        let past = hi > row.at + len && rows.get(i + 1).is_none_or(|n| n.line != row.line);
+                        let x1 = row.x(hi - row.at) * px + if past { px * 4.0 } else { 0.0 };
+                        if x1 > x0 {
+                            let rect = Rect { x: tx + x0, y: ty + i as f32 * lh, w: x1 - x0, h: lh };
+                            self.class_background(gpu, assets, look, "input_selection", "", rect, scale);
+                        }
+                    }
+                }
+                for (i, row) in rows.iter().enumerate() {
+                    let y = ty + i as f32 * lh;
+                    if y + lh < r.y || y > r.y + r.h {
+                        continue;
+                    }
+                    let layout = super::text::layout(&row.spans, &self.font, None);
+                    self.glyph_run(&layout.items, tx + row.indent * px, y, px, look.text("input", ""), None, icons);
+                }
+                if ui.focused == Some(id) {
+                    let rect = Rect { x: tx + caret_x, y: ty + caret_y, w: px.max(1.0), h: lh };
+                    self.class_background(gpu, assets, look, "caret", "", rect, scale);
+                }
+                let field = [r.x + 2.0 * scale, r.y + 2.0 * scale, r.x + r.w - 2.0 * scale, r.y + r.h - 2.0 * scale];
+                for q in &mut self.quads[start..] {
+                    q.clip = field;
+                }
             }
             Kind::Input { value, caret, .. } => {
                 background(self, "input", if ui.focused == Some(id) { "focused" } else { "" });

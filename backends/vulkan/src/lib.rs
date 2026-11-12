@@ -93,6 +93,8 @@ struct Swapchain {
     layouts: Vec<vk::ImageLayout>,
     format: vk::Format,
     extent: vk::Extent2D,
+    mode: vk::PresentModeKHR,
+    transform: vk::SurfaceTransformFlagsKHR,
 }
 
 pub struct VulkanBackend {
@@ -746,8 +748,21 @@ impl VulkanBackend {
             if caps.max_image_count > 0 {
                 count = count.min(caps.max_image_count);
             }
+            // A resize to the size it already has: remaking it for nothing crashed Intel Arc's driver at start.
+            if let Some(sc) = &self.swapchain
+                && sc.extent == extent
+                && sc.format == format.format
+                && sc.mode == mode
+                && sc.transform == transform
+            {
+                self.dirty_swapchain = false;
+                return Ok(());
+            }
             self.turned = transform != caps.current_transform;
-            let old = self.swapchain.take();
+            // Destroyed before the new one instead of handed over as `old_swapchain`: nothing is in flight after the wait above.
+            if let Some(old) = self.swapchain.take() {
+                self.destroy_swapchain(old);
+            }
             let raw = self
                 .swapchain_fn
                 .create_swapchain(
@@ -763,14 +778,10 @@ impl VulkanBackend {
                         .pre_transform(transform)
                         .composite_alpha(alpha)
                         .present_mode(mode)
-                        .clipped(true)
-                        .old_swapchain(old.as_ref().map_or(vk::SwapchainKHR::null(), |s| s.raw)),
+                        .clipped(true),
                     None,
                 )
                 .map_err(err("vkCreateSwapchainKHR"))?;
-            if let Some(old) = old {
-                self.destroy_swapchain(old);
-            }
             let images = self
                 .swapchain_fn
                 .get_swapchain_images(raw)
@@ -813,6 +824,8 @@ impl VulkanBackend {
                 rendered,
                 format: format.format,
                 extent,
+                mode,
+                transform,
             });
             self.dirty_swapchain = false;
             Ok(())

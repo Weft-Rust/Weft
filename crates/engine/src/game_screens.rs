@@ -87,6 +87,7 @@ fn creative_panel(ui: &mut Ui, cx: &BuildCx, search: &Rc<RefCell<String>>, tab: 
                 value: search.borrow().clone(),
                 caret: search.borrow().chars().count(),
                 max: 32,
+                area: None,
                 on_change: Some(Rc::new(move |ctx: &mut Ctx, v: &str| {
                     *s.borrow_mut() = v.to_string();
                     ctx.requests.push(Request::Rebuild);
@@ -444,6 +445,7 @@ impl Screen for Chat {
                         value: st.text.clone(),
                         caret: st.text.chars().count(),
                         max: 256,
+                        area: None,
                         on_change: Some(Rc::new(move |ctx: &mut Ctx, v: &str| {
                             let players = ctx
                                 .client
@@ -997,6 +999,7 @@ impl Screen for TagList {
                     value: self.filter.borrow().clone(),
                     caret: self.filter.borrow().chars().count(),
                     max: 48,
+                    area: None,
                     on_change: Some(Rc::new(move |ctx: &mut Ctx, v: &str| {
                         *f.borrow_mut() = v.to_string();
                         ctx.requests.push(Request::Rebuild);

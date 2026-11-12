@@ -336,7 +336,9 @@ fn vs_lod(@builtin(vertex_index) vi: u32, @builtin(instance_index) ii: u32) -> V
     let o = origins[ii] + g.cam_cube;
     let world = vec3<f32>(o.xyz * 16) + local + vec3(0.0, 0.125, 0.0);
     out.uv = lod_uv(dir, world);
-    out.pos = world - vec3(0.0, 0.125, 0.0);
+    // A wall lies on the line between two columns: it is of the one its box stands in, a little
+    // behind it, or the mask's pick between them flickers along it.
+    out.pos = world - vec3(0.0, 0.125, 0.0) - FACE_DIRS[dir] * 0.25;
     let tex_id = w1 & FACE_TEX_MASK;
     let fr = texture_frame(tex_id);
     out.size = fr.size;
@@ -345,7 +347,7 @@ fn vs_lod(@builtin(vertex_index) vi: u32, @builtin(instance_index) ii: u32) -> V
     out.blend = fr.blend;
     out.glow = 0xffffffffu;
     out.slot = 0u;
-    out.light = vec4(1.0, lod_light(w0, w2, w3));
+    out.light = lod_light(w0, w2, w3);
     let kind = lod_tint(w0);
     var tint = vec3(1.0);
     if kind != 0u {
@@ -356,19 +358,26 @@ fn vs_lod(@builtin(vertex_index) vi: u32, @builtin(instance_index) ii: u32) -> V
     return out;
 }
 
+// Whether cubes show the column at `pos`, distant terrain giving way to them there: its ground
+// (part 0) or its top (part 1, a sea's surface).
+fn shown_by_cubes(pos: vec3<f32>, part: u32) -> bool {
+    let half = i32(g.extra.w);
+    let col = vec2<i32>(floor(pos.xz / 16.0));
+    let d = col - g.cam_cube.xz;
+    if abs(d.x) > half || abs(d.y) > half {
+        return false;
+    }
+    let w = 2 * half + 1;
+    let i = u32(((col.y % w) + w) % w * w + ((col.x % w) + w) % w) + part * ((u32(w * w) + 31u) / 32u) * 32u;
+    return ((lod_mask[i / 32u] >> (i % 32u)) & 1u) != 0u;
+}
+
 @fragment
 fn fs_lod(in: VOut) -> @location(0) vec4<f32> {
     let du = dpdx(in.uv);
     let dv = dpdy(in.uv);
-    let half = i32(g.extra.w);
-    let col = vec2<i32>(floor(in.pos.xz / 16.0));
-    let d = col - g.cam_cube.xz;
-    if abs(d.x) <= half && abs(d.y) <= half {
-        let w = 2 * half + 1;
-        let i = u32(((col.y % w) + w) % w * w + ((col.x % w) + w) % w);
-        if ((lod_mask[i / 32u] >> (i % 32u)) & 1u) != 0u {
-            discard;
-        }
+    if shown_by_cubes(in.pos, 0u) {
+        discard;
     }
     let uv = fract(in.uv);
     let nuv = nearest_uv(in.size, uv, du, dv);
@@ -377,4 +386,17 @@ fn fs_lod(in: VOut) -> @location(0) vec4<f32> {
     let tinted = any(in.tint != vec3(1.0));
     albedo = vec4(mix(select(albedo.rgb, vec3(1.0), tinted), albedo.rgb, cover), 1.0);
     return vec4(shade(in, albedo).rgb, 1.0);
+}
+
+// A see-through surface far off (a sea), as a near liquid's top is drawn: its picture's own
+// alpha over the ground under it.
+@fragment
+fn fs_lod_surface(in: VOut) -> @location(0) vec4<f32> {
+    let du = dpdx(in.uv);
+    let dv = dpdy(in.uv);
+    if shown_by_cubes(in.pos, 1u) {
+        discard;
+    }
+    let nuv = nearest_uv(in.size, fract(in.uv), du, dv);
+    return shade(in, sample(in, nuv, du, dv));
 }

@@ -127,6 +127,7 @@ pub fn named(name: &str) -> Option<Box<dyn Screen>> {
         "core:debug_options" => Box::new(crate::hud_editor::DebugOptions),
         "core:tags" => Box::new(crate::game_screens::TagList::default()),
         "core:mods" => Box::new(crate::mods_screen::ModsScreen::default()),
+        "core:editor" => Box::new(crate::editor::Editor::default()),
         "core:profile" => Box::new(Profile::default()),
         _ => return None,
     })
@@ -176,6 +177,7 @@ impl Screen for Profile {
                         caret: crate::settings::name().chars().count(),
                         max: 16,
                         on_change: Some(Rc::new(|_: &mut Ctx, v: &str| crate::settings::set_text("name", v))),
+                        area: None,
                     },
                     Style::default().h(16.0).w(300.0),
                 );
@@ -385,7 +387,21 @@ impl Screen for Title {
                     ui.nodes[p].tooltip = Some(cx.t("menu.profile", &[]));
                     ui.set_id(p, "profile");
                 });
-                icon_button(ui, cx, "button", "menu_mods", "menu.mods", &[Arg::Int(cx.mods as i64)], 156.0, |c| open(c, "core:mods"));
+                // The editor is a square beside Mods.
+                ui.container(Style::row().gap(4.0).stretch(), |ui| {
+                    let mods = icon_button(ui, cx, "button", "menu_mods", "menu.mods", &[Arg::Int(cx.mods as i64)], 132.0, |c| {
+                        open(c, "core:mods")
+                    });
+                    ui.nodes[mods].style.grow = 1.0;
+                    let icon = cx.look.texture("menu_editor", "");
+                    let e = ui.button("button", Style::default().w(20.0).h(20.0), Rc::new(|c: &mut Ctx| open(c, "core:editor")), |ui| {
+                        if let Some(texture) = icon {
+                            ui.add(Kind::Image { texture, color: 0xFFFFFFFF }, Style::default().w(9.0).h(9.0).at(5.5, 5.5, [0.0, 0.0]));
+                        }
+                    });
+                    ui.nodes[e].tooltip = Some(cx.t("menu.editor", &[]));
+                    ui.set_id(e, "editor");
+                });
                 icon_button(ui, cx, "button", "menu_settings", "menu.settings", &[], 156.0, |c| open(c, "core:settings"));
                 parts(ui, cx, "core:title", "buttons");
                 ui.add(Kind::Container { class: None }, Style::default().h(6.0));
@@ -434,6 +450,7 @@ impl Screen for Pause {
             button(ui, cx, "menu.resume", &[], 200.0, |c| c.requests.push(Request::Close));
             button(ui, cx, "menu.multiplayer", &[], 200.0, |c| open(c, "core:multiplayer"));
             button(ui, cx, "menu.settings", &[], 200.0, |c| open(c, "core:settings"));
+            button(ui, cx, "menu.editor", &[], 200.0, |c| open(c, "core:editor"));
             parts(ui, cx, "core:pause", "buttons");
             button(ui, cx, "menu.save_quit", &[], 200.0, |c| c.requests.push(Request::LeaveWorld));
         });

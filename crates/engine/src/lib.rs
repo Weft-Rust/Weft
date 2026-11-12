@@ -16,6 +16,7 @@ pub mod config;
 pub mod content;
 pub mod dedicated;
 pub mod diag;
+pub mod editor;
 pub mod entries;
 pub mod features;
 pub mod game_screens;

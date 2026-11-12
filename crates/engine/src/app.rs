@@ -1305,6 +1305,13 @@ impl Running {
             ui.pressed = hovered;
             ui.focused = hovered.filter(|&h| matches!(ui.nodes[h].kind, Kind::Input { .. } | Kind::Slider { .. }));
             ui.anchor = None;
+            if let Some(f) = ui.focused
+                && let Some(at) = self.ui.caret_at(ui, f, cursor)
+                && let Kind::Input { caret, .. } = &mut ui.nodes[f].kind
+            {
+                *caret = at;
+                self.quads_dirty = true;
+            }
             if let Some(h) = hovered {
                 if let Kind::Text(t) = &ui.nodes[h].kind {
                     let r = ui.nodes[h].rect;
@@ -1367,8 +1374,9 @@ impl Running {
             self.quads_dirty = true;
         }
         if let Some(f) = ui.focused {
-            if let Kind::Input { value, caret, max, on_change } = &mut ui.nodes[f].kind {
-                let outcome = crate::ui::edit::Field { value, caret, anchor: &mut ui.anchor, max: *max }.handle(&self.input);
+            if let Kind::Input { value, caret, max, on_change, area } = &mut ui.nodes[f].kind {
+                let lines = area.is_some();
+                let outcome = crate::ui::edit::Field { value, caret, anchor: &mut ui.anchor, max: *max, lines }.handle(&self.input);
                 let (changed, moved) = (outcome.changed, outcome.moved);
                 if moved {
                     self.quads_dirty = true;
@@ -2093,6 +2101,9 @@ fn debug_keys(r: &mut Running) {
     if r.input.pressed("core:debug_options") && r.screens.is_empty() {
         r.open(screens::engine("core:debug_options"));
     }
+    if let Some(g) = r.game.as_mut().filter(|_| r.input.pressed("core:relight")) {
+        g.client.relight();
+    }
     for (key, group) in [("core:show_cubes", "cubes"), ("core:show_hitboxes", "hitboxes")] {
         if let Some(g) = r.game.as_mut().filter(|_| r.input.pressed(key)) {
             g.client.toggle_gizmo(group);
@@ -2677,13 +2688,16 @@ fn report_frame(r: &mut Running, dt: f64) {
         if b.done() {
             let extra = match &r.game {
                 Some(g) => format!(
-                    "pos {:.1} {:.1} {:.1}, cubes {}, draws {}, faces {}k, entities {}, regions {}",
+                    "pos {:.1} {:.1} {:.1}, cubes {}, draws {}, faces {}k, lod {} tiles {}k quads {}k drawn, entities {}, regions {}",
                     g.client.player.pos.x,
                     g.client.player.pos.y,
                     g.client.player.pos.z,
                     g.client.world.len(),
                     g.client.render.drawn,
                     g.client.render.faces_drawn / 1000,
+                    g.client.lod_stats().0,
+                    g.client.lod_stats().2 / 1000,
+                    g.client.render.lod_drawn / 1000,
                     g.client.entities.len(),
                     g.server.as_ref().map_or(0, |s| s.regions())
                 ),
