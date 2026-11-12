@@ -400,6 +400,10 @@ impl Client {
         let got = unsafe { (host().client_command_reply)(self.raw, id, &mut out) } != 0;
         got.then(|| unsafe { out.as_str() }.to_string())
     }
+
+    pub fn scroll(&self) -> f32 {
+        self.state().scroll
+    }
 }
 
 /// Which hand.

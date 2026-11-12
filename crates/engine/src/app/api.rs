@@ -234,6 +234,7 @@ pub unsafe extern "C" fn client_state(c: *mut abi::ClientCtx, out: *mut abi::Cli
             s.gpu_ms = r.gpu.gpu_times().iter().sum();
             s.window = r.gpu.surface_size().into();
             s.gui_scale = r.gui_scale();
+            s.scroll = r.input.scroll;
             s.screen = r
                 .screens
                 .last()

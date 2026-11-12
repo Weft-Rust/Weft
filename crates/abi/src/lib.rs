@@ -5395,6 +5395,7 @@ pub struct ClientState {
     pub player: u64,
     pub pos: Vec3,
     pub vel: Vec3,
+    pub scroll: f32,
     /// Radians, like `EntityState`.
     pub yaw: f32,
     pub pitch: f32,
@@ -5467,6 +5468,7 @@ defaults!(ClientState {
     vel: Vec3::ZERO,
     yaw: 0.0,
     pitch: 0.0,
+    scroll: 0.0,
     selected: 0,
     mode: 0,
     health: 0.0,
