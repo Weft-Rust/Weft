@@ -106,12 +106,9 @@ pub struct ClientEntity {
     pub item: ItemStack,
     pub health: f32,
     pub hurt: f32,
-    pub worn: Vec<u32>,
-    /// A player's item in hand, 0 for none.
-    pub held: u32,
-    /// And in the other hand.
-    pub off_held: u32,
-    pub held_stacks: [ItemStack; 2],
+    pub worn: Vec<ItemStack>,
+    pub held: ItemStack,
+    pub off_held: ItemStack,
     /// Into using what it holds, 0..1 (seconds for what is used until let go, `endless_use`),
     /// and whether with the other hand.
     pub using: Option<(f32, bool)>,
@@ -163,7 +160,7 @@ pub struct ClientEntity {
     /// Every effect on it, its level and the tick it ends (`ClientWorld::ticks`).
     pub effects: Vec<crate::world::OnEffect>,
     /// The items its kind shows (`registry::SHOWN`), 0 empty.
-    pub shown: Vec<u32>,
+    pub shown: Vec<ItemStack>,
     /// Solid bodies: where the server had them at its last ticks (tick, position), oldest
     /// first; they are shown `INTERP_TICKS` behind the server (`pose`).
     pub track: std::collections::VecDeque<(f64, DVec3)>,
@@ -328,6 +325,14 @@ fn fade_pose(now: f32, on: bool, dt: f32) -> f32 {
 }
 
 impl ClientEntity {
+    pub fn displayed(&self) -> impl Iterator<Item = ItemStack> + '_ {
+        [self.held, self.off_held, self.item]
+            .into_iter()
+            .chain(self.worn.iter().copied())
+            .chain(self.shown.iter().copied())
+            .filter(|s| !s.is_empty())
+    }
+
     /// The shader effect drawn on it at tick `now`: of several, the latest that `drawn` says has a
     /// shader.
     pub fn shader_effect(&self, now: u64, drawn: impl Fn(u32) -> bool) -> Option<(u32, f32)> {
@@ -338,7 +343,7 @@ impl ClientEntity {
             .map(|f| (f.id, 1.0))
     }
 
-    pub fn new(kind: u32, pos: DVec3, yaw: f32, pitch: f32, item: ItemStack) -> ClientEntity {
+    pub fn new(kind: u32, pos: DVec3, yaw: f32, pitch: f32) -> ClientEntity {
         ClientEntity {
             kind,
             pos,
@@ -359,14 +364,13 @@ impl ClientEntity {
             shown: Vec::new(),
             pitch,
             target_pitch: pitch,
-            item,
+            item: ItemStack::EMPTY,
             // Arrives as a component right after: no hurt flash for the first.
             health: f32::NAN,
             hurt: 0.0,
             worn: Vec::new(),
-            held: 0,
-            off_held: 0,
-            held_stacks: [ItemStack::EMPTY; 2],
+            held: ItemStack::EMPTY,
+            off_held: ItemStack::EMPTY,
             using: None,
             use_ticks: 0.0,
             stuck: None,
@@ -887,7 +891,7 @@ impl Client {
             joined: false,
             player_id: 0,
             sprint_stopped: false,
-            me: ClientEntity::new(content().game.player_kind, DVec3::ZERO, 0.0, 0.0, ItemStack::EMPTY),
+            me: ClientEntity::new(content().game.player_kind, DVec3::ZERO, 0.0, 0.0),
             drive: Drive::default(),
             key_ticks: Vec::new(),
             accum: 0.0,
@@ -2477,6 +2481,7 @@ impl Client {
 
     /// Copies an engine field component into the entity (or the own player) that shows it.
     fn engine_field(&mut self, id: u64, comp: u32, bytes: &[u8]) {
+        use crate::net::codec::Wire;
         let c = content();
         let crate::registry::FieldComps {
             health,
@@ -2496,6 +2501,7 @@ impl Client {
             permission,
             attributes,
             shown,
+            ground,
             // Only in its slot.
             trash: _,
         } = c.game.fields;
@@ -2510,6 +2516,9 @@ impl Client {
                 .filter(|&l| l != u32::MAX);
             (size, look)
         };
+        if [held, off_held, worn, shown, ground, shape].contains(&comp) {
+            self.entity_render.changed_items.insert(id);
+        }
         let mine = id == self.player_id;
         let other = self
             .entities
@@ -2544,14 +2553,13 @@ impl Client {
         } else if comp == burning {
             e.burning = bytes.first().is_some_and(|&b| b != 0);
         } else if comp == worn {
-            e.worn = words(bytes).map(u32::from_le_bytes).collect();
+            e.worn = Vec::<ItemStack>::get(&mut crate::net::codec::R(bytes)).unwrap_or_default();
         } else if comp == shown {
-            e.shown = words(bytes).map(u32::from_le_bytes).collect();
+            e.shown = Vec::<ItemStack>::get(&mut crate::net::codec::R(bytes)).unwrap_or_default();
+        } else if comp == ground {
+            e.item = ItemStack::get(&mut crate::net::codec::R(bytes)).unwrap_or_default();
         } else if comp == held {
-            use crate::net::codec::Wire;
-            let stack = ItemStack::get(&mut crate::net::codec::R(bytes)).unwrap_or_default();
-            e.held = stack.item;
-            e.held_stacks[0] = stack;
+            e.held = ItemStack::get(&mut crate::net::codec::R(bytes)).unwrap_or_default();
         } else if comp == swaps {
             e.swaps = parse_swaps(bytes);
         } else if comp == looping {
@@ -2561,10 +2569,7 @@ impl Client {
                 e.action = Some((name.into_owned(), ((arriving - e.born).max(0.0) / crate::world::TPS as f64) as f32, true));
             }
         } else if comp == off_held {
-            use crate::net::codec::Wire;
-            let stack = ItemStack::get(&mut crate::net::codec::R(bytes)).unwrap_or_default();
-            e.off_held = stack.item;
-            e.held_stacks[1] = stack;
+            e.off_held = ItemStack::get(&mut crate::net::codec::R(bytes)).unwrap_or_default();
         } else if comp == using {
             let v = words(bytes).next().map_or(0, u32::from_le_bytes);
             let ticks = (v & !(1 << 31)) as f32;
@@ -2627,18 +2632,11 @@ impl Client {
     fn update_glow(&mut self, c: &crate::content::Content) {
         let (now, light) = (self.ticks(), c.ids.light.unwrap_or(u32::MAX));
         let mut sources = Vec::new();
-        if !self.mode.has(crate::tag_bits::game_mode::HIDDEN) && !self.dead {
-            let mut own = vec![self.held(), self.off_held()];
-            let w = &c.game.player_layout.worn;
-            own.extend_from_slice(
-                self.inventory
-                    .get(w.start as usize..w.end as usize)
-                    .unwrap_or_default(),
-            );
-            let stored = self.components.get(&light).map(Vec::as_slice);
-            sources.push(glow::entity_glow(c, &self.me, now, self.player.pos, self.me.body_yaw, stored, &own));
-        }
-        let all = self.entities.iter().chain(&self.showing_blocks);
+        let mine = (!self.mode.has(crate::tag_bits::game_mode::HIDDEN) && !self.dead).then_some((&self.player_id, &self.me));
+        let all = mine
+            .into_iter()
+            .chain(self.entities.iter())
+            .chain(&self.showing_blocks);
         let hidden = |e: &ClientEntity| {
             e.effects.iter().any(|f| {
                 f.until > now
@@ -2649,34 +2647,13 @@ impl Client {
             })
         };
         for (id, e) in all.filter(|e| e.1.dying.is_none() && !hidden(e.1)) {
-            let shown: Vec<ItemStack> = [e.held, e.off_held]
-                .iter()
-                .chain(&e.worn)
-                .chain(&e.shown)
-                .filter(|&&i| i != 0)
-                .map(|&i| ItemStack::new(i, 1))
-                .chain([e.item])
-                .collect();
-            let stored = self.entity_components.get(&(*id, light)).map(Vec::as_slice);
-            sources.push(glow::entity_glow(c, e, now, e.pos, e.body_yaw, stored, &shown));
+            let stored = if *id == self.player_id { self.components.get(&light) } else { self.entity_components.get(&(*id, light)) }
+                .map(Vec::as_slice);
+            let pos = if *id == self.player_id { self.player.pos } else { e.pos };
+            sources.push(glow::entity_glow(c, e, now, pos, e.body_yaw, stored));
         }
         let eye = self.player.pos;
         self.world.set_glow(c, eye, sources);
-    }
-
-    /// Items the local player wears.
-    pub fn worn(&self) -> Vec<u32> {
-        let c = content();
-        let w = &c.game.player_layout.worn;
-        let slots = self
-            .inventory
-            .get(w.start as usize..w.end as usize)
-            .unwrap_or_default();
-        slots
-            .iter()
-            .filter(|s| !s.is_empty() && c.worn(s.item).is_some())
-            .map(|s| s.item)
-            .collect()
     }
 
     /// Wire of the world and of bodies, before the frame's passes.
@@ -2808,12 +2785,8 @@ impl Client {
     /// The local player as an entity.
     /// Brings `me` up to what prediction, the inventory and the hand say this frame.
     fn sync_me(&mut self) {
-        let w = &content().game.player_layout.worn;
-        let worn: Vec<u32> = self
-            .inventory
-            .get(w.start as usize..w.end as usize)
-            .map_or(Vec::new(), |s| s.iter().filter(|s| !s.is_empty()).map(|s| s.item).collect());
-        let (held, off_held) = (self.shown_held().item, self.off_held().item);
+        let worn = crate::content::equipped(content(), self.me.kind, &self.inventory).to_vec();
+        let (held, off_held) = (self.shown_held(), self.off_held());
         let into = |(held, all): (f32, f32)| if endless_use(all) { held / self.tick_rate as f32 } else { held / all.max(1.0) };
         let using = self.using.map(|u| (into(u), self.using_off));
         let me = &mut self.me;
@@ -2823,7 +2796,7 @@ impl Client {
         (me.arm_swing, me.swing_off, me.pose) = (self.hand_swing, self.hand_swing_off, self.player.pose);
         me.sprinting = self.player.sprinting && self.player.on_ground;
         me.age = self.start.elapsed().as_secs_f32();
-        self.player.swims_in = crate::content::swims_in(content(), self.me.kind, &self.worn());
+        self.player.swims_in = crate::content::swims_in(content(), self.me.kind, &self.me.worn);
     }
 
     /// Columns distant terrain takes from saved cubes.

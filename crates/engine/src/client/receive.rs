@@ -299,7 +299,8 @@ impl Client {
     fn spawn_entities(&mut self, list: Vec<crate::net::EntityView>) {
         for e in list {
             let to = if content().game.is_block_entity(e.kind) { &mut self.showing_blocks } else { &mut self.entities };
-            let mut shown = ClientEntity::new(e.kind, e.pos, e.yaw, e.pitch, e.item);
+            self.entity_render.changed_items.insert(e.id);
+            let mut shown = ClientEntity::new(e.kind, e.pos, e.yaw, e.pitch);
             (shown.born, shown.body_yaw, shown.body_target) = (e.born as f64, e.body_yaw, e.body_yaw);
             (shown.walk, shown.walk_target, shown.swing, shown.swing_target) = (e.strode, e.strode, e.stride, e.stride);
             to.insert(e.id, shown);

@@ -2604,11 +2604,9 @@ fn read_avatar(run_dir: &std::path::Path) -> Option<crate::net::AvatarData> {
 fn record_passes(r: &mut Running, info: &weft_render::FrameInfo, scale: f32) {
     r.list.clear();
     if let Some(g) = &mut r.game {
-        let worn = g.client.worn();
-        let held = [g.client.shown_held(), g.client.off_held()];
         g.client
             .entity_render
-            .preload(&mut *r.gpu, &r.assets, &g.client.entities, &worn, held);
+            .preload(&mut *r.gpu, &r.assets, &g.client.entities, &g.client.me);
         if g.client
             .entity_render
             .draw_icons(&mut *r.gpu, &mut r.list, info)
@@ -2618,12 +2616,15 @@ fn record_passes(r: &mut Running, info: &weft_render::FrameInfo, scale: f32) {
     }
     if let Some(g) = r.game.as_mut().filter(|_| !r.screens.is_empty()) {
         if let Some(&[x, y, w, h]) = r.previews.first() {
-            let worn = g.client.worn();
             let look = r.input.cursor - Vec2::new(x, y);
-            let tex =
-                g.client
-                    .entity_render
-                    .draw_preview(&mut *r.gpu, &mut r.list, info, [w.round() as u32, h.round() as u32], look, &worn);
+            let tex = g.client.entity_render.draw_preview(
+                &mut *r.gpu,
+                &mut r.list,
+                info,
+                [w.round() as u32, h.round() as u32],
+                look,
+                &g.client.me.worn,
+            );
             if tex != r.preview_tex {
                 r.preview_tex = tex;
                 r.quads_dirty = true;

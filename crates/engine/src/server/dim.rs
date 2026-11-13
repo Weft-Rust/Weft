@@ -384,6 +384,7 @@ impl Dim {
             permission,
             attributes,
             shown,
+            ground,
             ..
         } = c.game.fields;
         // What lives has attributes; a dropped item or a block's entity none worth sending. A
@@ -428,18 +429,19 @@ impl Dim {
                 }
                 None => {}
             };
+            put(comps, ground, &crate::stack::client_bytes(e.item));
             let slots = &c.game.entities[e.kind as usize].shown_slots;
             if !slots.is_empty() {
                 let inv = inventories.get(&e.id);
-                let items: Vec<u8> = slots
+                let items: Vec<ItemStack> = slots
                     .iter()
-                    .flat_map(|&s| {
+                    .map(|&s| {
                         inv.and_then(|i| i.get(s as usize))
-                            .map_or(0, |s| s.item)
-                            .to_le_bytes()
+                            .copied()
+                            .unwrap_or_default()
                     })
                     .collect();
-                put(comps, shown, &items);
+                put(comps, shown, &crate::stack::shown_bytes(&items));
             }
             // A block entity is heard of only for what it shows.
             if e.anchor.is_some() {
@@ -459,8 +461,8 @@ impl Dim {
             hp[4..].copy_from_slice(&max.to_le_bytes());
             put(comps, health, &hp);
             put(comps, burning, &[(e.fire > 0) as u8]);
-            let items: Vec<u8> = e.worn.iter().flat_map(|i| i.to_le_bytes()).collect();
-            put(comps, worn, &items);
+            let inv = inventories.get(&e.id).map_or(&[][..], Vec::as_slice);
+            put(comps, worn, &crate::stack::shown_bytes(crate::content::equipped(c, e.kind, inv)));
             let mut sh = [0u8; 16];
             let size = e.size.unwrap_or_default();
             for (i, v) in [size.width, size.height, size.eye].into_iter().enumerate() {
@@ -494,16 +496,10 @@ impl Dim {
                 let bytes: Vec<u8> = a.iter().flat_map(|v| v.to_le_bytes()).collect();
                 put(comps, attributes, &bytes);
             }
-            if let Some(inv) = inventories.get(&e.id) {
-                use crate::net::codec::Wire;
-                let item = crate::content::in_main_hand(c, e.kind, inv, e.selected);
-                let mut bytes = crate::net::codec::W::default();
-                crate::stack::for_client(item).put(&mut bytes);
-                put(comps, held, &bytes.0);
-                let off = crate::content::in_off_hand(c, e.kind, inv);
-                let mut bytes = crate::net::codec::W::default();
-                crate::stack::for_client(off).put(&mut bytes);
-                put(comps, off_held, &bytes.0);
+            for (comp, item) in
+                [(held, crate::content::in_main_hand(c, e.kind, inv, e.selected)), (off_held, crate::content::in_off_hand(c, e.kind, inv))]
+            {
+                put(comps, comp, &crate::stack::client_bytes(item));
             }
             let use_value = e.using.0 | (e.using.1 as u32) << 31;
             put(comps, using, &use_value.to_le_bytes());
@@ -2659,7 +2655,12 @@ impl Dim {
             let size = e.size.unwrap_or(k.size());
             let (pos, walk, hw) = (e.pos, e.walk, size.width as f64 / 2.0);
             let low = e.pose.def().tilt != abi::pose_tilt::UPRIGHT;
-            let swims = crate::content::swims_in(c, e.kind, &e.worn);
+            let inv = self
+                .entities
+                .inventories
+                .get(&id)
+                .map_or(&[][..], Vec::as_slice);
+            let swims = crate::content::swims_in(c, e.kind, crate::content::equipped(c, e.kind, inv));
             let block = super::space::CubeCells(&self.space.cubes);
             let swim_at = pos + DVec3::Y * if low { 0.1 } else { e.dims(c).eye };
             let in_liquid = crate::physics::liquid_at(c, &block, swim_at).is_some_and(|l| swims.get(l as usize) == Some(&true));

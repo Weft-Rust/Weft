@@ -108,6 +108,7 @@ pub fn all() -> Vec<TestDef> {
         extend::status_effects,
         extend::block_properties,
         sync::menu_sync,
+        sync::displayed_stacks,
         visual::liquid_layers,
         visual::break_overlay,
         visual::tooltips,

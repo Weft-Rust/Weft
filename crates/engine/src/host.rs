@@ -121,7 +121,7 @@ pub static HOST: Host = Host {
     client_bone_position: crate::app::api::client_bone_position,
     client_action_current: crate::app::api::client_entity_action,
     client_clip_length: crate::app::api::client_clip_length,
-    client_held_item: crate::app::api::client_entity_held,
+    client_displayed: crate::app::api::client_displayed,
     reg_packet,
     reg_mistake,
     launch_option: crate::app::api::launch_option,

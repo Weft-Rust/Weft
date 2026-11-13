@@ -751,7 +751,11 @@ unsafe fn with_entity<T>(
         if entity == g.client.player_id {
             return Some(f(&g.client, &g.client.me));
         }
-        g.client.entities.get(&entity).map(|e| f(&g.client, e))
+        g.client
+            .entities
+            .get(&entity)
+            .or_else(|| g.client.showing_blocks.get(&entity))
+            .map(|e| f(&g.client, e))
     }
 }
 
@@ -776,8 +780,24 @@ pub unsafe extern "C" fn client_clip_length(c: *mut abi::ClientCtx, entity: u64,
     }
 }
 
-pub unsafe extern "C" fn client_entity_held(c: *mut abi::ClientCtx, entity: u64, hand: u32) -> u32 {
-    unsafe { with_entity(c, entity, |_, e| if hand == abi::hand::OFF { e.off_held } else { e.held }).unwrap_or(0) }
+pub unsafe extern "C" fn client_displayed(c: *mut abi::ClientCtx, entity: u64, source: u32, out: *mut ItemStack, max: usize) -> usize {
+    unsafe {
+        with_entity(c, entity, |_, e| {
+            let hands = [e.held, e.off_held];
+            let stacks = match source {
+                abi::display_source::HANDS => &hands[..],
+                abi::display_source::EQUIPMENT => &e.worn,
+                abi::display_source::SHOWN => &e.shown,
+                abi::display_source::GROUND => std::slice::from_ref(&e.item),
+                _ => &[],
+            };
+            for (i, stack) in stacks.iter().take(max).enumerate() {
+                *out.add(i) = *stack;
+            }
+            stacks.len()
+        })
+        .unwrap_or(0)
+    }
 }
 
 pub unsafe extern "C" fn client_bone_position(c: *mut abi::ClientCtx, entity: u64, bone: Str, out: *mut abi::Vec3) -> u32 {

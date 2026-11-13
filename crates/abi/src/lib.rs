@@ -956,8 +956,11 @@ pub mod comp {
             ("component.keep_on_respawn", f::KEEP_ON_RESPAWN),
             ("component.carried", f::CARRIED),
         ];
-        pub const STACK_FLAGS: [(&str, u32); 2] =
-            [("component.server_only", crate::stack_flags::SERVER_ONLY), ("component.no_save", crate::stack_flags::NO_SAVE)];
+        pub const STACK_FLAGS: [(&str, u32); 3] = [
+            ("component.server_only", crate::stack_flags::SERVER_ONLY),
+            ("component.no_save", crate::stack_flags::NO_SAVE),
+            ("component.visual", crate::stack_flags::VISUAL),
+        ];
     }
 
     /// A recipe's (`entry_kind::RECIPE`): `KIND` (`str`, a recipe kind), `PATTERN` (`[str]`, rows
@@ -4185,7 +4188,7 @@ pub struct Host {
     /// Seconds a clip of an action takes on `entity`; below 0 if it has none.
     pub client_clip_length: unsafe extern "C" fn(c: *mut ClientCtx, entity: u64, name: Str) -> f32,
     /// The item in `entity`'s `hand`; 0 for none.
-    pub client_held_item: unsafe extern "C" fn(c: *mut ClientCtx, entity: u64, hand: u32) -> u32,
+    pub client_displayed: unsafe extern "C" fn(c: *mut ClientCtx, entity: u64, source: u32, out: *mut ItemStack, max: usize) -> usize,
     /// Where a bone of what `entity` is or has on was, the last frame. 0 if there is none.
     pub client_bone_position: unsafe extern "C" fn(c: *mut ClientCtx, entity: u64, bone: Str, out: *mut Vec3) -> u32,
     /// Message channel `name` between a mod's client and server parts, carrying values of
@@ -4539,7 +4542,15 @@ pub mod gizmo_kind {
     pub const FILL: u32 = 2;
 }
 
-/// Which hand (`Host::client_held_item`).
+/// Sources of displayed stacks (`Host::client_displayed`). Slot order and empty slots are preserved.
+pub mod display_source {
+    pub const HANDS: u32 = 0;
+    pub const EQUIPMENT: u32 = 1;
+    pub const SHOWN: u32 = 2;
+    pub const GROUND: u32 = 3;
+}
+
+/// Which hand.
 pub mod hand {
     pub const MAIN: u32 = 0;
     pub const OFF: u32 = 1;
@@ -5372,6 +5383,8 @@ pub mod stack_flags {
     pub const SERVER_ONLY: u32 = 1;
     /// Not written to saves.
     pub const NO_SAVE: u32 = 2;
+    /// Read by an item's conditional look. Only public visual data participates in its cache.
+    pub const VISUAL: u32 = 4;
 }
 
 crate::data! {
@@ -5400,6 +5413,8 @@ pub struct ItemModelArgs {
     pub stack: ItemStack,
     pub model: Str,
     pub texture: Str,
+    pub worn_model: Str,
+    pub worn_texture: Str,
 }
 
 /// One entity on the client, for `comp::entity::FRAMES`.

@@ -2666,9 +2666,9 @@ impl ItemBuilder<'_> {
     pub fn modifier(self, m: crate::Modifier) -> Self {
         self.push(&crate::component::MODIFIERS, m.0)
     }
-    /// How a stack of it looks by what is in it, decided once per kind of stack (its data):
-    /// `.condition(|s, v| if s.wear() > 0 { v.texture("can_empty"); })`. Other players' hands
-    /// show the usual look: their stacks aren't sent.
+    /// How a stack looks, wherever it is displayed. Reads public components marked
+    /// `stack_flags::VISUAL` (wear is marked by default); count is normalized to one.
+    /// The result is cached until those components change.
     pub fn condition(self, f: impl Fn(&abi::ItemStack, &mut Looks) + Send + Sync + 'static) -> Self {
         let cb = callback(move |a: &mut abi::ItemModelArgs| {
             let mut v = Looks::default();
@@ -2676,7 +2676,8 @@ impl ItemBuilder<'_> {
             LOOKS.with(|l| {
                 *l.borrow_mut() = v;
                 let l = l.borrow();
-                (a.model, a.texture) = (Str::new(&l.model), Str::new(&l.texture));
+                (a.model, a.texture, a.worn_model, a.worn_texture) =
+                    (Str::new(&l.model), Str::new(&l.texture), Str::new(&l.worn_model), Str::new(&l.worn_texture));
             });
         });
         self.set(&crate::comps::item::CONDITION, cb)
@@ -2882,9 +2883,21 @@ impl ItemBuilder<'_> {
 pub struct Looks {
     model: String,
     texture: String,
+    worn_model: String,
+    worn_texture: String,
 }
 
 impl Looks {
+    /// A model attached to a bone while this stack is in equipment.
+    pub fn worn_model(&mut self, model: &str, bone: &str) -> &mut Self {
+        self.worn_model = format!("{}@{bone}", crate::asset("", model));
+        self
+    }
+    /// A texture on the wearer's armor geometry, under `entity/`.
+    pub fn worn_texture(&mut self, texture: &str) -> &mut Self {
+        self.worn_texture = crate::asset("entity", texture);
+        self
+    }
     /// A texture from `item/` instead of its own.
     pub fn texture(&mut self, t: &str) -> &mut Self {
         self.texture = crate::asset("item", t);

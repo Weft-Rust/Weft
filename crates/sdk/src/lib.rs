@@ -34,7 +34,7 @@ pub use abi::{
     Who, hitbox_part, hitbox_part_id, hud_anchor, tool_tier,
 };
 pub use camera::{Shot, cameras, easing, shot};
-pub use client::{Channel, Client, Hand, Packet, Payload, keys, launch_option, screens};
+pub use client::{Channel, Client, DisplaySource, Hand, Packet, Payload, keys, launch_option, screens};
 pub use command::{ClientCommand, Command, CommandOptions, ServerCommand};
 pub use component::*;
 pub use config::*;

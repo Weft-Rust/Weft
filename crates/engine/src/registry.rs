@@ -697,6 +697,7 @@ fn engine_components() -> Vec<RawEntry> {
         (BURNING, "u8", shown, vec![0]),
         (abi::comp::LIGHT, "[u8;3]", own, vec![0; 3]),
         (SHOWN, "bytes", shown, Vec::new()),
+        (GROUND, "bytes", shown, Vec::new()),
         (WORN, "bytes", shown, Vec::new()),
         (SHAPE, "bytes", own, shape),
         (HELD, "bytes", shown, Vec::new()),
@@ -1878,10 +1879,11 @@ pub const TIMERS: &str = "core:timers";
 /// Engine fields clients show, kept as synced components (`Dim::mirror_fields`): health and
 /// max health (`[f32; 2]`, max only for players), on fire (`u8`), worn items (`u32` each), own
 /// size and look (`[f32; 3]` with width 0 for the kind's, `u32` kind with `u32::MAX` for its own),
-/// a player's item in hand (`u32`, 0 for none).
+/// and displayed public stacks (the stack wire codec).
 pub const HEALTH: &str = "core:health";
 pub const BURNING: &str = "core:burning";
 pub const WORN: &str = "core:worn";
+pub const GROUND: &str = "core:ground";
 pub const SHAPE: &str = "core:shape";
 pub const HELD: &str = "core:held";
 pub const OFF_HELD: &str = "core:off_held";
@@ -1898,7 +1900,7 @@ pub const RIDING: &str = "core:riding";
 /// with its body) and its own yaw there (`f32`); empty while it isn't. Clients hold it on the
 /// bone of the model it went into.
 pub const STUCK: &str = "core:stuck";
-/// Entity component (`[u32]`, synced to watchers): the items in its kind's `SHOWN_SLOTS`, 0 empty.
+/// Entity component (stack list wire codec, synced to watchers): its kind's `SHOWN_SLOTS`.
 pub const SHOWN: &str = "core:shown";
 use abi::comp::{ATTRIBUTES, GAME_MODE, PERMISSION};
 /// Entity component (`ItemStack`, not saved): what a player last put in its trash
@@ -1928,6 +1930,7 @@ pub struct FieldComps {
     pub permission: u32,
     pub attributes: u32,
     pub shown: u32,
+    pub ground: u32,
     pub trash: u32,
 }
 
@@ -2450,6 +2453,7 @@ fn freeze_entity_storage(
         permission: id(PERMISSION),
         attributes: id(ATTRIBUTES),
         shown: id(SHOWN),
+        ground: id(GROUND),
         trash: id(TRASH),
     };
     g.simulated_comp = g.component_names[SIMULATED];

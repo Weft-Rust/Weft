@@ -512,7 +512,7 @@ pub fn in_off_hand(c: &Content, kind: u32, inventory: &[weft_abi::ItemStack]) ->
 }
 
 /// By liquid, whether `kind` wearing `worn` swims in it: what its `comp::SWIMS_IN` and theirs take.
-pub fn swims_in(c: &Content, kind: u32, worn: &[u32]) -> Vec<bool> {
+pub fn swims_in(c: &Content, kind: u32, worn: &[abi::ItemStack]) -> Vec<bool> {
     use crate::components as comps;
     let id = c.components.id(weft_abi::comp::SWIMS_IN);
     let matchers: Vec<u32> = id
@@ -520,7 +520,8 @@ pub fn swims_in(c: &Content, kind: u32, worn: &[u32]) -> Vec<bool> {
         .flat_map(|id| {
             c.components.get(comps::ENTITY, kind, id).into_iter().chain(
                 worn.iter()
-                    .filter_map(move |&i| c.components.get(comps::ITEM, i, id)),
+                    .filter(|s| !s.is_empty())
+                    .filter_map(move |s| c.stack_value::<u32>(s, Some(id))),
             )
         })
         .collect();
@@ -528,6 +529,14 @@ pub fn swims_in(c: &Content, kind: u32, worn: &[u32]) -> Vec<bool> {
         .iter()
         .map(|l| matchers.iter().any(|&m| c.matchers.has(m, l.first_state)))
         .collect()
+}
+
+/// Equipment slots, including empty slots and items without a worn model.
+pub fn equipped<'a>(c: &Content, kind: u32, inventory: &'a [abi::ItemStack]) -> &'a [abi::ItemStack] {
+    let slots = &c.game.entities[kind as usize].worn;
+    inventory
+        .get(slots.start as usize..slots.end as usize)
+        .unwrap_or_default()
 }
 
 /// What the main hand really holds: an item that needs both hands does nothing while the other
@@ -900,7 +909,6 @@ pub struct Ids {
     pub conductor: Option<u32>,
     pub worn: Option<u32>,
     pub loot_rolls: Option<u32>,
-    pub worn_texture: Option<u32>,
     pub wear_per_hit: Option<u32>,
     pub spawn_egg: Option<u32>,
     pub attack_speed: Option<u32>,
@@ -1388,14 +1396,15 @@ impl Content {
         self.components.get(comps::BLOCK, state, comp?)
     }
 
-    /// Worn look of an item: inflation and texture.
-    pub fn worn(&self, item: u32) -> Option<(abi::Worn, &str)> {
-        let w = self.item_value::<abi::Worn>(item, self.ids.worn)?;
-        Some((
-            w,
-            self.components
-                .text(comps::ITEM, item, self.ids.worn_texture?)?,
-        ))
+    /// Worn look of a stack: inflation and texture, independent of slot effects.
+    pub fn worn(&self, stack: &abi::ItemStack) -> Option<(abi::Worn, &str)> {
+        if stack.is_empty() {
+            return None;
+        }
+        let w = self.stack_value::<abi::Worn>(stack, self.ids.worn)?;
+        let conditional = crate::stack::look(*stack).worn_texture;
+        let texture = if conditional.is_empty() { crate::stack::text(*stack, abi::comp::WORN_TEXTURE)? } else { conditional };
+        Some((w, texture))
     }
 
     /// The roles (`1 << role`) of the wearer's bones an item covers, from its equipment slot.
@@ -2759,7 +2768,6 @@ fn component_ids(components: &Components) -> Ids {
         conductor: id(abi::comp::CONDUCTOR),
         worn: id(abi::comp::WORN),
         loot_rolls: id(abi::comp::LOOT_ROLLS),
-        worn_texture: id(abi::comp::WORN_TEXTURE),
         wear_per_hit: id(abi::comp::WEAR_PER_HIT),
         spawn_egg: id(abi::comp::SPAWN_EGG),
         attack_speed: id(abi::comp::ATTACK_SPEED),
@@ -3719,10 +3727,16 @@ fn freeze_loot(
 }
 
 fn collect_stack_flags(decls: &[crate::registry::ComponentDecl], components: &Components) -> FxHashMap<u32, u32> {
-    decls
+    let mut flags: FxHashMap<u32, u32> = decls
         .iter()
         .filter_map(|d| Some((components.id(&d.name)?, d.stack?)))
-        .collect()
+        .collect();
+    for name in [abi::comp::WEAR, abi::comp::LAYERS, abi::comp::MODEL, abi::comp::WORN, abi::comp::WORN_MODEL, abi::comp::WORN_TEXTURE] {
+        if let Some(id) = components.id(name) {
+            *flags.entry(id).or_default() |= abi::stack_flags::VISUAL;
+        }
+    }
+    flags
 }
 
 fn link_particles(game: &mut crate::registry::Game, textures: &mut Interner) {

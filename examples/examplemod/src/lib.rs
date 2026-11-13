@@ -277,7 +277,10 @@ fn client(_r: &mut Registry) {
     // A stack with data of its own, what a custom workbench might make:
     // static GRADE: Component<u32> = Component::named("grade");
     // static CHISEL: Item = Item::named("chisel");
-    // r.stack_component(&GRADE, 0);
+    // r.stack_component(&GRADE, abi::stack_flags::VISUAL);
+    // r.item(&CHISEL).condition(|s, look| {
+    //     if GRADE.on_stack(s).unwrap_or(0) > 2 { look.model("chisel_fine"); }
+    // });
     // fn made(grade: u32) -> ItemStack { CHISEL.stack(1).with(&GRADE, grade).with_wear(5) }
     //
     // Sparks around a mob while it lives, the engine's steps and idle noises kept (`.own_effects()`

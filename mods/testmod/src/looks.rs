@@ -48,7 +48,45 @@ static WISP_SPARKS: Config<i32> = Config::named("wisp_sparks");
 static DREAM_STRENGTH: Config<f32> = Config::named("dream_strength");
 static DREAM_STYLE: Config<u32> = Config::named("dream_style");
 
+static DISPLAY_PHASE: Component<u32> = Component::named("testmod:display_phase");
+static DISPLAY_PARTS: Storage = Storage::named("testmod:display_parts");
+static DISPLAY_TOKEN: Item = Item::named("display_token");
+static DISPLAY_CARRIER: EntityKind = EntityKind::named("display_carrier");
+static DISPLAY_LOOK_CALLS: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+
 pub fn register(r: &mut Registry) {
+    r.stack_component(&DISPLAY_PHASE, abi::stack_flags::VISUAL);
+    r.storage(&DISPLAY_PARTS, 1).stack(abi::stack_flags::VISUAL);
+    r.item(&DISPLAY_TOKEN)
+        .wearable(&base_api::HEAD, 0.5, "base:armor/iron_1")
+        .condition(|s, look| {
+            DISPLAY_LOOK_CALLS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            match DISPLAY_PHASE.on_stack(s).unwrap_or(0) {
+                0 => {
+                    look.model("testmod:katana")
+                        .worn_model("testmod:fox_tail", "body");
+                }
+                1 => {
+                    look.model("testmod:katana_broken")
+                        .worn_texture("base:armor/diamond_1");
+                }
+                _ => {}
+            }
+        });
+    r.entity(&DISPLAY_CARRIER)
+        .size(0.6, 1.8)
+        .kinematic()
+        .inventory(2)
+        .equipment()
+        .shown_slots(&[1, 0])
+        .model(humanoid(false))
+        .texture("base:zombie")
+        .no_egg();
+    r.client_command("display_calls", "<sample:word>", |cmd| {
+        let sample = cmd.text("sample").unwrap_or_default().to_string();
+        let calls = DISPLAY_LOOK_CALLS.load(std::sync::atomic::Ordering::Relaxed);
+        cmd.reply("command.testmod.display_calls", &[Arg::Text(&sample), Arg::Int(calls as i64)]);
+    });
     r.config(&GENERATOR_HUM).bool(true);
     // The server decides how much its wisps sparkle; joining players get its value.
     r.config(&WISP_SPARKS).int(2, 0, 10).server();
