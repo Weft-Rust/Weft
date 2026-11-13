@@ -17,8 +17,12 @@ pub async fn displayed_stacks(t: T) -> R {
 
     async fn look_calls(t: &T, sample: &str) -> Result<u32, String> {
         let reply = t.cmd(&format!("/display_calls {sample}")).await?;
-        reply.split_whitespace().last().ok_or_else(|| format!("missing display count: {reply}"))?
-            .parse().map_err(|e| format!("display count: {reply}: {e}"))
+        reply
+            .split_whitespace()
+            .last()
+            .ok_or_else(|| format!("missing display count: {reply}"))?
+            .parse()
+            .map_err(|e| format!("display count: {reply}: {e}"))
     }
 
     t.flat().await?;
