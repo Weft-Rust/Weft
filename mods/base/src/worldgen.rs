@@ -56,6 +56,7 @@ pub static BUSH_COVER: Component<f32> = Component::named("bush");
 pub static FUNGI_COVER: Component<f32> = Component::named("fungi");
 pub static FLOWER_COVER: Component<f32> = Component::named("flower");
 pub static FERN_COVER: Component<f32> = Component::named("fern");
+pub static BLUEGRASS_COVER: Component<f32> = Component::named("bluegrass");
 /// Flowers a biome grows, picked evenly (`"base:dandelion base:rose"` where unset).
 pub static FLOWERS: Component<BlockList> = Component::named("flowers");
 /// On a log, the tree it grows into: `round <leaves>` (like oaks, 4-6 high) or `cone <leaves>`
@@ -68,6 +69,7 @@ static DRY: Tag = Tag::named("dry");
 
 pub static PLAINS: Biome = Biome::named("plains");
 pub static LAVENDER_FIELDS: Biome = Biome::named("lavender_fields");
+pub static HILLS: Biome = Biome::named("hills");
 pub static FOREST: Biome = Biome::named("forest");
 pub static BIRCH_FOREST: Biome = Biome::named("birch_forest");
 pub static TAIGA: Biome = Biome::named("taiga");
@@ -351,6 +353,16 @@ pub fn register(r: &mut Registry) {
         .set(&SNOWBERRY_COVER, 0.002)
         .set_text(&FLOWERS, "base:lavender")
         .set(&FLOWER_COVER, 0.1);
+    r.biome(&HILLS)
+        .surface("grass", "dirt", 3)
+        .tag("animals")
+        .tint(grass, 0x88bb67)
+        .tint(foliage, 0x6ba941)
+        .set(&GRASS_COVER, 0.5)
+        .set(&TALL_GRASS_COVER, 0.1)
+        .set(&BOULDER_COVER, 0.03)
+        .set(&BLUEGRASS_COVER, 0.2)
+        .set_text(&FLOWERS, "base:lavender base:rose base:dandelion");
     r.biome(&FOREST)
         .humidity(0.25..)
         .surface("grass", "dirt", 3)
@@ -467,10 +479,8 @@ pub fn register(r: &mut Registry) {
         .sea(SEA, "water")
         .field("temperature", Expr::fbm(0x22, 2200.0, 3) * Expr::value(1.4))
         .field("humidity", Expr::fbm(0x33, 1600.0, 3) * Expr::value(1.4))
-        .field(
-            "base:weirdness",
-            Expr::fbm(0x4A7, 700.0, 3).ramp(-0.2, 0.2),
-        )
+        .field("base:weirdness", Expr::fbm(0x4A7, 700.0, 3).ramp(-0.2, 0.2))
+        .field("base:randomness", Expr::fbm(0x4A7, 700.0, 3).ramp(-0.2, 0.2))
         .landform(preset::continents(18.0))
         // Biomes shape the land through their climate, not their borders, so nothing seams:
         // the cold flattens hills into tundra, deserts get dunes.
@@ -526,6 +536,7 @@ pub fn register(r: &mut Registry) {
         .rule(BiomeRule::new("desert"))
         .rule(BiomeRule::new("forest"))
         .rule(BiomeRule::new("birch_forest"))
+        .rule(BiomeRule::new("hills").field("base:randomness", 0.5..).height(SEA + 30..))
         .rule(BiomeRule::new("lavender_fields").field("base:weirdness", 0.6..))
         .rule(BiomeRule::new("plains"))
         .cave_biome("deep_caves", 24, 96.0, 0.25)
@@ -866,6 +877,7 @@ fn decorate(g: &mut Gen) {
             let grass_chance = GRASS_COVER.on_biome(b).unwrap_or(0.05) as f64;
             let flower_chance = FLOWER_COVER.on_biome(b).unwrap_or(0.012) as f64;
             let fern_chance = FERN_COVER.on_biome(b).unwrap_or(0.0) as f64;
+            let bluegrass_chance = BLUEGRASS_COVER.on_biome(b).unwrap_or(0.0) as f64;
             // What is under the lowest layer takes a look at the terrain: only if anything would grow.
             if y == 0 && roll >= grass_chance.max(0.08) && roll >= tall_grass_chance.max(0.08) {
                 continue;
@@ -883,7 +895,13 @@ fn decorate(g: &mut Gen) {
                 // roll ∈ [grass_chance; fern_chance)
                 } else if roll < fern_chance {
                     g.set(x, y, z, FERN.id());
-                // roll ∈ [fern_chance; tall_grass_chance)
+                // roll ∈ [fern_chance; bluegrass_chance)
+                } else if roll < bluegrass_chance {
+                    let wave = fixed::fbm(fixed::seed32(seed, 0x7A11) + 1, wx * 16, wz * 16, 48 * 16, 3);
+                    if wave < 0 {
+                        g.set(x, y, z, BLUEGRASS.id());
+                    }
+                // roll ∈ [bluegrass_chance; tall_grass_chance)
                 } else if roll < tall_grass_chance {
                     let wave = fixed::fbm(fixed::seed32(seed, 0x7A11), wx * 16, wz * 16, 48 * 16, 3);
                     if wave > 0 {
