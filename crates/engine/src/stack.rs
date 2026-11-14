@@ -5,6 +5,7 @@
 //! components by name.
 
 use std::sync::{Arc, OnceLock};
+use weft_abi::entry_kind as ek;
 
 use parking_lot::RwLock;
 use rustc_hash::FxHashMap;
@@ -365,7 +366,7 @@ pub fn contents_from_names(c: &crate::content::Content, b: &[u8]) -> Vec<u8> {
     let Some(n) = u32::get(&mut r) else { return out };
     for _ in 0..n.min(1 << 12) {
         let (Some(name), Some(count), Some(data)) = (String::get(&mut r), u32::get(&mut r), get_named(&mut r)) else { break };
-        let item = c.item_names.get(&name).copied().filter(|_| count > 0);
+        let item = c.game.catalog.find(ek::ITEM, &name).filter(|_| count > 0);
         let (item, count, data) = item.map_or((0, 0, 0), |i| (i, count, data));
         out.extend([item, count, data].iter().flat_map(|v| v.to_le_bytes()));
     }
@@ -423,6 +424,45 @@ pub fn from_names(list: Vec<(String, Vec<u8>)>) -> u32 {
             })
             .collect(),
     )
+}
+
+/// Space for this stack in a slot with the given insertion limit.
+pub fn room_in(current: ItemStack, incoming: ItemStack, limit: u32) -> u32 {
+    if current.is_empty() {
+        limit
+    } else if current.stacks_with(&incoming) {
+        limit.saturating_sub(current.count)
+    } else {
+        0
+    }
+}
+
+/// Matching stacks first, then empty slots. Access reads on None and writes on Some.
+pub fn insert_into(
+    mut incoming: ItemStack,
+    slots: impl Iterator<Item = usize> + Clone,
+    mut access: impl FnMut(usize, Option<ItemStack>) -> ItemStack,
+    limit: impl Fn(usize, ItemStack) -> u32,
+) -> ItemStack {
+    for empty in [false, true] {
+        for i in slots.clone() {
+            if incoming.is_empty() {
+                return ItemStack::EMPTY;
+            }
+            let current = access(i, None);
+            if current.is_empty() != empty {
+                continue;
+            }
+            let n = incoming
+                .count
+                .min(room_in(current, incoming, limit(i, current)));
+            if n != 0 {
+                access(i, Some(ItemStack { count: if empty { n } else { current.count + n }, ..incoming }));
+                incoming.count -= n;
+            }
+        }
+    }
+    if incoming.is_empty() { ItemStack::EMPTY } else { incoming }
 }
 
 #[cfg(test)]

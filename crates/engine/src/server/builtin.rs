@@ -2,7 +2,7 @@
 //! side by side, so a listed command always has one.
 
 use glam::{DVec3, IVec3};
-use weft_abi::{ItemStack, Who, damage_cause as damage};
+use weft_abi::{ItemStack, Who, damage_cause as damage, entry_kind as ek};
 
 use super::Server;
 use crate::commands::Args;
@@ -132,7 +132,7 @@ fn structure(s: &mut Server, x: &Ctx) -> Vec<Msg> {
         let at = a.pos("pos").unwrap_or(x.here).floor().as_ivec3();
         let t = crate::template::Transform::new(a.int("transform").unwrap_or(0).clamp(0, 7) as u32);
         let file_def;
-        let def = match c.template_names.get(name) {
+        let def = match c.game.catalog.ids(ek::TEMPLATE).get(name) {
             Some(&t) => &c.templates[t as usize],
             None => {
                 let Some(path) = s.structures_dir().map(|d| d.join(format!("{name}.json"))) else {
@@ -463,7 +463,7 @@ fn weather(s: &mut Server, x: &Ctx) -> Vec<Msg> {
         return say("weather.none", Vec::new());
     }
     let named = x.a.text("weather").unwrap_or("");
-    let names = &x.c.game.weather_names;
+    let names = x.c.game.catalog.ids(ek::WEATHER);
     let Some(&w) = names
         .get(named)
         .or_else(|| names.get(&format!("core:{named}")))
@@ -522,7 +522,7 @@ fn heal(s: &mut Server, x: &Ctx) -> Vec<Msg> {
 fn effect(s: &mut Server, x: &Ctx) -> Vec<Msg> {
     let c = x.c;
     let named = x.a.text("effect");
-    let names = &c.game.entity_effect_names;
+    let names = c.game.catalog.ids(ek::ENTITY_EFFECT);
     let found = named.map(|n| {
         names.get(n).copied().or_else(|| {
             let mut short = names

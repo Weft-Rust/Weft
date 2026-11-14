@@ -716,41 +716,8 @@ impl UiRenderer {
 
     /// An item's own picture, what it shows until its model has one or without a model.
     fn plain_icon(&mut self, c: &Content, tex: &GameTextures, x: f32, y: f32, size: f32, stack: &weft_abi::ItemStack) {
-        let item = stack.item;
         let looks = crate::client::looks::current();
-        match looks.item_draw(c, item) {
-            // Its own pictures, one over the other.
-            crate::client::looks::ItemDraw::Icon(_) if crate::stack::layers(stack).is_some() => self.quads.push(Quad {
-                p0: [x, y],
-                u: [size, 0.0],
-                v: [0.0, size],
-                uv: [0.0, 0.0, 1.0, 1.0],
-                color: 0xFFFFFFFF,
-                tex: tex.texture(tex.layered(crate::stack::layers(stack).unwrap_or_default())),
-                mode: ui_mode::ICON,
-                ..Default::default()
-            }),
-            crate::client::looks::ItemDraw::Model(model) => self.boxes_icon(c, tex, x, y, size, model, &c.states[0]),
-            crate::client::looks::ItemDraw::Icon(icon) => self.quads.push(Quad {
-                p0: [x, y],
-                u: [size, 0.0],
-                v: [0.0, size],
-                uv: [0.0, 0.0, 1.0, 1.0],
-                // A liquid's item is its texture, tinted as the liquid is (water is gray).
-                color: c
-                    .item_fluid
-                    .get(&item)
-                    .and_then(|&l| c.states.get(c.liquids[l as usize].first_state as usize))
-                    .filter(|s| s.tint != 0)
-                    .map_or(0xFFFFFFFF, |s| c.kind_color(s.tint, self.biome) << 8 | 0xFF),
-                tex: tex.texture(icon),
-                mode: ui_mode::ICON,
-                ..Default::default()
-            }),
-            // Its front on the left face, as vanilla's furnace in a slot.
-            crate::client::looks::ItemDraw::Block(state) => self.state_icon(c, tex, x, y, size, c.facing_toward(state, "south")),
-            crate::client::looks::ItemDraw::Nothing => {}
-        }
+        self.draw_icon(c, tex, x, y, size, looks.item_draw(c, stack, self.biome, "south"));
     }
 
     /// The picture of what `stack` shows as if that is a model, drawn by now.
@@ -764,26 +731,32 @@ impl UiRenderer {
         }
     }
 
+    fn draw_icon(&mut self, c: &Content, tex: &GameTextures, x: f32, y: f32, size: f32, draw: crate::client::looks::ItemDraw<'_>) {
+        match draw {
+            crate::client::looks::ItemDraw::Model { boxes, state } => {
+                self.boxes_icon(c, tex, x, y, size, &boxes, &c.states[state as usize])
+            }
+            draw => {
+                for sprite in draw.sprites() {
+                    self.quads.push(Quad {
+                        p0: [x, y],
+                        u: [size, 0.0],
+                        v: [0.0, size],
+                        uv: [0.0, 0.0, 1.0, 1.0],
+                        color: sprite.color << 8 | 0xFF,
+                        tex: tex.texture(sprite.texture(tex)),
+                        mode: ui_mode::ICON,
+                        ..Default::default()
+                    });
+                }
+            }
+        }
+    }
+
     /// A block state the way block items show: a sprite for flat blocks, else an isometric model.
     pub fn state_icon(&mut self, c: &Content, tex: &GameTextures, x: f32, y: f32, size: f32, state: u32) {
-        let Some(s) = c.states.get(state as usize) else { return };
         let looks = crate::client::looks::current();
-        if let Some(t) = looks.block_sprite(state, s) {
-            for l in crate::client::mesher::face_layers(c, s, t, 0).iter() {
-                self.quads.push(Quad {
-                    p0: [x, y],
-                    u: [size, 0.0],
-                    v: [0.0, size],
-                    uv: [0.0, 0.0, 1.0, 1.0],
-                    color: c.kind_color(l.tint, self.biome) << 8 | 0xFF,
-                    tex: tex.texture(l.tex),
-                    mode: ui_mode::ICON,
-                    ..Default::default()
-                });
-            }
-            return;
-        }
-        self.boxes_icon(c, tex, x, y, size, &looks.block_shape(state, s), s);
+        self.draw_icon(c, tex, x, y, size, looks.block_draw(c, state, self.biome));
     }
 
     /// Texture `texture` (`Content::textures`) flat over `r`, as an item's picture shows.

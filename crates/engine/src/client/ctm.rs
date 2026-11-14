@@ -38,6 +38,7 @@
 //! a block this applies to has holes, so what is next to it is drawn.
 
 use std::sync::{Arc, RwLock};
+use weft_abi::entry_kind as ek;
 
 use rustc_hash::{FxHashMap, FxHashSet};
 
@@ -76,7 +77,7 @@ struct Rule {
     /// The block states it is for, a bit each (`refs::compile`); empty: any.
     blocks: Vec<u64>,
     heights: Vec<(i32, i32)>,
-    biomes: Option<(bool, Vec<u64>)>,
+    biomes: Option<Vec<u64>>,
     tiles: Vec<u32>,
     /// Per tile the model it is in `Ctm::models`, or `NO_MODEL`. Empty: only textures.
     models: Vec<u32>,
@@ -403,7 +404,7 @@ pub fn load(assets: &Assets, c: &Content, looks: &Looks, mut names: Names) -> (C
             };
             // A matcher like anywhere else: names, `name[prop=value]`, `#tag`, `#pattern/*`, `!`.
             let blocks = kv.get("blocks").map_or(Vec::new(), |v| {
-                crate::refs::compile(v, &c.block_names, &c.blocks, &c.components).unwrap_or_else(|e| {
+                crate::refs::compile(v, c.game.catalog.ids(ek::BLOCK), &c.blocks, &c.components).unwrap_or_else(|e| {
                     log::error!("{name}.ctm: blocks: {e}");
                     // No block, rather than every block.
                     vec![0]
@@ -411,16 +412,25 @@ pub fn load(assets: &Assets, c: &Content, looks: &Looks, mut names: Names) -> (C
             });
             let biomes = kv.get("biomes").map(|v| {
                 let (invert, list) = v.strip_prefix('!').map_or((false, *v), |r| (true, r));
-                let mut set = vec![0u64; c.biomes.len() / 64 + 1];
-                for b in list.split_whitespace() {
-                    match crate::refs::set(b, crate::components::BIOME, &c.biome_names, c.biomes.len() as u32, &c.components, "biome") {
-                        Ok(list) => list
-                            .into_iter()
-                            .for_each(|i| set[i as usize / 64] |= 1 << (i % 64)),
-                        Err(e) => log::error!("{name}.ctm: biomes: {e}"),
+                match crate::refs::bits(
+                    list,
+                    crate::components::BIOME,
+                    c.game.catalog.ids(ek::BIOME),
+                    c.biomes.len() as u32,
+                    &c.components,
+                    "biome",
+                ) {
+                    Ok(mut bits) => {
+                        if invert {
+                            bits.iter_mut().for_each(|b| *b = !*b);
+                        }
+                        bits
+                    }
+                    Err(e) => {
+                        log::error!("{name}.ctm: biomes: {e}");
+                        Vec::new()
                     }
                 }
-                (invert, set)
             });
             ctm.rules.push(Rule {
                 method,
@@ -469,7 +479,9 @@ pub fn load(assets: &Assets, c: &Content, looks: &Looks, mut names: Names) -> (C
         let on = c.states.iter().enumerate().find_map(|(st, s)| {
             let hit = r.covers(st as u32) && off_cube(&looks.drawn(st as u32, s), tex, r.faces);
             hit.then(|| {
-                c.block_names
+                c.game
+                    .catalog
+                    .ids(ek::BLOCK)
                     .iter()
                     .find(|n| *n.1 == s.block)
                     .map_or("a block", |n| n.0.as_str())
@@ -708,9 +720,9 @@ impl Ctm {
             {
                 continue;
             }
-            if let Some((invert, set)) = &rule.biomes {
+            if let Some(set) = &rule.biomes {
                 let b = n.biomes[(z * 16 + x) as usize] as usize;
-                if set.get(b / 64).is_some_and(|w| w >> (b % 64) & 1 == 1) == *invert {
+                if !crate::refs::has(set, b as u32) {
                     continue;
                 }
             }

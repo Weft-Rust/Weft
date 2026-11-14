@@ -25,7 +25,7 @@ use std::time::Instant;
 use crate::gpu_layout::Scene;
 use glam::{DVec3, IVec3, Vec3};
 use rustc_hash::{FxHashMap, FxHashSet};
-use weft_abi::{ItemStack, block_flags as bf};
+use weft_abi::{ItemStack, block_flags as bf, entry_kind as ek};
 use weft_render::{Backend, BufferId, CommandList, FrameInfo};
 
 use crate::content::content;
@@ -305,11 +305,6 @@ struct Drive {
 fn seat_at(c: &crate::content::Content, kind: u32, pos: DVec3, yaw: f32, seat: u8) -> Option<DVec3> {
     let s = c.game.entities[kind as usize].seats.get(seat as usize)?;
     Some(pos + crate::world::turned(s.pos, yaw))
-}
-
-/// `u32` and `f32` values of an engine field component (`registry::HEALTH` ...).
-fn words(bytes: &[u8]) -> impl Iterator<Item = [u8; 4]> + '_ {
-    bytes.chunks_exact(4).map(|w| [w[0], w[1], w[2], w[3]])
 }
 
 fn parse_swaps(bytes: &[u8]) -> Vec<(String, String)> {
@@ -2137,9 +2132,8 @@ impl Client {
             .collect();
         let Some(kind) = c
             .game
-            .particle_names
-            .get(weft_abi::particle::EFFECT)
-            .copied()
+            .catalog
+            .find(ek::PARTICLE, weft_abi::particle::EFFECT)
         else {
             return;
         };
@@ -2207,7 +2201,7 @@ impl Client {
                     .map_or(Vec::new(), |names| {
                         names
                             .split(',')
-                            .filter_map(|n| c.game.particle_names.get(n).copied())
+                            .filter_map(|n| c.game.catalog.find(ek::PARTICLE, n))
                             .collect()
                     })
             };
@@ -2349,9 +2343,8 @@ impl Client {
             let state = c.liquids[l as usize].first_state;
             let id = c.components.id(weft_abi::comp::BUBBLE)?;
             c.game
-                .particle_names
-                .get(c.components.text(crate::components::BLOCK, state, id)?)
-                .copied()
+                .catalog
+                .find(ek::PARTICLE, c.components.text(crate::components::BLOCK, state, id)?)
         });
         if let Some(kind) = bubble.filter(|_| self.chance() < a.dt * 1.5) {
             self.particles.spawn(
@@ -2460,15 +2453,12 @@ impl Client {
         }
         let now = self.ticks();
         let arriving = self.arriving_tick();
-        let f: Vec<f32> = words(bytes).map(f32::from_le_bytes).collect();
-        let shaped = || {
-            let size = (f.len() == 4 && f[0] > 0.0).then(|| weft_abi::EntitySize { width: f[0], height: f[1], eye: f[2] });
-            let look = words(bytes)
-                .nth(3)
-                .map(u32::from_le_bytes)
-                .filter(|&l| l != u32::MAX);
-            (size, look)
-        };
+        let hp = (comp == health)
+            .then(|| crate::net::HealthField::from_bytes(bytes))
+            .flatten();
+        let shaped = (comp == shape)
+            .then(|| crate::net::ShapeField::from_bytes(bytes))
+            .flatten();
         if [held, off_held, worn, shown, ground, shape].contains(&comp) {
             self.entity_render.changed_items.insert(id);
         }
@@ -2478,23 +2468,19 @@ impl Client {
             .get_mut(&id)
             .or(self.showing_blocks.get_mut(&id));
         let Some(e) = (if mine { Some(&mut self.me) } else { other }) else { return };
-        if comp == health && f.len() == 2 {
+        if let Some(hp) = &hp {
             // Lower health out of a lower maximum, or on joining, isn't a hit.
-            if f[0] < e.health && (!mine || (f[1] >= self.max_health && e.health > 0.0)) {
+            if hp.current < e.health && (!mine || (hp.maximum >= self.max_health && e.health > 0.0)) {
                 e.hurt = HURT_FLASH;
             }
-            e.health = f[0];
+            e.health = hp.current;
         } else if comp == riding {
-            e.vehicle = (bytes.len() >= 12).then(|| {
-                let mount = u64::from_le_bytes(bytes[..8].try_into().unwrap());
-                (mount, u32::from_le_bytes(bytes[8..12].try_into().unwrap()) as u8)
-            });
+            e.vehicle = crate::net::RidingField::from_bytes(bytes).map(|r| (r.mount, r.seat as u8));
         } else if comp == stuck {
-            // Its pitch is the one it flew in with, as it arrives with its moves.
-            e.stuck = (bytes.len() >= 24).then(|| Stuck {
-                host: u64::from_le_bytes(bytes[..8].try_into().unwrap()),
-                at: DVec3::new(f[2] as f64, f[3] as f64, f[4] as f64),
-                yaw: f[5],
+            e.stuck = crate::net::StuckField::from_bytes(bytes).map(|s| Stuck {
+                host: s.host,
+                at: glam::Vec3::from_array(s.at).as_dvec3(),
+                yaw: s.yaw,
                 pitch: f32::NAN,
                 bone: None,
                 looked: false,
@@ -2524,15 +2510,15 @@ impl Client {
         } else if comp == off_held {
             e.off_held = ItemStack::get(&mut crate::net::codec::R(bytes)).unwrap_or_default();
         } else if comp == using {
-            let v = words(bytes).next().map_or(0, u32::from_le_bytes);
-            let ticks = (v & !(1 << 31)) as f32;
-            if v != 0 && (e.using.is_none() || e.use_ticks != ticks) {
+            let v = crate::net::UsingField::from_bytes(bytes).unwrap_or_default();
+            let ticks = v.ticks as f32;
+            if v.ticks != 0 && (e.using.is_none() || e.use_ticks != ticks) {
                 e.use_at = arriving;
             }
             e.use_ticks = ticks;
-            e.using = (v != 0).then(|| (e.using.map_or(0.0, |u| u.0), v >> 31 != 0));
-        } else if comp == shape {
-            (e.size, e.look) = shaped();
+            e.using = (v.ticks != 0).then(|| (e.using.map_or(0.0, |u| u.0), v.offhand));
+        } else if let Some(shaped) = &shaped {
+            (e.size, e.look) = (shaped.size(), shaped.look());
         } else if comp == effect {
             e.effects = crate::world::effects_on(Some(bytes), now).collect();
         }
@@ -2541,32 +2527,34 @@ impl Client {
         }
         // What the local player's own movement and screens go by.
         if comp == forced {
-            self.player.forced = (bytes.len() >= 8).then(|| {
-                let yaw = f32::from_le_bytes(bytes[4..8].try_into().unwrap());
-                (Pose::from_id(u32::from_le_bytes(bytes[..4].try_into().unwrap())), (!yaw.is_nan()).then_some(yaw))
-            });
-        } else if comp == health && f.len() == 2 {
-            self.max_health = f[1];
-            if f[0] > 0.0 {
+            self.player.forced =
+                crate::net::ForcedPoseField::from_bytes(bytes).map(|f| (Pose::from_id(f.pose), (!f.yaw.is_nan()).then_some(f.yaw)));
+        } else if let Some(hp) = hp {
+            self.max_health = hp.maximum;
+            if hp.current > 0.0 {
                 self.dead = false;
             }
-        } else if comp == shape {
-            self.player.size = shaped()
-                .0
+        } else if let Some(shaped) = shaped {
+            self.player.size = shaped
+                .size()
                 .unwrap_or(c.game.entities[c.game.player_kind as usize].size());
         } else if comp == game_mode {
-            let mode = crate::world::GameMode(words(bytes).next().map_or(0, u32::from_le_bytes) as u16);
+            let mode = crate::world::GameMode(u32::from_bytes(bytes).unwrap_or(0) as u16);
             self.mode = mode;
             self.player.flying = mode.has(crate::tag_bits::game_mode::ALWAYS_FLY) || (self.can_fly() && self.player.flying);
             self.player.noclip = mode.has(crate::tag_bits::game_mode::NOCLIP);
             self.player.fly_speed = 1.0;
         } else if comp == permission {
-            self.permission = words(bytes).next().map_or(0, u32::from_le_bytes);
+            self.permission = u32::from_bytes(bytes).unwrap_or(0);
         } else if comp == attributes {
             use crate::registry::attr as a;
             let could = self.can_fly();
-            for (dst, v) in self.attributes.iter_mut().zip(&f) {
-                *dst = *v;
+            for (dst, v) in self
+                .attributes
+                .iter_mut()
+                .zip(Vec::<f32>::from_bytes(bytes).unwrap_or_default())
+            {
+                *dst = v;
             }
             self.player.speed_mul = self.attributes[a::MOVEMENT_SPEED as usize] as f64;
             self.player.jump_mul = self.attributes[a::JUMP_STRENGTH as usize] as f64;

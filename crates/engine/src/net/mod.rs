@@ -32,6 +32,15 @@ pub fn host(server: &crate::server::ServerHandle, settings: &crate::settings::Se
 
 /// A struct that travels in messages, written field by field.
 macro_rules! wire_struct {
+    (schema; $(#[$m:meta])* pub struct $name:ident { $(pub $f:ident: $t:ty),* $(,)? }) => {
+        wire_struct! { $(#[$m])* pub struct $name { $(pub $f: $t),* } }
+        impl $name {
+            pub fn schema() -> String {
+                let fields = [$(format!("{}:{}", stringify!($f), <$t as weft_abi::data::Data>::schema())),*];
+                format!("{{{}}}", fields.join(","))
+            }
+        }
+    };
     ($(#[$m:meta])* pub struct $name:ident { $(pub $f:ident: $t:ty),* $(,)? }) => {
         $(#[$m])*
         pub struct $name {
@@ -49,6 +58,41 @@ macro_rules! wire_struct {
 
         impl codec::Item for $name {}
     };
+}
+
+wire_struct! {
+    schema;
+    #[derive(Default)]
+    pub struct HealthField { pub current: f32, pub maximum: f32 }
+}
+wire_struct! {
+    pub struct ShapeField { pub width: f32, pub height: f32, pub eye: f32, pub look: u32 }
+}
+impl Default for ShapeField {
+    fn default() -> Self {
+        Self { width: 0.0, height: 0.0, eye: 0.0, look: u32::MAX }
+    }
+}
+impl ShapeField {
+    pub fn size(&self) -> Option<weft_abi::EntitySize> {
+        (self.width > 0.0).then_some(weft_abi::EntitySize { width: self.width, height: self.height, eye: self.eye })
+    }
+    pub fn look(&self) -> Option<u32> {
+        (self.look != u32::MAX).then_some(self.look)
+    }
+}
+wire_struct! {
+    pub struct RidingField { pub mount: u64, pub seat: u32 }
+}
+wire_struct! {
+    pub struct StuckField { pub host: u64, pub at: [f32; 3], pub yaw: f32 }
+}
+wire_struct! {
+    pub struct ForcedPoseField { pub pose: u32, pub yaw: f32 }
+}
+wire_struct! {
+    #[derive(Default)]
+    pub struct UsingField { pub ticks: u32, pub offhand: bool }
 }
 
 /// One variant's fields written or read in order.

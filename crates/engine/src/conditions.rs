@@ -7,7 +7,7 @@
 
 use glam::DVec3;
 use rustc_hash::FxHashMap;
-use weft_abi::{self as abi, condition as k};
+use weft_abi::{self as abi, condition as k, entry_kind as ek};
 
 use crate::content::Content;
 use crate::registry::Answer;
@@ -205,7 +205,7 @@ impl Parser<'_, '_> {
             );
             self.at += 1;
         }
-        let names = &self.look.game.condition_names;
+        let names = self.look.game.catalog.ids(ek::CONDITION);
         let id = *names
             .get(name)
             .or_else(|| {
@@ -280,7 +280,8 @@ impl Parser<'_, '_> {
                 let id = *self
                     .look
                     .game
-                    .attr_names
+                    .catalog
+                    .ids(ek::ATTRIBUTE)
                     .get(attr.trim())
                     .ok_or_else(|| format!("condition {name}({text}): no attribute {attr}"))?;
                 let Arg::Range(a, b) = range(r)? else { unreachable!() };
@@ -445,9 +446,62 @@ pub fn holds_server(d: &mut Dim, c: &'static Content, e: &Expr, a: &Ask) -> bool
     server(d, c, e, a) == Some(true)
 }
 
-fn server(d: &mut Dim, c: &'static Content, e: &Expr, a: &Ask) -> Option<bool> {
-    let p = d.place.to_local(a.pos).floor().as_ivec3();
-    eval(e, &mut |id, arg| {
+enum Context<'a> {
+    Server(&'a mut Dim),
+    Client(Option<&'a crate::client::Client>),
+}
+
+impl Context<'_> {
+    fn grid_pos(&self, pos: DVec3) -> glam::IVec3 {
+        match self {
+            Self::Server(d) => d.place.to_local(pos).floor().as_ivec3(),
+            Self::Client(_) => pos.floor().as_ivec3(),
+        }
+    }
+
+    fn cell(&self, p: glam::IVec3) -> Option<u32> {
+        match self {
+            Self::Server(d) => d.get(p),
+            Self::Client(cl) => cl.and_then(|cl| cl.world.block_or_air(p)),
+        }
+    }
+
+    fn parts(&self, p: glam::IVec3) -> Vec<u32> {
+        match self {
+            Self::Server(d) => d.parts(p),
+            Self::Client(cl) => cl.map_or_else(Vec::new, |cl| {
+                cl.world
+                    .block_or_air(p)
+                    .into_iter()
+                    .chain(cl.world.extras(p).iter().copied())
+                    .collect()
+            }),
+        }
+    }
+
+    fn light(&self, p: glam::IVec3) -> u32 {
+        match self {
+            Self::Server(d) => d.light(p),
+            Self::Client(cl) => cl.map_or(0, |cl| cl.world.light(p)),
+        }
+    }
+
+    fn daylight(&self, c: &Content) -> Option<f32> {
+        match self {
+            Self::Server(d) => Some(d.daylight(c)),
+            Self::Client(cl) => cl.map(|cl| cl.daylight()),
+        }
+    }
+
+    fn enclosed(&self, c: &Content, p: glam::IVec3) -> Option<bool> {
+        let dim = match self {
+            Self::Server(d) => d.id,
+            Self::Client(cl) => cl.as_ref()?.world.dim,
+        };
+        Some(crate::world::light::enclosed(&c.dims[dim as usize], self.light(p)))
+    }
+
+    fn answer(&mut self, c: &'static Content, id: u32, arg: &Arg, a: &Ask) -> Option<bool> {
         if let Some(v) = known(c, id, arg, a) {
             return Some(v);
         }
@@ -457,8 +511,7 @@ fn server(d: &mut Dim, c: &'static Content, e: &Expr, a: &Ask) -> Option<bool> {
         if a.could && changes {
             return None;
         }
-        let sky = || !crate::world::light::enclosed(&c.dims[d.id as usize], d.light(p));
-        // The cell on a side named, the cell itself for 6.
+        let p = self.grid_pos(a.pos);
         let toward = |f: u8| {
             let f = if a.own_frame && f < 6 { c.states[a.state as usize].turn.face(f as usize) } else { f as usize };
             p + crate::world::DIRS
@@ -466,78 +519,124 @@ fn server(d: &mut Dim, c: &'static Content, e: &Expr, a: &Ask) -> Option<bool> {
                 .copied()
                 .unwrap_or(glam::IVec3::ZERO)
         };
-        // What is on a side, `None` if it isn't loaded.
-        let side = |d: &Dim, f: u8, test: &dyn Fn(u32) -> bool| -> Option<bool> {
-            let at = toward(f);
-            d.get(at)?;
-            Some(d.parts(at).into_iter().any(test))
-        };
         Some(match def.answer {
             Answer::Engine => match (id, arg) {
-                (k::DAY, _) => d.daylight(c) > 0.5,
-                (k::NIGHT, _) => d.daylight(c) <= 0.5,
-                (k::UNDERGROUND, _) => !sky(),
-                (k::SURFACE, _) => sky(),
-                (k::LIGHT, _) => {
-                    let daylight = a.daylight.unwrap_or_else(|| d.daylight(c));
-                    in_range(arg, light_for(arg, p, &|q| d.light(q), daylight))
+                (k::DAY, _) => self.daylight(c)? > 0.5,
+                (k::NIGHT, _) => self.daylight(c)? <= 0.5,
+                (k::UNDERGROUND, _) => self.enclosed(c, p)?,
+                (k::SURFACE, _) => !self.enclosed(c, p)?,
+                (k::LIGHT, _) => in_range(arg, light_for(arg, p, &|q| self.light(q), a.daylight.or_else(|| self.daylight(c))?)),
+                (k::CHANCE, Arg::Num(n)) => match self {
+                    Self::Server(d) => d.random_unit() < *n,
+                    Self::Client(_) => false,
+                },
+                (k::SKY, _) => in_range(arg, abi::light::sky(self.light(p)) as f32),
+                (k::SHELTERED, _) => {
+                    let weather = match self {
+                        Self::Server(d) => d.weather,
+                        Self::Client(cl) => cl.as_ref()?.weather_id,
+                    };
+                    c.game.weathers[weather as usize].shelters()
                 }
-                (k::CHANCE, Arg::Num(n)) => d.random_unit() < *n,
-                (k::SKY, _) => in_range(arg, abi::light::sky(d.light(p)) as f32),
-                (k::SHELTERED, _) => c.game.weathers[d.weather as usize].shelters(),
                 (k::HEIGHT, _) => in_range(arg, a.pos.y as f32),
-                (k::ATTRIBUTE, _) => in_range(arg, d.attribute(c, a.entity, attr(arg), false) as f32),
-                (k::WEARS, Arg::Slots(slots)) => {
-                    let Some(e) = d.entities.get(a.entity) else { return Some(false) };
-                    let inv = d
-                        .entities
-                        .inventories
-                        .get(&a.entity)
-                        .map_or(&[][..], |i| &i[..]);
-                    wears(&c.game.entities[e.kind as usize], inv, *slots)
+                (k::ATTRIBUTE, _) => {
+                    let value = match self {
+                        Self::Server(d) => d.attribute(c, a.entity, attr(arg), false) as f32,
+                        Self::Client(cl) => cl.as_ref()?.attribute(attr(arg)),
+                    };
+                    in_range(arg, value)
                 }
+                (k::WEARS, Arg::Slots(slots)) => match self {
+                    Self::Server(d) => {
+                        let e = d.entities.get(a.entity)?;
+                        wears(
+                            &c.game.entities[e.kind as usize],
+                            d.entities
+                                .inventories
+                                .get(&a.entity)
+                                .map_or(&[], Vec::as_slice),
+                            *slots,
+                        )
+                    }
+                    Self::Client(cl) => {
+                        let cl = cl.as_ref()?;
+                        wears(&c.game.entities[cl.me.kind as usize], &cl.inventory, *slots)
+                    }
+                },
                 (k::SIDE, Arg::Side(f, m)) => {
-                    return side(d, *f, &|s| m.as_ref().map_or(c.solid(s), |m| crate::refs::has(m, s)));
+                    let at = toward(*f);
+                    self.cell(at)?;
+                    self.parts(at)
+                        .into_iter()
+                        .any(|s| m.as_ref().map_or(c.solid(s), |m| crate::refs::has(m, s)))
                 }
                 (k::OPEN, Arg::Side(f, _)) => {
-                    return d
-                        .get(toward(*f))
-                        .map(|s| s == crate::content::AIR || c.states[s as usize].flags & abi::block_flags::REPLACEABLE != 0);
+                    let s = self.cell(toward(*f))?;
+                    s == crate::content::AIR || c.states[s as usize].flags & abi::block_flags::REPLACEABLE != 0
                 }
                 (k::BESIDE, Arg::Side(f, Some(m))) => {
                     let at = toward(*f);
                     let mut known = true;
                     for n in [glam::IVec3::X, -glam::IVec3::X, glam::IVec3::Z, -glam::IVec3::Z] {
-                        match d.get(at + n) {
+                        match self.cell(at + n) {
                             None => known = false,
-                            Some(_) if d.parts(at + n).into_iter().any(|s| crate::refs::has(m, s)) => return Some(true),
+                            Some(_)
+                                if self
+                                    .parts(at + n)
+                                    .into_iter()
+                                    .any(|s| crate::refs::has(m, s)) =>
+                            {
+                                return Some(true);
+                            }
                             Some(_) => {}
                         }
                     }
                     return known.then_some(false);
                 }
-                (k::COVERED, _) => {
-                    let above = d.get(p + glam::IVec3::Y)?;
-                    c.states[above as usize].flags & abi::block_flags::OPAQUE != 0
-                }
+                (k::COVERED, _) => c.states[self.cell(p + glam::IVec3::Y)? as usize].flags & abi::block_flags::OPAQUE != 0,
                 _ => false,
             },
-            Answer::Mode(m) => d.entities.get(a.entity).is_some_and(|e| e.mode == m),
+            Answer::Mode(m) => match self {
+                Self::Server(d) => d.entities.get(a.entity)?.mode == m,
+                Self::Client(cl) => cl.as_ref()?.mode == m,
+            },
             Answer::Mod(owner, cb) => {
                 let text = if let Arg::Text(t) = arg { t.as_str() } else { "" };
-                d.call(owner, cb, |w| abi::ConditionArgs {
-                    world: w,
-                    client: std::ptr::null_mut(),
-                    pos: a.pos.to_array().into(),
-                    entity: a.entity,
-                    arg: abi::Str::new(text),
-                    result: 0,
-                })
-                .result
-                    != 0
+                match self {
+                    Self::Server(d) => {
+                        d.call(owner, cb, |w| abi::ConditionArgs {
+                            world: w,
+                            client: std::ptr::null_mut(),
+                            pos: a.pos.to_array().into(),
+                            entity: a.entity,
+                            arg: abi::Str::new(text),
+                            result: 0,
+                        })
+                        .result
+                            != 0
+                    }
+                    Self::Client(cl) => {
+                        let mut v = crate::client::modui::ClientView::new(*cl);
+                        let mut x = abi::ConditionArgs {
+                            world: std::ptr::null_mut(),
+                            client: v.raw(),
+                            pos: a.pos.to_array().into(),
+                            entity: a.entity,
+                            arg: abi::Str::new(text),
+                            result: 0,
+                        };
+                        crate::host::invoke(owner, cb, &mut x);
+                        x.result != 0
+                    }
+                }
             }
         })
-    })
+    }
+}
+
+fn server(d: &mut Dim, c: &'static Content, e: &Expr, a: &Ask) -> Option<bool> {
+    let mut context = Context::Server(d);
+    eval(e, &mut |id, arg| context.answer(c, id, arg, a))
 }
 
 /// Condition `id` on a client, about its own player.
@@ -549,51 +648,6 @@ pub fn on_client(client: Option<&crate::client::Client>, id: u32, a: &Ask) -> bo
 }
 
 pub fn client_holds(client: Option<&crate::client::Client>, e: &Expr, a: &Ask) -> bool {
-    let c = crate::content::content();
-    eval(e, &mut |id, arg| {
-        if let Some(v) = known(c, id, arg, a) {
-            return Some(v);
-        }
-        let def = c.game.conditions.get(id as usize)?;
-        let enclosed = || {
-            client.is_some_and(|cl| crate::world::light::enclosed(&c.dims[cl.world.dim as usize], cl.world.light(a.pos.floor().as_ivec3())))
-        };
-        Some(match def.answer {
-            Answer::Engine => match id {
-                k::DAY => client.is_some_and(|cl| cl.daylight() > 0.5),
-                k::NIGHT => client.is_some_and(|cl| cl.daylight() <= 0.5),
-                k::UNDERGROUND => enclosed(),
-                k::SURFACE => client.is_some() && !enclosed(),
-                k::LIGHT => client.is_some_and(|cl| {
-                    let daylight = a.daylight.unwrap_or_else(|| cl.daylight());
-                    in_range(arg, light_for(arg, a.pos.floor().as_ivec3(), &|q| cl.world.light(q), daylight))
-                }),
-                k::ATTRIBUTE => client.is_some_and(|cl| in_range(arg, cl.attribute(attr(arg)))),
-                k::WEARS => client.is_some_and(|cl| {
-                    let Arg::Slots(slots) = arg else { return false };
-                    wears(&c.game.entities[cl.me.kind as usize], &cl.inventory, *slots)
-                }),
-                k::SKY => client.is_some_and(|cl| in_range(arg, abi::light::sky(cl.world.light(a.pos.floor().as_ivec3())) as f32)),
-                k::SHELTERED => client.is_some_and(|cl| c.game.weathers[cl.weather_id as usize].shelters()),
-                k::HEIGHT => in_range(arg, a.pos.y as f32),
-                // Rolled where the world is.
-                _ => false,
-            },
-            Answer::Mode(m) => client.is_some_and(|cl| cl.mode == m),
-            Answer::Mod(owner, cb) => {
-                let text = if let Arg::Text(t) = arg { t.as_str() } else { "" };
-                let mut v = crate::client::modui::ClientView::new(client);
-                let mut x = abi::ConditionArgs {
-                    world: std::ptr::null_mut(),
-                    client: v.raw(),
-                    pos: a.pos.to_array().into(),
-                    entity: a.entity,
-                    arg: abi::Str::new(text),
-                    result: 0,
-                };
-                crate::host::invoke(owner, cb, &mut x);
-                x.result != 0
-            }
-        })
-    }) == Some(true)
+    let mut context = Context::Client(client);
+    eval(e, &mut |id, arg| context.answer(crate::content::content(), id, arg, a)) == Some(true)
 }

@@ -10,7 +10,7 @@ use glam::{DVec3, Vec3};
 use rustc_hash::{FxHashMap, FxHashSet};
 use std::sync::Arc;
 use weft_abi::{
-    self as abi,
+    self as abi, entry_kind as ek,
     environment::{EnvironmentLayer as Layer, EnvironmentOverlay as Overlay, EnvironmentValues as Values},
 };
 
@@ -170,7 +170,8 @@ impl Client {
         let view_distance = (self.view_radius * 16).max(super::lod::Lod::distance()) as f32;
         let cloud_distance = c
             .game
-            .config_names
+            .catalog
+            .ids(ek::CONFIG)
             .get("core:cloud_distance")
             .map_or(0.0, |&id| crate::config::get(id)) as f32;
         let fog_day = self.daylight();

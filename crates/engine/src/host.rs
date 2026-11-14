@@ -6,7 +6,7 @@ use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 use std::time::Instant;
 
 use glam::{DVec3, IVec3};
-use weft_abi::{self as abi, Callback, Host, ItemStack, ModId, Str};
+use weft_abi::{self as abi, Callback, Host, ItemStack, ModId, Str, entry_kind as ek};
 
 use crate::content::{RawRegistrar, content, try_content};
 use crate::registry;
@@ -249,7 +249,7 @@ unsafe extern "C" fn place(w: *mut abi::WorldCtx, name: Str, pos: *const abi::Bl
         let at = ip(pos);
         let pal = match palette {
             "" => None,
-            p => match c.palette_names.get(p) {
+            p => match c.game.catalog.ids(ek::PALETTE).get(p) {
                 Some(&p) => Some(p),
                 None => {
                     misuse("place", || format!("no palette {p}"));
@@ -257,7 +257,7 @@ unsafe extern "C" fn place(w: *mut abi::WorldCtx, name: Str, pos: *const abi::Bl
                 }
             },
         };
-        let placed = if let Some(&t) = c.template_names.get(name) {
+        let placed = if let Some(t) = c.game.catalog.find(ek::TEMPLATE, name) {
             d.place_template(c, &c.templates[t as usize], at, crate::template::Transform::new(transform), pal)
         } else if let Some(fi) = c.dims[d.id as usize]
             .features
@@ -306,7 +306,7 @@ unsafe extern "C" fn plan_op(ctx: *mut abi::PlanCtx, op: *const abi::PlanOp) -> 
 
 unsafe extern "C" fn template_size(name: Str, transform: u32, out: *mut abi::BlockPos) -> u32 {
     let Some(c) = try_content() else { return 0 };
-    let Some(&t) = c.template_names.get(unsafe { name.as_str() }) else { return 0 };
+    let Some(t) = c.game.catalog.find(ek::TEMPLATE, unsafe { name.as_str() }) else { return 0 };
     let size = crate::template::Transform::new(transform).size(c.templates[t as usize].size);
     unsafe { *out = size.to_array().into() };
     1
@@ -314,7 +314,7 @@ unsafe extern "C" fn template_size(name: Str, transform: u32, out: *mut abi::Blo
 
 unsafe extern "C" fn template_joints(name: Str, transform: u32, out: *mut abi::Joint, cap: u32) -> u32 {
     let Some(c) = try_content() else { return 0 };
-    let Some(&t) = c.template_names.get(unsafe { name.as_str() }) else { return 0 };
+    let Some(t) = c.game.catalog.find(ek::TEMPLATE, unsafe { name.as_str() }) else { return 0 };
     let def = &c.templates[t as usize];
     let tr = crate::template::Transform::new(transform);
     for (i, j) in def.joints.iter().enumerate().take(cap as usize) {
@@ -1598,7 +1598,7 @@ unsafe extern "C" fn recipe_match(kind: Str, grid: *const ItemStack, width: u32,
         .collect();
     content()
         .game
-        .match_grid(kind, &cells, width, height, &content().components)
+        .match_grid(kind, &cells, width, height, &content().components, None)
         .map_or(ItemStack::EMPTY, |r| r.result())
 }
 
@@ -1660,29 +1660,10 @@ unsafe extern "C" fn recipe_consume(kind: Str, recipe: u32, stacks: *mut ItemSta
     let used = (0..r.inputs.len()).filter(|&k| !matches!(r.inputs[k], registry::Ingredient::Empty));
     for (i, k) in found.into_iter().zip(used) {
         let (s, n) = (stacks[i], r.input_counts[k]);
-        stacks[i] = match r.uses.get(k).copied().unwrap_or(registry::Use::Consume) {
-            registry::Use::Keep => s,
-            registry::Use::Wear(w) => match crate::stack::worn(c, s, w) {
-                broken if broken.is_empty() => remainder_of(c, s.item).map_or(ItemStack::EMPTY, |x| ItemStack::new(x, 1)),
-                after => after,
-            },
-            // What is left of the last of a stack takes its place; a machine has nowhere else
-            // to put it.
-            u if s.count == n => match u {
-                registry::Use::Leaves(x) => ItemStack::new(x, n),
-                _ => remainder_of(c, s.item).map_or(ItemStack::EMPTY, |x| ItemStack::new(x, n)),
-            },
-            _ => ItemStack { count: s.count - n, ..s },
-        };
+        let (after, back) = registry::use_ingredient(c, s, r.uses.get(k).copied().unwrap_or(registry::Use::Consume), n, 1);
+        stacks[i] = if after.is_empty() { back } else { after };
     }
     1
-}
-
-fn remainder_of(c: &crate::content::Content, item: u32) -> Option<u32> {
-    let id = c.components.id(abi::comp::REMAINDER)?;
-    c.components
-        .get::<u32>(crate::components::ITEM, item, id)
-        .filter(|&r| r != 0)
 }
 
 unsafe extern "C" fn recipe_process(kind: Str, input: u32, time_out: *mut u32) -> ItemStack {
@@ -1709,52 +1690,14 @@ unsafe extern "C" fn find(kind: u32, name: Str, count: *mut u32) -> u32 {
     let name = unsafe { name.as_str() };
     let Some(c) = try_content() else { return u32::MAX };
     let mut n = 1;
-    fn at<'a>(mut names: impl Iterator<Item = &'a str>, name: &str) -> Option<u32> {
-        names.position(|n| n == name).map(|i| i as u32)
-    }
     let id = match kind {
         abi::entry_kind::BLOCK if name.contains('[') => c.state_by_name(name),
-        abi::entry_kind::BLOCK => c.block_names.get(name).map(|&b| {
+        abi::entry_kind::BLOCK => c.game.catalog.find(ek::BLOCK, name).map(|b| {
             n = c.blocks[b as usize].states;
             c.blocks[b as usize].first_state
         }),
-        abi::entry_kind::ITEM => c.item_names.get(name).copied(),
-        abi::entry_kind::ENTITY => c.game.entity_names.get(name).copied(),
-        abi::entry_kind::BIOME => c.biome_names.get(name).copied(),
-        abi::entry_kind::DIMENSION => c.dim_names.get(name).copied(),
-        abi::entry_kind::MENU => c.game.menu_names.get(name).copied(),
-        abi::entry_kind::PARTICLE => c.game.particle_names.get(name).copied(),
-        abi::entry_kind::CONFIG => c.game.config_names.get(name).copied(),
-        abi::entry_kind::SOUND => c.game.sound_names.get(name).copied(),
-        abi::entry_kind::DAMAGE_CAUSE => c.game.damage_cause_names.get(name).copied(),
-        abi::entry_kind::ENTITY_EFFECT => c.game.entity_effect_names.get(name).copied(),
-        abi::entry_kind::TEXT_PLACE => c.game.text_place_names.get(name).copied(),
-        abi::entry_kind::GAME_MODE => c.game.game_mode_names.get(name).copied(),
-        abi::entry_kind::POSE => c.game.pose_names.get(name).copied(),
-        abi::entry_kind::WEATHER => c.game.weather_names.get(name).copied(),
-        abi::entry_kind::PRECIPITATION => c.game.precipitation_names.get(name).copied(),
-        abi::entry_kind::CONDITION => c.game.condition_names.get(name).copied(),
-        abi::entry_kind::MUSIC => at(c.game.music.iter().map(|m| m.name.as_str()), name),
-        abi::entry_kind::CAMERA => c.game.camera_names.get(name).copied(),
-        abi::entry_kind::EQUIPMENT_SLOT => at(
-            c.game
-                .player_layout
-                .equipment
-                .iter()
-                .map(|e| e.name.as_str()),
-            name,
-        ),
-        abi::entry_kind::CREATIVE_TAB => at(c.creative_tabs.iter().map(|t| t.name.as_str()), name),
-        abi::entry_kind::SOUND_CATEGORY => at(c.game.sound_categories.iter().map(|k| k.name.as_str()), name),
-        abi::entry_kind::ENTITY_CATEGORY => at(c.game.categories.iter().map(|k| k.name.as_str()), name),
-        abi::entry_kind::TINT_KIND => at(c.tint_kinds.iter().map(|k| k.0.as_str()), name),
-        abi::entry_kind::RECIPE_KIND => c.game.recipe_kinds.get(name).copied(),
-        abi::entry_kind::ATTRIBUTE => c.game.attr_names.get(name).copied(),
-        abi::entry_kind::KEY => at(c.game.keys.iter().map(|k| k.name.as_str()), name),
-        abi::entry_kind::LIQUID => at(c.liquids.iter().map(|l| l.name.as_str()), name),
-        abi::entry_kind::FEATURE => c.feature_names.get(name).copied(),
-        abi::entry_kind::RECORD => c.record_names.get(name).copied(),
-        _ => None,
+        ek::COMPONENT => c.components.id(name),
+        _ => c.game.catalog.find(kind, name),
     };
     if !count.is_null() {
         unsafe { *count = if id.is_some() { n } else { 0 } }
@@ -1774,17 +1717,8 @@ unsafe extern "C" fn name_of(kind: u32, id: u32) -> Str {
             });
             names.get(id as usize).map(|s| s.as_str())
         }
-        abi::entry_kind::ITEM => c.items.get(id as usize).map(|i| i.name.as_str()),
-        abi::entry_kind::ENTITY => c.game.entities.get(id as usize).map(|e| e.name.as_str()),
-        abi::entry_kind::BIOME => c.biomes.get(id as usize).map(|b| b.name.as_str()),
-        abi::entry_kind::DIMENSION => c.dims.get(id as usize).map(|d| d.name.as_str()),
-        abi::entry_kind::MENU => c.game.menus.get(id as usize).map(|m| m.name.as_str()),
-        abi::entry_kind::PARTICLE => c.game.particles.get(id as usize).map(|p| p.name.as_str()),
-        abi::entry_kind::CONFIG => c.game.configs.get(id as usize).map(|d| d.name.as_str()),
-        abi::entry_kind::SOUND => c.game.sounds.get(id as usize).map(|d| d.name.as_str()),
-        abi::entry_kind::FEATURE => c.features.get(id as usize).map(|d| d.as_str()),
-        abi::entry_kind::RECORD => c.records.get(id as usize).map(|d| d.as_str()),
-        _ => None,
+        ek::COMPONENT => c.components.names.get(id as usize).map(String::as_str),
+        _ => c.game.catalog.name(kind, id),
     };
     name.map_or(Str::EMPTY, Str::new)
 }
@@ -2069,11 +2003,13 @@ unsafe extern "C" fn attribute_add_modifier(
     unsafe {
         let c = content();
         let (name, step, phase) = (name.as_str(), step.as_str(), phase.as_str());
-        let Some(&a) = c.game.attr_names.get(name) else { return misuse("attribute_add_modifier", || format!("no attribute {name}")) };
-        if !c.game.steps.names.contains_key(step) {
+        let Some(a) = c.game.catalog.find(ek::ATTRIBUTE, name) else {
+            return misuse("attribute_add_modifier", || format!("no attribute {name}"));
+        };
+        if !c.game.catalog.ids(ek::STEP).contains_key(step) {
             return misuse("attribute_add_modifier", || format!("no step {step}"));
         }
-        if !phase.is_empty() && !c.game.steps.phase_names.contains_key(phase) {
+        if !phase.is_empty() && !c.game.catalog.ids(ek::PHASE).contains_key(phase) {
             return misuse("attribute_add_modifier", || format!("no phase {phase}"));
         }
         let phase = if phase.is_empty() { 0 } else { crate::registry::name_hash(phase) };
@@ -2084,7 +2020,7 @@ unsafe extern "C" fn attribute_add_modifier(
 unsafe extern "C" fn attribute_remove_modifier(w: *mut abi::WorldCtx, entity: u64, name: Str, id: Str) {
     unsafe {
         let c = content();
-        match c.game.attr_names.get(name.as_str()) {
+        match c.game.catalog.ids(ek::ATTRIBUTE).get(name.as_str()) {
             Some(&a) => dim(w).remove_attr_modifier(c, entity, a, id.as_str()),
             None => misuse("attribute_remove", || format!("no attribute {}", name.as_str())),
         }
@@ -2143,7 +2079,7 @@ unsafe extern "C" fn set_entity_appearance(w: *mut abi::WorldCtx, id: u64, kind:
         let name = kind.as_str();
         let look = match name {
             "" => None,
-            n => match content().game.entity_names.get(n) {
+            n => match content().game.catalog.ids(ek::ENTITY).get(n) {
                 Some(&k) => Some(k),
                 None => return misuse("set_entity_look", || format!("no entity kind {n}")),
             },
@@ -2158,7 +2094,7 @@ unsafe extern "C" fn set_entity_appearance(w: *mut abi::WorldCtx, id: u64, kind:
 unsafe extern "C" fn entity_kind_size(kind: Str, out: *mut abi::EntitySize) -> u32 {
     unsafe {
         let g = &content().game;
-        let Some(&k) = g.entity_names.get(kind.as_str()) else { return 0 };
+        let Some(k) = g.catalog.find(ek::ENTITY, kind.as_str()) else { return 0 };
         let e = &g.entities[k as usize];
         *out = e.size();
         1
@@ -2227,7 +2163,7 @@ unsafe extern "C" fn entity_set_pose(w: *mut abi::WorldCtx, id: u64, pose: u32, 
             if let Some(y) = e.facing {
                 e.yaw = y;
             }
-            [pose.to_le_bytes(), yaw.to_le_bytes()].concat()
+            <crate::net::ForcedPoseField as crate::net::codec::Wire>::to_bytes(&crate::net::ForcedPoseField { pose, yaw })
         } else {
             Vec::new()
         };

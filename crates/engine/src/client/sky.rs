@@ -5,6 +5,7 @@
 
 use glam::{Mat3, Vec3};
 use rustc_hash::FxHashMap;
+use weft_abi::entry_kind as ek;
 use weft_abi::sky_kind;
 use weft_render::*;
 
@@ -408,7 +409,8 @@ impl Sky {
                 const CELL: f64 = 12.0;
                 let setting = |name: &str| {
                     c.game
-                        .config_names
+                        .catalog
+                        .ids(ek::CONFIG)
                         .get(name)
                         .map_or(0.0, |&id| crate::config::get(id))
                 };

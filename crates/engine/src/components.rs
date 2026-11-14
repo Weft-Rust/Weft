@@ -357,61 +357,17 @@ impl Components {
     }
 }
 
-/// Size and alignment of a schema's value (`repr(C)`), for what can be read in text.
-fn layout_of(schema: &str) -> Option<(usize, usize)> {
-    let s = schema.trim();
-    match s {
-        "u8" | "i8" | "bool" => return Some((1, 1)),
-        "u16" | "i16" => return Some((2, 2)),
-        "u32" | "i32" | "f32" => return Some((4, 4)),
-        "u64" | "i64" | "f64" => return Some((8, 8)),
-        _ => {}
-    }
-    if let Some((t, n)) = s
-        .strip_prefix('[')
-        .and_then(|r| r.strip_suffix(']'))
-        .and_then(|r| r.rsplit_once(';'))
-    {
-        let (size, align) = layout_of(t)?;
-        return Some((size * n.trim().parse::<usize>().ok()?, align));
-    }
-    let (mut at, mut most) = (0usize, 1usize);
-    for (_, t) in schema_fields(s)? {
-        let (size, align) = layout_of(t)?;
-        at = at.next_multiple_of(align) + size;
-        most = most.max(align);
-    }
-    Some((at.next_multiple_of(most), most))
-}
-
-/// The fields of a `{name:type,..}` schema.
-fn schema_fields(schema: &str) -> Option<Vec<(&str, &str)>> {
-    let inner = schema.trim().strip_prefix('{')?.strip_suffix('}')?;
-    let (mut out, mut depth, mut start) = (Vec::new(), 0, 0);
-    for (i, ch) in inner.char_indices() {
-        match ch {
-            '{' | '[' => depth += 1,
-            '}' | ']' => depth -= 1,
-            ',' if depth == 0 => {
-                out.push(inner[start..i].split_once(':')?);
-                start = i + 1;
-            }
-            _ => {}
-        }
-    }
-    if start < inner.len() {
-        out.push(inner[start..].split_once(':')?);
-    }
-    Some(out)
-}
-
 /// A number in a value by its schema: the field named, or its first number (a lone number's self).
 pub fn number_in(schema: &str, bytes: &[u8], field: Option<&str>) -> Option<f32> {
     let s = schema.trim();
-    if let Some(fields) = schema_fields(s) {
+    if let Some(fields) = s
+        .strip_prefix('{')
+        .and_then(|s| s.strip_suffix('}'))
+        .and_then(weft_abi::data::fields)
+    {
         let mut at = 0usize;
         for (name, t) in fields {
-            let (size, align) = layout_of(t)?;
+            let (size, align) = weft_abi::data::layout(t)?;
             at = at.next_multiple_of(align);
             let wanted = field.map_or(true, |f| f == name.trim());
             if wanted {
@@ -423,8 +379,16 @@ pub fn number_in(schema: &str, bytes: &[u8], field: Option<&str>) -> Option<f32>
         }
         return None;
     }
-    if let Some(t) = s.strip_prefix('[').and_then(|r| r.split(';').next()) {
-        return number_in(t, bytes, None);
+    if let Some((t, n)) = s
+        .strip_prefix('[')
+        .and_then(|r| r.strip_suffix(']'))
+        .and_then(|r| r.rsplit_once(';'))
+    {
+        if n.trim().parse::<usize>().ok()? == 0 {
+            return None;
+        }
+        let (size, _) = weft_abi::data::layout(t)?;
+        return number_in(t, bytes.get(..size)?, None);
     }
     let b = |n: usize| bytes.get(..n);
     Some(match s {
@@ -633,6 +597,13 @@ mod numbers {
         let mut v = vec![9u8, 0, 0, 0];
         v.extend(2.0f32.to_le_bytes());
         assert_eq!(number_in("{a:u8,b:f32}", &v, Some("b")), Some(2.0));
+        let values = [1.5f32.to_le_bytes(), 3.0f32.to_le_bytes()].concat();
+        assert_eq!(number_in("[{n:f32};2]", &values, None), Some(1.5));
+        assert_eq!(number_in("[[f32;1];2]", &values, None), Some(1.5));
+        assert_eq!(number_in("[f32;0]", &values, None), None);
+        let mut callback = vec![0; 16];
+        callback.extend(2.0f32.to_le_bytes());
+        assert_eq!(number_in("{call:callback,amount:f32}", &callback, None), Some(2.0));
     }
 }
 

@@ -408,26 +408,21 @@ fn sort(m: &mut OpenMenu, dim: &mut Dim, c: &'static Content, player: u64, slot:
             }
         }
     };
-    let mut stacks: Vec<ItemStack> = Vec::new();
-    for &i in &picked {
-        let s = get(m, dim, player, i);
-        if s.is_empty() {
-            continue;
+    let mut stacks: Vec<ItemStack> = picked
+        .iter()
+        .map(|&i| get(m, dim, player, i))
+        .filter(|s| !s.is_empty())
+        .collect();
+    stacks.sort_by_key(|s| (s.item, s.data));
+    stacks.dedup_by(|s, t| {
+        if (t.item, t.data) != (s.item, s.data) {
+            return false;
         }
-        let max = c.max_stack(&s);
-        let mut left = s.count;
-        for t in stacks
-            .iter_mut()
-            .filter(|t| t.item == s.item && t.data == s.data && t.count < max)
-        {
-            let n = left.min(max - t.count);
-            t.count += n;
-            left -= n;
-        }
-        if left > 0 {
-            stacks.push(ItemStack { count: left, ..s });
-        }
-    }
+        let n = s.count.min(c.max_stack(s).saturating_sub(t.count));
+        t.count += n;
+        s.count -= n;
+        s.count == 0
+    });
     stacks.sort_by_key(|s| (s.item, s.data, std::cmp::Reverse(s.count)));
     for (k, &i) in picked.iter().enumerate() {
         let s = stacks.get(k).copied().unwrap_or(ItemStack::EMPTY);
@@ -845,24 +840,22 @@ fn move_out(m: &mut OpenMenu, dim: &mut Dim, c: &'static Content, player: u64, s
     let mut rest = ItemStack { count: n.min(cur.count), ..cur };
     let going = rest.count;
     let targets = other_side(m, dim, c, player, slot, Some(cur.item));
-    for pass in 0..2 {
-        for &t in &targets {
-            if rest.count == 0 {
-                break;
+    let limits: Vec<_> = targets
+        .iter()
+        .map(|&t| cap(c, &m.slots[t as usize], &rest))
+        .collect();
+    rest = crate::stack::insert_into(
+        rest,
+        0..targets.len(),
+        |i, value| {
+            let t = targets[i];
+            if let Some(value) = value {
+                set(m, dim, player, t, value);
             }
-            let ts = get(m, dim, player, t);
-            let room = cap(c, &m.slots[t as usize], &rest);
-            if pass == 0 && !ts.is_empty() && ts.item == rest.item && ts.data == rest.data && ts.count < room {
-                let n = (room - ts.count).min(rest.count);
-                set(m, dim, player, t, ItemStack { count: ts.count + n, ..ts });
-                rest.count -= n;
-            } else if pass == 1 && ts.is_empty() {
-                let n = rest.count.min(room);
-                set(m, dim, player, t, ItemStack { count: n, ..rest });
-                rest.count -= n;
-            }
-        }
-    }
+            get(m, dim, player, t)
+        },
+        |i, _| limits[i],
+    );
     let moved = going - rest.count;
     if moved > 0 {
         let left = cur.count - moved;
@@ -963,9 +956,10 @@ fn craft_runs(
         .iter()
         .map(|s| if s.is_empty() { 0 } else { s.item })
         .collect();
-    let (r, cells) = c
+    let mut cells = Vec::new();
+    let r = c
         .game
-        .match_cells(g.kind, &ids, g.cols, g.len / g.cols, &c.components)?;
+        .match_grid(g.kind, &ids, g.cols, g.len / g.cols, &c.components, Some(&mut cells))?;
     let runs = cells
         .iter()
         .zip(&stacks)
@@ -988,13 +982,6 @@ fn per_run(r: &crate::registry::Recipe, k: usize) -> u32 {
     if r.shaped.is_some() { 1 } else { r.input_counts.get(k).copied().unwrap_or(1).max(1) }
 }
 
-fn remainder(c: &Content, item: u32) -> Option<u32> {
-    let id = c.components.id(abi::comp::REMAINDER)?;
-    c.components
-        .get::<u32>(crate::components::ITEM, item, id)
-        .filter(|&r| r != 0)
-}
-
 /// `times` runs of the grid's recipe: each ingredient used as it says. What is left of one used
 /// up (what it `leaves`, else its `remainder`) goes into its slot when that empties, the rest
 /// to the player.
@@ -1014,74 +1001,44 @@ fn use_grid(
         let Some(k) = *k else { continue };
         let slot = g.first + i as u32;
         let s = get(m, dim, player, slot);
-        let left = match r.uses[k] {
-            Use::Keep => continue,
-            Use::Wear(w) => match crate::stack::worn(c, s, w.saturating_mul(times)) {
-                broken if broken.is_empty() => remainder(c, s.item).map_or(ItemStack::EMPTY, |x| ItemStack::new(x, 1)),
-                after => after,
-            },
-            use_ => {
-                let n = per_run(r, k).saturating_mul(times).min(s.count);
-                let rest = if n == s.count { ItemStack::EMPTY } else { ItemStack { count: s.count - n, ..s } };
-                let back = match use_ {
-                    Use::Leaves(x) => Some(x),
-                    _ => remainder(c, s.item),
-                };
-                match back {
-                    Some(x) if rest.is_empty() => {
-                        let made = ItemStack::new(x, n);
-                        let fit = c.max_stack(&made).min(n);
-                        if n > fit {
-                            spare.push(ItemStack { count: n - fit, ..made });
-                        }
-                        ItemStack { count: fit, ..made }
-                    }
-                    Some(x) => {
-                        spare.push(ItemStack::new(x, n));
-                        rest
-                    }
-                    None => rest,
+        let (mut left, back) = crate::registry::use_ingredient(c, s, r.uses[k], per_run(r, k), times);
+        if !back.is_empty() {
+            if left.is_empty() {
+                let fit = c.max_stack(&back).min(back.count);
+                left = ItemStack { count: fit, ..back };
+                if back.count > fit {
+                    spare.push(ItemStack { count: back.count - fit, ..back });
                 }
+            } else {
+                spare.push(back);
             }
-        };
-        set(m, dim, player, slot, left);
+        }
+        if left != s {
+            set(m, dim, player, slot, left);
+        }
     }
     for s in spare {
-        give(dim, c, player, s, s.count);
+        give(dim, c, player, s, s.count as u64);
     }
     // What else runs give, rolled for each.
     for _ in 0..times.min(4096) {
         for s in dim.roll_table(c, &r.extras, &Default::default(), glam::DVec3::ZERO, 0) {
-            give(dim, c, player, s, s.count);
+            give(dim, c, player, s, s.count as u64);
         }
     }
 }
 
-/// `count` of `stack` into the player's inventory, a full stack at a time; what doesn't fit is
-/// thrown out unless `keep` is false, then it is left over (the count not given).
-fn give_up_to(dim: &mut Dim, c: &'static Content, player: u64, stack: ItemStack, count: u32, keep: bool) -> u32 {
-    let max = c.max_stack(&stack).max(1);
-    let mut left = count;
-    while left > 0 {
-        let n = left.min(max);
+fn give(dim: &mut Dim, c: &'static Content, player: u64, stack: ItemStack, mut count: u64) {
+    while count > 0 {
+        let batch = count.min(u32::MAX as u64) as u32;
         let rest = dim
             .entities
-            .insert_item(c, player, ItemStack { count: n, ..stack });
-        left -= n - rest.count;
+            .insert_item(c, player, ItemStack { count: batch, ..stack });
         if !rest.is_empty() {
-            if keep {
-                dim.throw(c, player, ItemStack { count: left, ..stack });
-                left = 0;
-            }
-            break;
+            dim.throw(c, player, rest);
         }
+        count -= batch as u64;
     }
-    dim.entities.dirty_inv.insert(player);
-    left
-}
-
-fn give(dim: &mut Dim, c: &'static Content, player: u64, stack: ItemStack, count: u32) {
-    give_up_to(dim, c, player, stack, count, true);
 }
 
 /// Shift on a crafting grid's result: as many runs as its ingredients last and their results
@@ -1093,30 +1050,15 @@ fn craft_all(m: &mut OpenMenu, dim: &mut Dim, c: &'static Content, player: u64, 
     if out.is_empty() {
         return;
     }
-    // The most runs whose results fit, tried on a copy of the inventory.
-    let room = dim
-        .entities
-        .inventories
-        .get(&player)
-        .map_or(0, |inv| inv.len() as u32)
-        * c.max_stack(&out);
-    let (mut lo, mut hi) = (0u32, runs.min(room / out.count.max(1)));
-    let backup = dim.entities.inventories.get(&player).cloned();
-    while lo < hi {
-        let mid = lo + (hi - lo).div_ceil(2);
-        let fits = give_up_to(dim, c, player, out, out.count * mid, false) == 0;
-        if let Some(b) = &backup {
-            dim.entities.inventories.insert(player, b.clone());
-        }
-        if fits { lo = mid } else { hi = mid - 1 }
-    }
-    if lo == 0 {
+    let room = dim.entities.item_room(c, player, out) / out.count as u64;
+    let times = runs.min(room.min(u32::MAX as u64) as u32);
+    if times == 0 {
         return;
     }
-    give(dim, c, player, out, out.count * lo);
+    give(dim, c, player, out, out.count as u64 * times as u64);
     set(m, dim, player, slot, ItemStack::EMPTY);
-    use_grid(m, dim, c, player, &g, r, &cells, lo);
-    call_times(m, dim, c, player, slot, lo, |d| d.on_take);
+    use_grid(m, dim, c, player, &g, r, &cells, times);
+    call_times(m, dim, c, player, slot, times, |d| d.on_take);
     changed(m, dim, c, player, slot);
 }
 

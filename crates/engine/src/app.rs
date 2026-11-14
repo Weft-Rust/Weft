@@ -3,6 +3,7 @@ pub mod api;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Instant;
+use weft_abi::entry_kind as ek;
 
 use glam::Vec2;
 use weft_abi as abi;
@@ -1451,7 +1452,7 @@ impl Running {
                 .map(|(s, ui)| Top { screen: Some(&mut **s), ui }),
         };
         if !actions.is_empty() {
-            if let Some(&click) = content().game.sound_names.get("core:ui.click") {
+            if let Some(click) = content().game.catalog.find(ek::SOUND, "core:ui.click") {
                 self.ui_sounds
                     .push(crate::audio::Play { sound: click, pos: None, volume: 1.0, pitch: 0.0 });
             }

@@ -2,6 +2,8 @@
 
 `r.item(&ITEM)` and then the calls below. Stacks that carry values of their own are at the end. Every method is in the [reference](reference/items.md).
 
+Slots, held items and dropped items use the same resolved geometry, texture layers and colors, including resource pack overrides and liquid tints. Their display transforms differ to suit each view.
+
 ## Settings
 
 - `texture`

@@ -41,13 +41,9 @@ pub struct StepDef {
 /// Every step and phase, and the steps each chain runs.
 #[derive(Default)]
 pub struct Steps {
-    /// Phase names in the order they run.
-    pub phases: Vec<String>,
-    pub phase_names: FxHashMap<String, u32>,
     /// By the hash of its name, what saved modifiers keep.
     pub phase_hashes: FxHashMap<u64, u32>,
     pub defs: Vec<StepDef>,
-    pub names: FxHashMap<String, u32>,
     pub hashes: FxHashMap<u64, u32>,
     /// By chain, the steps every computation of it runs, in order.
     pub chains: FxHashMap<String, Vec<u32>>,
@@ -329,23 +325,25 @@ struct Found {
 
 /// Steps baked: each one's code (the engine's by name when no mod gave a callback), then every
 /// chain's in order. `order_file` is `config/step_order.txt`.
-pub fn freeze(phases: Vec<String>, entries: &[Entry], order_file: &str, errors: &mut Vec<String>) -> Steps {
+pub fn freeze(
+    catalog: &mut crate::entries::Catalog,
+    phases: Vec<String>,
+    entries: &[Entry],
+    order_file: &str,
+    errors: &mut Vec<String>,
+) -> Steps {
     use abi::comp::step as s;
-    let phase_names: FxHashMap<String, u32> = phases
-        .iter()
-        .enumerate()
-        .map(|(i, p)| (p.clone(), i as u32))
-        .collect();
+    catalog.set(ek::PHASE, phases.iter().map(String::as_str));
     let phase_hashes = phases
         .iter()
         .enumerate()
         .map(|(i, p)| (crate::registry::name_hash(p), i as u32))
         .collect();
-    let mut out = Steps { phases, phase_names, phase_hashes, ..Default::default() };
+    let mut out = Steps { phase_hashes, ..Default::default() };
     let mut found = Vec::new();
     for e in entries {
         let phase = e.text(s::PHASE).unwrap_or(abi::phase::ADD);
-        let Some(&rank) = out.phase_names.get(phase) else {
+        let Some(rank) = catalog.find(ek::PHASE, phase) else {
             errors.push(format!("step {}: no phase {phase}", e.name));
             continue;
         };
@@ -362,7 +360,6 @@ pub fn freeze(phases: Vec<String>, entries: &[Entry], order_file: &str, errors: 
         let hash = crate::registry::name_hash(&e.name);
         out.defs
             .push(StepDef { name: e.name.clone(), hash, phase: rank, run });
-        out.names.insert(e.name.clone(), id);
         out.hashes.insert(hash, id);
         let list = |name: &str| e.get::<Vec<String>>(name).unwrap_or_default();
         found.push(Found {
@@ -372,6 +369,7 @@ pub fn freeze(phases: Vec<String>, entries: &[Entry], order_file: &str, errors: 
             before: list(s::BEFORE),
         });
     }
+    catalog.set(ek::STEP, out.defs.iter().map(|s| s.name.as_str()));
     let mut by_chain: FxHashMap<String, Vec<&Found>> = FxHashMap::default();
     for f in &found {
         if let Some(c) = &f.chain {
@@ -380,9 +378,9 @@ pub fn freeze(phases: Vec<String>, entries: &[Entry], order_file: &str, errors: 
     }
     let hand = hand_order(order_file, errors);
     for (chain, steps) in by_chain {
-        let mut list = order_chain(&out, &chain, &steps, errors);
+        let mut list = order_chain(&out, catalog, &chain, &steps, errors);
         if let Some(wanted) = hand.get(&chain) {
-            apply_hand_order(&out, &mut list, wanted, &chain, errors);
+            apply_hand_order(catalog, &mut list, wanted, &chain, errors);
             // A hand order reorders inside a phase, never across.
             list.sort_by_key(|&s| out.defs[s as usize].phase);
         }
@@ -393,24 +391,22 @@ pub fn freeze(phases: Vec<String>, entries: &[Entry], order_file: &str, errors: 
 
 /// A chain's steps by phase; inside one, each after what it says it follows (and before what
 /// says it follows it), else in load order.
-fn order_chain(steps: &Steps, chain: &str, found: &[&Found], errors: &mut Vec<String>) -> Vec<u32> {
+fn order_chain(steps: &Steps, catalog: &crate::entries::Catalog, chain: &str, found: &[&Found], errors: &mut Vec<String>) -> Vec<u32> {
     let name = |id: u32| steps.defs[id as usize].name.as_str();
     let mut out = Vec::new();
-    for rank in 0..steps.phases.len() as u32 {
+    for rank in 0..catalog.ids(ek::PHASE).len() as u32 {
         let here: Vec<&&Found> = found
             .iter()
             .filter(|f| steps.defs[f.id as usize].phase == rank)
             .collect();
-        // `a` must run before `b`.
-        let mut edges: Vec<(u32, u32)> = Vec::new();
-        for f in &here {
+        let mut edges = vec![Vec::new(); here.len()];
+        for (i, f) in here.iter().enumerate() {
             for (list, first) in [(&f.after, false), (&f.before, true)] {
                 for other in list {
-                    match here.iter().find(|o| name(o.id) == other) {
-                        Some(o) if first => edges.push((f.id, o.id)),
-                        Some(o) => edges.push((o.id, f.id)),
-                        // Another phase, or not loaded: nothing to keep apart from here.
-                        None if !steps.names.contains_key(other) => {
+                    match here.iter().position(|o| name(o.id) == other) {
+                        Some(j) if first => edges[i].push(j),
+                        Some(j) => edges[j].push(i),
+                        None if !catalog.ids(ek::STEP).contains_key(other) => {
                             log::debug!(target: "modifiers", "step {}: no step {other} to order by", name(f.id))
                         }
                         None => {}
@@ -418,20 +414,13 @@ fn order_chain(steps: &Steps, chain: &str, found: &[&Found], errors: &mut Vec<St
                 }
             }
         }
-        let mut left: Vec<u32> = here.iter().map(|f| f.id).collect();
-        while !left.is_empty() {
-            let next = left
-                .iter()
-                .position(|&s| !edges.iter().any(|&(a, b)| b == s && left.contains(&a)));
-            match next {
-                Some(i) => out.push(left.remove(i)),
-                None => {
-                    let names: Vec<&str> = left.iter().map(|&s| name(s)).collect();
-                    errors.push(format!("chain {chain}: steps {} each want to run before another", names.join(", ")));
-                    out.append(&mut left);
-                }
-            }
+        let (mut ordered, rest) = crate::entries::dependency_order(&edges, |i| i, false);
+        if !rest.is_empty() {
+            let names: Vec<&str> = rest.iter().map(|&i| name(here[i].id)).collect();
+            errors.push(format!("chain {chain}: steps {} each want to run before another", names.join(", ")));
+            ordered.extend(rest);
         }
+        out.extend(ordered.into_iter().map(|i| here[i].id));
     }
     out
 }
@@ -462,10 +451,10 @@ fn hand_order(src: &str, errors: &mut Vec<String>) -> FxHashMap<String, Vec<Stri
 }
 
 /// The steps named go in the places those steps held, in the order given.
-fn apply_hand_order(steps: &Steps, list: &mut [u32], wanted: &[String], chain: &str, errors: &mut Vec<String>) {
+fn apply_hand_order(catalog: &crate::entries::Catalog, list: &mut [u32], wanted: &[String], chain: &str, errors: &mut Vec<String>) {
     let mut ids = Vec::new();
     for w in wanted {
-        match steps.names.get(w).filter(|id| list.contains(id)) {
+        match catalog.ids(ek::STEP).get(w).filter(|id| list.contains(id)) {
             Some(&id) => ids.push(id),
             None => errors.push(format!("step_order.txt: chain {chain} has no step {w}")),
         }

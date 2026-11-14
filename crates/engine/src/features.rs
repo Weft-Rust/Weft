@@ -8,6 +8,7 @@
 //! each cube it reaches takes its part.
 
 use std::sync::Arc;
+use weft_abi::entry_kind as ek;
 
 use glam::{DVec3, IVec3};
 use weft_abi as abi;
@@ -526,7 +527,7 @@ impl PlanCtx<'_> {
                     return false;
                 }
                 let only = if op.kind == k::REPLACE {
-                    match crate::refs::compile(name, &c.block_names, &c.blocks, &c.components) {
+                    match crate::refs::compile(name, c.game.catalog.ids(ek::BLOCK), &c.blocks, &c.components) {
                         Ok(m) => Some(Arc::from(m)),
                         Err(e) => {
                             crate::host::misuse("plan", || format!("replace: {e}"));
@@ -539,7 +540,7 @@ impl PlanCtx<'_> {
                 self.start.put(Put::Fill { lo, hi, state: op.state, only });
             }
             k::TEMPLATE => {
-                let Some(&t) = c.template_names.get(name) else {
+                let Some(t) = c.game.catalog.find(ek::TEMPLATE, name) else {
                     crate::host::misuse("plan", || format!("no template {name}"));
                     return false;
                 };
@@ -549,7 +550,7 @@ impl PlanCtx<'_> {
                     let h = hash(self.random, op.pos.x as i64, op.pos.y as i64, op.pos.z as i64);
                     (!f.palettes.is_empty()).then(|| f.palettes[(h >> 40) as usize % f.palettes.len()])
                 } else {
-                    match c.palette_names.get(extra) {
+                    match c.game.catalog.ids(ek::PALETTE).get(extra) {
                         Some(&p) => Some(p),
                         None => {
                             crate::host::misuse("plan", || format!("no palette {extra}"));
@@ -567,7 +568,7 @@ impl PlanCtx<'_> {
                 add_piece(&mut self.start, piece);
             }
             k::ENTITY => {
-                let Some(&kind) = c.game.entity_names.get(name) else {
+                let Some(kind) = c.game.catalog.find(ek::ENTITY, name) else {
                     crate::host::misuse("plan", || format!("no entity kind {name}"));
                     return false;
                 };

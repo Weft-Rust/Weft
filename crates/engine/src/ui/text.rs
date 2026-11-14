@@ -26,6 +26,7 @@
 use super::font::Font;
 use super::lang::Lang;
 use crate::input::{Input, key_name};
+use weft_abi::entry_kind as ek;
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum Arg {
@@ -713,7 +714,9 @@ fn shape_of(n: &Name) -> Option<(u32, String)> {
     };
     let (source, key) = c.shapes.get(name)?;
     Some((
-        c.block_names
+        c.game
+            .catalog
+            .ids(ek::BLOCK)
             .get(source)
             .map(|&b| c.blocks[b as usize].first_state)?,
         key.clone(),

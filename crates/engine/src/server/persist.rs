@@ -2,7 +2,7 @@
 //! survives mods being added, removed or reordered.
 
 use glam::{DVec3, IVec3};
-use weft_abi::{ItemStack, component_flags as cf};
+use weft_abi::{ItemStack, component_flags as cf, entry_kind as ek};
 
 use super::entity::Entity;
 use crate::content::Content;
@@ -12,6 +12,8 @@ use crate::net::codec::{self, R};
 /// blocks.
 pub type Saved = (Entity, Option<Vec<ItemStack>>, Vec<(u32, Box<[u8]>)>, Option<Vec<(IVec3, u32)>>);
 pub type ToSave<'a> = (&'a Entity, Option<&'a Vec<ItemStack>>, Vec<(u32, &'a [u8])>, Option<Vec<(IVec3, String)>>);
+
+const ENTITY_FORMAT: u32 = 0x3254_4E45;
 
 struct W<'a>(&'a mut Vec<u8>);
 
@@ -65,7 +67,9 @@ impl R<'_> {
         let data = crate::stack::get_named(self)?;
         // Items of removed mods are dropped rather than turned into something else.
         Some(
-            c.item_names
+            c.game
+                .catalog
+                .ids(ek::ITEM)
                 .get(&name)
                 .map_or(ItemStack::EMPTY, |&i| ItemStack { item: i, count, data }),
         )
@@ -75,6 +79,7 @@ impl R<'_> {
 /// `now`: the tick of the entities' dimension, what their effects' ends count from.
 pub fn write(c: &Content, out: &mut Vec<u8>, list: &[ToSave<'_>], now: u64) {
     let mut w = W(out);
+    w.u32(ENTITY_FORMAT);
     w.u32(list.len() as u32);
     for (e, inv, comps, blocks) in list {
         w.str(&c.game.entities[e.kind as usize].name);
@@ -85,6 +90,10 @@ pub fn write(c: &Content, out: &mut Vec<u8>, list: &[ToSave<'_>], now: u64) {
         w.f32(e.yaw);
         w.f32(e.pitch);
         w.f32(e.health);
+        w.u32(e.selected);
+        w.u8(e.flying as u8);
+        w.u32(e.fire);
+        w.str(e.mode.name());
         w.u64(e.age);
         w.stack(c, e.item);
         // 2: on a body, which it says.
@@ -189,6 +198,13 @@ pub fn read_timers(c: &Content, data: &[u8]) -> Vec<super::space::BlockTimer> {
 pub fn read(c: &Content, data: &[u8], now: u64) -> Vec<Saved> {
     let mut r = R(data);
     let mut out = Vec::new();
+    if data.is_empty() {
+        return out;
+    }
+    if r.u32() != Some(ENTITY_FORMAT) {
+        log::warn!("unsupported saved entity format");
+        return out;
+    }
     let Some(n) = r.u32() else { return out };
     for _ in 0..n {
         let Some(e) = read_one(c, &mut r, now) else { break };
@@ -209,6 +225,10 @@ fn read_one(c: &Content, r: &mut R, now: u64) -> Option<Option<Saved>> {
     let yaw = r.f32()?;
     let pitch = r.f32()?;
     let health = r.f32()?;
+    let selected = r.u32()?;
+    let flying = r.u8()? != 0;
+    let fire = r.u32()?;
+    let mode = crate::world::GameMode::parse(&r.str()?).unwrap_or(crate::world::GameMode::SURVIVAL);
     let age = r.u64()?;
     let item = r.stack(c)?;
     let anchor_kind = r.u8()?;
@@ -231,7 +251,7 @@ fn read_one(c: &Content, r: &mut R, now: u64) -> Option<Option<Saved>> {
         let len = r.u16()? as usize;
         let len = if len == u16::MAX as usize { r.u32()? as usize } else { len };
         let bytes = r.take(len)?.to_vec();
-        if let Some(id) = c.game.component(&name) {
+        if let Some(id) = c.component(&name) {
             let bytes = if crate::stack::holds_stacks(c, id) {
                 crate::stack::contents_from_names(c, &bytes)
             } else if id == c.game.fields.effect {
@@ -256,8 +276,12 @@ fn read_one(c: &Content, r: &mut R, now: u64) -> Option<Option<Saved>> {
         }
         Some(v)
     };
-    let Some(&kind) = c.game.entity_names.get(&kind_name) else { return Some(None) };
+    let Some(kind) = c.game.catalog.find(ek::ENTITY, &kind_name) else { return Some(None) };
     let mut e = Entity::new(id, kind, DVec3::new(v[0], v[1], v[2]), health);
+    e.selected = selected;
+    e.flying = flying;
+    e.fire = fire;
+    e.mode = mode;
     e.vel = DVec3::new(v[3], v[4], v[5]);
     e.yaw = yaw;
     e.pitch = pitch;
@@ -292,7 +316,7 @@ pub fn effects_from_save(c: &Content, bytes: &[u8], now: u64) -> Vec<u8> {
     while let Some(len) = r.u16() {
         let (Some(name), Some(level), Some(left)) = (r.take(len as usize), r.u32(), r.u32()) else { break };
         let name = String::from_utf8_lossy(name);
-        if let Some(&id) = c.game.entity_effect_names.get(name.as_ref()) {
+        if let Some(id) = c.game.catalog.find(ek::ENTITY_EFFECT, name.as_ref()) {
             let until = if left == weft_abi::INFINITE_TICKS { crate::world::FOREVER } else { now + left as u64 };
             list.push(crate::world::OnEffect { id, level, until });
         }

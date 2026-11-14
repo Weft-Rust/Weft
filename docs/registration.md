@@ -34,6 +34,8 @@ The anchor is an element's `name` field (a text element's text), or `#index`; el
 
 Defaults below are what the engine uses where nothing is set, so an edit only needs what it changes.
 
+After loading, `name_of(kind, id)` and a handle's `lookup(name)` use the same catalog of frozen entries. Block ids name states, including their properties; looking up a block without properties returns its first state and its handle's `count()` gives the state range.
+
 ## Block
 A block and its states; its item comes along unless `.no_item()`. Entry point `r.block(&BLOCK)`, edit `r.edit(&BLOCK)`. Shapes of other blocks: `r.stairs(..)`, `r.slabs(..)`, `r.vertical_slabs(..)`, `r.shapes_of(name, sources, suffix)`. A layer against the sides of its cell, several in one block: `.on_sides(Facings::ALL)` (properties `north`..`down`).
 

@@ -7,6 +7,7 @@
 use std::collections::VecDeque;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use weft_abi::entry_kind as entries;
 
 use crossbeam_channel::{Receiver, Sender};
 use glam::IVec3;
@@ -503,7 +504,8 @@ fn unpacking() -> &'static rayon::ThreadPool {
 fn enabled() -> bool {
     let c = content();
     c.game
-        .config_names
+        .catalog
+        .ids(entries::CONFIG)
         .get("core:terrain_gpu")
         .is_none_or(|&id| crate::config::get(id) != 0.0)
 }
@@ -511,7 +513,8 @@ fn enabled() -> bool {
 fn checking() -> bool {
     let c = content();
     c.game
-        .config_names
+        .catalog
+        .ids(entries::CONFIG)
         .get("core:terrain_check")
         .is_some_and(|&id| crate::config::get(id) != 0.0)
 }

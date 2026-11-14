@@ -9,7 +9,7 @@ use std::path::Path;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Mutex, OnceLock, RwLock};
 
-use weft_abi::{config_kind as ck, config_scope as scope};
+use weft_abi::{config_kind as ck, config_scope as scope, entry_kind as ek};
 
 use crate::content::content;
 use crate::entries::{Entry, RawEntry};
@@ -181,7 +181,7 @@ fn save_of(id: u32) {
 }
 
 pub fn by_name(name: &str) -> Option<u32> {
-    content().game.config_names.get(name).copied()
+    content().game.catalog.find(ek::CONFIG, name)
 }
 
 pub fn automated() -> bool {
@@ -499,7 +499,7 @@ pub fn volume(name: &str) -> RawEntry {
 
 fn number(name: &str, kind: u32, default: f64, min: f64, max: f64, step: f64) -> RawEntry {
     use weft_abi::comp::config as c;
-    RawEntry::engine(weft_abi::entry_kind::CONFIG, name)
+    RawEntry::engine(ek::CONFIG, name)
         .set(c::KIND, kind)
         .set(c::DEFAULT, default)
         .set(c::RANGE, [min, max])

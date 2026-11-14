@@ -110,6 +110,12 @@ pub struct Entry {
 }
 
 impl Entry {
+    fn write_cells(&self, id: u32) {
+        for &cell in &self.cells {
+            crate::registry::write_cell(cell, id);
+        }
+    }
+
     pub fn value(&self, name: &str) -> Option<&RawValue> {
         self.values.iter().find(|v| v.name == name)
     }
@@ -292,7 +298,7 @@ pub fn bake_by<D, K: Ord>(
     finish(fold(kind_name(kind), raw, mod_name, errors), errors, key, make)
 }
 
-fn kind_name(kind: u32) -> &'static str {
+pub fn kind_name(kind: u32) -> &'static str {
     abi::entry_kind::NAMES
         .get(kind as usize)
         .copied()
@@ -315,7 +321,9 @@ fn order<K: Ord>(mut f: Folded, errors: &mut Vec<String>, key: impl FnMut(&Entry
     f.report_missing(errors);
     f.entries.sort_by_cached_key(key);
     f.apply_patterns(errors);
-    f.write_cells();
+    for (id, e) in f.entries.iter().enumerate() {
+        e.write_cells(id as u32);
+    }
     let names = f
         .entries
         .iter()
@@ -334,7 +342,64 @@ pub const NO_TABLE: [u32; 2] = [abi::entry_kind::WORDS, abi::entry_kind::COMPONE
 /// Kinds baked through here keep their entries, in id order, for their component tables
 /// (`Components::add_table`).
 #[derive(Default)]
-pub struct Tables(pub Vec<(u32, Vec<Entry>)>);
+pub struct Tables(pub Vec<(u32, Vec<Entry>)>, pub Catalog);
+
+pub type Names = std::sync::Arc<FxHashMap<String, u32>>;
+
+#[derive(Default)]
+pub struct Catalog(FxHashMap<u32, (Vec<String>, Names)>);
+
+impl Catalog {
+    pub fn set<'a>(&mut self, kind: u32, names: impl IntoIterator<Item = &'a str>) -> Names {
+        self.set_ids(
+            kind,
+            names
+                .into_iter()
+                .enumerate()
+                .map(|(i, n)| (n.to_owned(), i as u32))
+                .collect(),
+        )
+    }
+
+    pub fn set_ids(&mut self, kind: u32, ids: FxHashMap<String, u32>) -> Names {
+        let mut names = vec![String::new(); ids.len()];
+        for (name, &id) in &ids {
+            names[id as usize] = name.clone();
+        }
+        let ids = Names::new(ids);
+        self.0.insert(kind, (names, ids.clone()));
+        ids
+    }
+
+    pub fn ids(&self, kind: u32) -> &FxHashMap<String, u32> {
+        &self.0[&kind].1
+    }
+
+    /// Bind handles and component rows to the final identities, including generated entries.
+    pub fn bind(&self, kind: u32, entries: &mut Vec<Entry>) {
+        let mut rows: Vec<_> = self.0[&kind]
+            .0
+            .iter()
+            .map(|name| Entry { name: name.clone(), owner: ModId(u32::MAX), ..Default::default() })
+            .collect();
+        for e in std::mem::take(entries) {
+            let id = self.find(kind, &e.name);
+            e.write_cells(id.unwrap_or(u32::MAX));
+            if let Some(id) = id {
+                rows[id as usize] = e;
+            }
+        }
+        *entries = rows;
+    }
+
+    pub fn find(&self, kind: u32, name: &str) -> Option<u32> {
+        self.0.get(&kind)?.1.get(name).copied()
+    }
+
+    pub fn name(&self, kind: u32, id: u32) -> Option<&str> {
+        self.0.get(&kind)?.0.get(id as usize).map(String::as_str)
+    }
+}
 
 impl Tables {
     pub fn bake<D>(
@@ -344,7 +409,7 @@ impl Tables {
         mod_name: &dyn Fn(ModId) -> String,
         errors: &mut Vec<String>,
         make: impl FnMut(&Entry, &mut Vec<String>) -> D,
-    ) -> (Vec<D>, FxHashMap<String, u32>) {
+    ) -> (Vec<D>, Names) {
         self.bake_by(raw, kind, mod_name, errors, |_| (), make)
     }
 
@@ -356,7 +421,7 @@ impl Tables {
         errors: &mut Vec<String>,
         key: impl FnMut(&Entry) -> K,
         make: impl FnMut(&Entry, &mut Vec<String>) -> D,
-    ) -> (Vec<D>, FxHashMap<String, u32>) {
+    ) -> (Vec<D>, Names) {
         self.finish(kind, fold(kind_name(kind), raw, mod_name, errors), errors, key, make)
     }
 
@@ -367,11 +432,12 @@ impl Tables {
         errors: &mut Vec<String>,
         key: impl FnMut(&Entry) -> K,
         mut make: impl FnMut(&Entry, &mut Vec<String>) -> D,
-    ) -> (Vec<D>, FxHashMap<String, u32>) {
+    ) -> (Vec<D>, Names) {
         // Their components were declared by this list, before anything was baked.
         debug_assert!(!NO_TABLE.contains(&kind), "{} has no table", kind_name(kind));
         let (entries, names) = order(f, errors, key);
         let out = entries.iter().map(|e| make(e, errors)).collect();
+        let names = self.1.set_ids(kind, names);
         self.0.push((kind, entries));
         (out, names)
     }
@@ -512,15 +578,6 @@ impl Folded {
         }
         out
     }
-
-    /// Writes every entry's id (its place, by name) into its handles' cells.
-    pub fn write_cells(&self) {
-        for (i, e) in self.entries.iter().enumerate() {
-            for &c in &e.cells {
-                crate::registry::write_cell(c, i as u32);
-            }
-        }
-    }
 }
 
 #[cfg(test)]
@@ -593,4 +650,31 @@ mod tests {
             .collect();
         assert_eq!(names, [("b".to_string(), 2), ("c".to_string(), 30)]);
     }
+}
+
+/// Dependencies by the caller's priority and tie breaker. A cycle either leaves a remainder
+/// or releases its first node and resumes the traversal.
+pub fn dependency_order<K: Ord>(edges: &[Vec<usize>], key: impl Fn(usize) -> K, break_cycles: bool) -> (Vec<usize>, Vec<usize>) {
+    let mut needs = vec![0; edges.len()];
+    for &b in edges.iter().flatten() {
+        needs[b] += 1;
+    }
+    let mut out = Vec::with_capacity(edges.len());
+    while let Some(i) = (0..edges.len())
+        .filter(|&i| needs[i] == 0)
+        .min_by_key(|&i| key(i))
+        .or_else(|| if break_cycles { needs.iter().position(|&n| n != usize::MAX) } else { None })
+    {
+        needs[i] = usize::MAX;
+        out.push(i);
+        for &b in &edges[i] {
+            if needs[b] != usize::MAX {
+                needs[b] -= 1;
+            }
+        }
+    }
+    let rest = (0..edges.len())
+        .filter(|&i| needs[i] != usize::MAX)
+        .collect();
+    (out, rest)
 }
