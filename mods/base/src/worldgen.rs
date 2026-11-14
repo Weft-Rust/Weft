@@ -337,7 +337,7 @@ pub fn register(r: &mut Registry) {
         .tag("spawn_biome")
         .set(&TREES, 0.025)
         .set(&GRASS_COVER, 0.7)
-        .set(&TALL_GRASS_COVER, 0.2)
+        .set(&TALL_GRASS_COVER, 0.075)
         .set(&BOULDER_COVER, 0.03)
         .set(&BUSH_COVER, 0.03)
         .set(&RASPBERRY_COVER, 0.005)
@@ -348,7 +348,7 @@ pub fn register(r: &mut Registry) {
         .surface("grass", "dirt", 3)
         .tag("animals")
         .set(&GRASS_COVER, 0.7)
-        .set(&TALL_GRASS_COVER, 0.5)
+        .set(&TALL_GRASS_COVER, 0.25)
         .set(&BOULDER_COVER, 0.03)
         .set(&BUSH_COVER, 0.02)
         .set(&RASPBERRY_COVER, 0.005)
@@ -361,7 +361,7 @@ pub fn register(r: &mut Registry) {
         .tint(grass, 0x88bb67)
         .tint(foliage, 0x6ba941)
         .set(&GRASS_COVER, 0.5)
-        .set(&TALL_GRASS_COVER, 0.1)
+        .set(&TALL_GRASS_COVER, 0.05)
         .set(&BOULDER_COVER, 0.06)
         .set(&BLUEGRASS_COVER, 0.2)
         .set_text(&FLOWERS, "base:lavender base:dandelion base:tulip_pink base:tulip_purple base:tulip_white")
@@ -906,10 +906,7 @@ fn decorate(g: &mut Gen) {
                     }
                 // roll ∈ [bluegrass_chance; tall_grass_chance)
                 } else if roll < tall_grass_chance {
-                    let wave = fixed::fbm(fixed::seed32(seed, 0x7A11), wx * 16, wz * 16, 48 * 16, 3);
-                    if wave > 0 {
-                        place_tall_grass(g, x, y, z);
-                    }
+                    place_tall_grass(g, x, y, z);
                 // roll ∈ [tall_grass_chance; grass_chance)
                 } else if roll < grass_chance {
                     place_grass(g, x, y, z);
