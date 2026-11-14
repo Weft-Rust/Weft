@@ -18,7 +18,11 @@ pub fn run(root: &Path) -> Result<String, String> {
     }
     let (mut pngs, mut png_saved, mut sounds, mut sound_saved) = (0, 0u64, 0, 0u64);
     for path in &files {
-        let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("").to_ascii_lowercase();
+        let ext = path
+            .extension()
+            .and_then(|e| e.to_str())
+            .unwrap_or("")
+            .to_ascii_lowercase();
         let before = std::fs::metadata(path).map_or(0, |m| m.len());
         match ext.as_str() {
             "png" => {
@@ -80,7 +84,10 @@ fn smaller_png(bytes: &[u8]) -> Option<Vec<u8>> {
     let opaque = px().all(|p| p[3] == 255);
     let gray = px().all(|p| p[0] == p[1] && p[1] == p[2]);
     let mut tries = Vec::new();
-    let channels = |keep: &[usize]| -> Vec<u8> { px().flat_map(|p| keep.iter().map(|&i| p[i]).collect::<Vec<_>>()).collect() };
+    let channels = |keep: &[usize]| -> Vec<u8> {
+        px().flat_map(|p| keep.iter().map(|&i| p[i]).collect::<Vec<_>>())
+            .collect()
+    };
     match (opaque, gray) {
         (true, true) => tries.push(encode(w, h, png::ColorType::Grayscale, 8, &channels(&[0]), None)),
         (true, false) => tries.push(encode(w, h, png::ColorType::Rgb, 8, &channels(&[0, 1, 2]), None)),
@@ -149,7 +156,11 @@ fn encode(w: u32, h: u32, color: png::ColorType, bits: u8, data: &[u8], palette:
         _ => png::BitDepth::Eight,
     };
     // Rows of indices usually pack best unfiltered, the rest with a filter chosen per row.
-    let filters: &[png::Filter] = if color == png::ColorType::Indexed { &[png::Filter::NoFilter, png::Filter::Adaptive] } else { &[png::Filter::Adaptive, png::Filter::NoFilter] };
+    let filters: &[png::Filter] = if color == png::ColorType::Indexed {
+        &[png::Filter::NoFilter, png::Filter::Adaptive]
+    } else {
+        &[png::Filter::Adaptive, png::Filter::NoFilter]
+    };
     filters
         .iter()
         .filter_map(|&filter| {

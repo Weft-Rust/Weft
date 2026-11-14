@@ -11,8 +11,7 @@ const ZOOM_RESPONSE: f32 = 14.0;
 const DEFAULT_ZOOM: f64 = 5.0;
 
 pub fn register(r: &mut Registry) {
-    r.key(&ZOOM_KEY, "Z")
-        .tag(abi::comp::key::DEBUG);
+    r.key(&ZOOM_KEY, "Z").tag(abi::comp::key::DEBUG);
 
     r.key(&ZOOM_IN, "KeyZ+wheel_up")
         // .with(&ZOOM_KEY)
@@ -27,10 +26,7 @@ pub fn register(r: &mut Registry) {
         active: bool,
     }
 
-    let zoom = Arc::new(Mutex::new(ZoomState {
-        amount: 0.0,
-        active: false,
-    }));
+    let zoom = Arc::new(Mutex::new(ZoomState { amount: 0.0, active: false }));
 
     let frame_zoom = Arc::clone(&zoom);
 
@@ -57,21 +53,12 @@ pub fn register(r: &mut Registry) {
     use abi::comp::camera::*;
 
     r.edit(&cameras::FIRST_PERSON)
-        .shot(Shot::new(
-            &[HAND, HUD, EFFECTS],
-            move |a| {
-                let target_fov = (-shot_zoom.lock().unwrap().amount).exp() as f32;
+        .shot(Shot::new(&[HAND, HUD, EFFECTS], move |a| {
+            let target_fov = (-shot_zoom.lock().unwrap().amount).exp() as f32;
 
-                let blend = 1.0 - (-ZOOM_RESPONSE * a.dt.max(0.0)).exp();
-                let fov = a.out.fov + (target_fov - a.out.fov) * blend;
+            let blend = 1.0 - (-ZOOM_RESPONSE * a.dt.max(0.0)).exp();
+            let fov = a.out.fov + (target_fov - a.out.fov) * blend;
 
-                a.out = abi::CameraPose {
-                    pos: a.eye,
-                    yaw: a.eye_yaw,
-                    pitch: a.eye_pitch,
-                    fov,
-                    ..abi::CameraPose::DEFAULT
-                };
-            },
-        ));
+            a.out = abi::CameraPose { pos: a.eye, yaw: a.eye_yaw, pitch: a.eye_pitch, fov, ..abi::CameraPose::DEFAULT };
+        }));
 }
