@@ -361,6 +361,8 @@ pub fn register(r: &mut Registry) {
         .tag("animals")
         .tint(grass, 0x88bb67)
         .tint(foliage, 0x6ba941)
+        .set(&TREES, 0.025)
+        .set(&TREE_KINDS, TreeKinds::from([("base:spruce", 1)]))
         .set(&GRASS_COVER, 0.5)
         .set(&TALL_GRASS_COVER, 0.05)
         .set(&BOULDER_COVER, 0.06)
