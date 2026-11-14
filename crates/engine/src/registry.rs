@@ -585,10 +585,10 @@ fn bake_sky(e: &Entry, dims: &FxHashMap<String, u32>, errors: &mut Vec<String>) 
     use abi::comp::sky as s;
     use abi::sky_kind as k;
     // Either name may have slashes of its own.
-    let Some((dim, name)) = e
+    let Some(dim) = e
         .name
         .match_indices('/')
-        .find_map(|(i, _)| dims.get(&e.name[..i]).map(|&d| (d, &e.name[i + 1..])))
+        .find_map(|(i, _)| dims.get(&e.name[..i]).copied())
     else {
         errors.push(format!("sky object {}: not <dimension>/<object> of a dimension there is", e.name));
         return None;
@@ -605,7 +605,7 @@ fn bake_sky(e: &Entry, dims: &FxHashMap<String, u32>, errors: &mut Vec<String>) 
     Some((
         dim,
         SkyDef {
-            name: name.to_string(),
+            name: e.name.clone(),
             kind,
             texture,
             shader,
@@ -3279,9 +3279,9 @@ mod sky_tests {
         let mut errors = Vec::new();
         let (dim, m) = bake_sky(&moon, &dims, &mut errors).unwrap();
         assert!(errors.is_empty(), "{errors:?}");
-        assert_eq!((dim, m.name.as_str(), m.size, m.phase), (1, "a:moons/1", 40f32.to_radians(), 0.5));
+        assert_eq!((dim, m.name.as_str(), m.size, m.phase), (1, "a:e/a:moons/1", 40f32.to_radians(), 0.5));
         assert!(m.orbit.is_infinite(), "nobody set an orbit, so it follows the day");
-        assert!(bake_sky(&e("a:d/x/stars"), &dims, &mut errors).is_some_and(|(d, s)| d == 0 && s.name == "stars"));
+        assert!(bake_sky(&e("a:d/x/stars"), &dims, &mut errors).is_some_and(|(d, s)| d == 0 && s.name == "a:d/x/stars"));
         assert!(bake_sky(&e("a:f/sun"), &dims, &mut errors).is_none());
     }
 }
