@@ -69,6 +69,7 @@ pub static TOADSTOOL_MUSHROOM: Block = Block::named("toadstool_mushroom");
 pub static DRYADS_SADDLE_MUSHROOM: Block = Block::named("dryads_saddle_mushroom");
 pub static BUSH_LEAVES: Block = Block::named("bush_leaves");
 pub static FERN: Block = Block::named("fern");
+pub static LAVENDER: Block = Block::named("lavender");
 
 static TILLABLE: Tag = Tag::named("tillable");
 
@@ -453,6 +454,13 @@ pub fn register(r: &mut Registry) {
         .pool(Pool::new().when(Cond::chance(0.25)).item("wheat_seeds"));
     plant(r, &DANDELION, "flower_dandelion");
     plant(r, &ROSE, "flower_rose");
+    r.block(&LAVENDER)
+        .sound_group("grass")
+        .tall_plant("lavender_bottom", "lavender_top")
+        .replaceable()
+        .needs_below("#plant_soil")
+        .tab(&crate::tabs::NATURAL);
+
     r.block(&SAPLING)
         .sound_group("grass")
         .texture("sapling_oak")

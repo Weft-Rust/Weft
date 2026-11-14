@@ -67,6 +67,7 @@ static FROZEN: Tag = Tag::named("frozen");
 static DRY: Tag = Tag::named("dry");
 
 pub static PLAINS: Biome = Biome::named("plains");
+pub static LAVENDER_FIELDS: Biome = Biome::named("lavender_fields");
 pub static FOREST: Biome = Biome::named("forest");
 pub static BIRCH_FOREST: Biome = Biome::named("birch_forest");
 pub static TAIGA: Biome = Biome::named("taiga");
@@ -339,6 +340,17 @@ pub fn register(r: &mut Registry) {
         .set(&BUSH_COVER, 0.03)
         .set(&RASPBERRY_COVER, 0.005)
         .set(&SNOWBERRY_COVER, 0.002);
+    r.biome(&LAVENDER_FIELDS)
+        .surface("grass", "dirt", 3)
+        .tag("animals")
+        .set(&GRASS_COVER, 0.7)
+        .set(&TALL_GRASS_COVER, 0.5)
+        .set(&BOULDER_COVER, 0.03)
+        .set(&BUSH_COVER, 0.02)
+        .set(&RASPBERRY_COVER, 0.005)
+        .set(&SNOWBERRY_COVER, 0.002)
+        .set_text(&FLOWERS, "base:lavender")
+        .set(&FLOWER_COVER, 0.1);
     r.biome(&FOREST)
         .humidity(0.25..)
         .surface("grass", "dirt", 3)
@@ -455,6 +467,10 @@ pub fn register(r: &mut Registry) {
         .sea(SEA, "water")
         .field("temperature", Expr::fbm(0x22, 2200.0, 3) * Expr::value(1.4))
         .field("humidity", Expr::fbm(0x33, 1600.0, 3) * Expr::value(1.4))
+        .field(
+            "base:weirdness",
+            Expr::fbm(0x4A7, 700.0, 3).ramp(-0.2, 0.2),
+        )
         .landform(preset::continents(18.0))
         // Biomes shape the land through their climate, not their borders, so nothing seams:
         // the cold flattens hills into tundra, deserts get dunes.
@@ -510,6 +526,7 @@ pub fn register(r: &mut Registry) {
         .rule(BiomeRule::new("desert"))
         .rule(BiomeRule::new("forest"))
         .rule(BiomeRule::new("birch_forest"))
+        .rule(BiomeRule::new("lavender_fields").field("base:weirdness", 0.6..))
         .rule(BiomeRule::new("plains"))
         .cave_biome("deep_caves", 24, 96.0, 0.25)
         .caves(Caves::new("lava", i32::MIN, 11));
