@@ -107,7 +107,8 @@ const COLORS: &[(&str, u32, u32, [u8; 3])] =
     &[("red", 0xED3737, 0xB02E26, [0, 12, 12]), ("green", 0x37C837, 0x5E7C16, [12, 0, 12]), ("blue", 0x375BFF, 0x3C44AA, [12, 12, 0])];
 
 fn leaves(r: &mut Registry, handle: &'static Block, tex: &str, tint: bool) {
-    let mut b = r.block(handle)
+    let mut b = r
+        .block(handle)
         .sound_group("grass")
         .texture(tex)
         .hardness(0.2)
@@ -193,7 +194,6 @@ fn pick_berries(u: &mut Use, berry: &'static Item) -> bool {
     w.spawn_item(block_center(p), berry.stack(1));
     true
 }
-
 
 /// Sand and gravel: with nothing under them they fall as an entity and land as a block.
 pub fn register(r: &mut Registry) {
@@ -464,14 +464,7 @@ pub fn register(r: &mut Registry) {
         .tab(&crate::tabs::NATURAL);
     plant(r, &DANDELION, "flower_dandelion");
     plant(r, &ROSE, "flower_rose");
-    for color in [
-        "orange",
-        "pink",
-        "purple",
-        "red",
-        "white",
-        "yellow",
-    ] {
+    for color in ["orange", "pink", "purple", "red", "white", "yellow"] {
         let name = format!("tulip_{color}");
         plant(r, Block::generated(name.clone()), name.as_str());
     }
@@ -772,7 +765,7 @@ pub fn register(r: &mut Registry) {
     r.loot(&FERN).pool(
         Pool::new()
             .when(Cond::tool("#tools/shears"))
-            .item(FERN.name())
+            .item(FERN.name()),
     );
 
     // What may grow or stand where, from the common `dirt` and `sand` tags like modern vanilla:

@@ -113,12 +113,7 @@ struct TreeSkeleton {
 //     const ALL = [&YOUNG, &MATURE, &OLD];
 // }
 
-const DIRECTIONS: [(i32, i32, &str); 4] = [
-    (1, 0, "east"),
-    (-1, 0, "west"),
-    (0, 1, "south"),
-    (0, -1, "north"),
-];
+const DIRECTIONS: [(i32, i32, &str); 4] = [(1, 0, "east"), (-1, 0, "west"), (0, 1, "south"), (0, -1, "north")];
 fn random_direction(rng: &mut Rng) -> (i32, i32, &str) {
     DIRECTIONS[rng.next() as usize % 4usize]
 }
@@ -270,7 +265,9 @@ fn moss_on_side(side: Dir) -> u32 {
 fn decorate_trunk(skeleton: &TreeSkeleton, rng: &mut Rng, put: &mut dyn FnMut(i32, i32, i32, u32, bool)) {
     let mossy = rng.float() < 0.25;
     for y in skeleton.bottom.1..skeleton.top.1 {
-        if rng.float() >= 0.5 { continue }
+        if rng.float() >= 0.5 {
+            continue;
+        }
         if mossy {
             let bz = skeleton.bottom.2 - 1;
             let state = moss_on_side(Dir::South);
@@ -279,7 +276,9 @@ fn decorate_trunk(skeleton: &TreeSkeleton, rng: &mut Rng, put: &mut dyn FnMut(i3
             }
             continue;
         }
-        if rng.float() >= 0.25 { continue }
+        if rng.float() >= 0.25 {
+            continue;
+        }
         let (dx, dz, facing) = random_direction(rng);
         let bx = skeleton.bottom.0 + dx;
         let bz = skeleton.bottom.2 + dz;
@@ -555,7 +554,11 @@ pub fn register(r: &mut Registry) {
         .rule(BiomeRule::new("desert"))
         .rule(BiomeRule::new("forest"))
         .rule(BiomeRule::new("birch_forest"))
-        .rule(BiomeRule::new("hills").field("base:randomness", 0.5..).height(SEA + 30..))
+        .rule(
+            BiomeRule::new("hills")
+                .field("base:randomness", 0.5..)
+                .height(SEA + 30..),
+        )
         .rule(BiomeRule::new("lavender_fields").field("base:weirdness", 1.0..))
         .rule(BiomeRule::new("tallgrass_meadow").field("base:weirdness", 0.5..))
         .rule(BiomeRule::new("plains"))
@@ -645,13 +648,7 @@ pub fn register(r: &mut Registry) {
         .spacing(5)
         .reach(3)
         .density(&BUSH_COVER)
-        .plan(|s| {
-            place_bush(
-                s,
-                |_r| BUSH_LEAVES.id(),
-                BUSH_STEM.id(),
-            )
-        });
+        .plan(|s| place_bush(s, |_r| BUSH_LEAVES.id(), BUSH_STEM.id()));
     r.scatter(&RASPBERRY_SITES)
         .spacing(5)
         .reach(3)

@@ -15,8 +15,8 @@ mod recipes;
 mod redstone;
 mod sounds;
 mod storage;
-mod tree_kinds;
 mod target_info;
+mod tree_kinds;
 mod woodcutter;
 mod worldgen;
 
