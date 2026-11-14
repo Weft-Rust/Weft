@@ -9,6 +9,7 @@
 extern crate alloc;
 
 pub mod data;
+pub mod environment;
 
 use core::ffi::c_void;
 use core::sync::atomic::AtomicU32;
@@ -689,7 +690,6 @@ pub mod comp {
     pub const ENTITY_EFFECT_BENEFICIAL: &str = "entity_effect.beneficial";
     pub const ENTITY_EFFECT_HARMFUL: &str = "entity_effect.harmful";
     pub const ENTITY_EFFECT_INSTANT: &str = "entity_effect.instant";
-    pub const ENTITY_EFFECT_SCREEN: &str = "entity_effect.screen";
     pub const ENTITY_EFFECT_HIDES: &str = "entity_effect.hides";
     /// An entity effect's `callback` (`EffectTickArgs`) every tick with every entity that has it.
     pub const ENTITY_EFFECT_ON_TICK: &str = "entity_effect.on_tick";
@@ -1079,8 +1079,7 @@ pub mod comp {
     /// liquid looks for a way down, 4), `RENEWABLE` (`u32`, a spot over solid ground or a source
     /// with at least this many sources beside it becomes one, 0 always; never), `DENSITY` (`i32`,
     /// negative rises, 1000), `HEAT` (`u32`, roughly Kelvin, 300; from 1000 up it burns what
-    /// touches it), `FOG` (`LiquidFog`, seen from inside, the average color of its texture and 96
-    /// blocks), `OVERLAY` (`LiquidOverlay`, over the screen from inside, its own texture at 0.1).
+    /// touches it). Perception is configured with environment layers.
     pub mod liquid {
         pub const DELAY: &str = "liquid.delay";
         pub const DROP_OFF: &str = "liquid.drop_off";
@@ -1088,8 +1087,6 @@ pub mod comp {
         pub const RENEWABLE: &str = "liquid.renewable";
         pub const DENSITY: &str = "liquid.density";
         pub const HEAT: &str = "liquid.heat";
-        pub const FOG: &str = "liquid.fog";
-        pub const OVERLAY: &str = "liquid.overlay";
     }
 
     /// What happens where two liquids meet (`entry_kind::REACTION`): when `LIQUID` (`match`) has
@@ -4188,6 +4185,9 @@ pub struct Host {
     /// Seconds a clip of an action takes on `entity`; below 0 if it has none.
     pub client_clip_length: unsafe extern "C" fn(c: *mut ClientCtx, entity: u64, name: Str) -> f32,
     /// The item in `entity`'s `hand`; 0 for none.
+    pub environment_set: unsafe extern "C" fn(w: *mut WorldCtx, entity: u64, name: Str, data: Slice<u8>) -> u32,
+    pub client_environment_set: unsafe extern "C" fn(c: *mut ClientCtx, name: Str, data: Slice<u8>) -> u32,
+    pub client_environment_values: unsafe extern "C" fn(c: *mut ClientCtx, out: *mut environment::EnvironmentValues),
     pub client_displayed: unsafe extern "C" fn(c: *mut ClientCtx, entity: u64, source: u32, out: *mut ItemStack, max: usize) -> usize,
     /// Where a bone of what `entity` is or has on was, the last frame. 0 if there is none.
     pub client_bone_position: unsafe extern "C" fn(c: *mut ClientCtx, entity: u64, bone: Str, out: *mut Vec3) -> u32,
@@ -5387,18 +5387,6 @@ pub mod stack_flags {
     pub const VISUAL: u32 = 4;
 }
 
-crate::data! {
-    /// A liquid's fog from inside (`comp::liquid::FOG`): 0xRRGGBB (`u32::MAX`: the average color
-    /// of its texture) and the blocks it takes to hide everything.
-    pub struct LiquidFog { pub color: u32, pub distance: f32 }
-}
-
-crate::data! {
-    /// The picture over the screen inside a liquid (`comp::liquid::OVERLAY`), under `textures/`
-    /// (empty: its own texture), and how much of it shows.
-    pub struct LiquidOverlay { pub texture: alloc::string::String, pub opacity: f32 }
-}
-
 // ---------------------------------------------------------------- client side
 
 #[repr(C)]
@@ -5668,7 +5656,6 @@ pub mod client_op {
     pub const RESPAWN: u32 = 12;
     /// Post-processing effect `text` (`shaders/post/<name>.wgsl`) at strength `num`, 0 turns it
     /// off. Effects stay on until changed and run in the order they were turned on.
-    pub const POST_EFFECT: u32 = 14;
     /// Runs command `text` (`/tp ~ ~5 ~`) as the player, here if it is a client command, else
     /// on the server; returns an id for `Host::client_command_reply`. The chat stays out of it.
     pub const RUN_COMMAND: u32 = 16;

@@ -55,6 +55,7 @@ static DISPLAY_CARRIER: EntityKind = EntityKind::named("display_carrier");
 static DISPLAY_LOOK_CALLS: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
 
 pub fn register(r: &mut Registry) {
+    environment_controls(r);
     r.stack_component(&DISPLAY_PHASE, abi::stack_flags::VISUAL);
     r.storage(&DISPLAY_PARTS, 1).stack(abi::stack_flags::VISUAL);
     r.item(&DISPLAY_TOKEN)
@@ -231,6 +232,12 @@ pub fn register(r: &mut Registry) {
         .into_iter()
         .fold(ring, |p, at| p.cuboid(at, [2.0, 2.0, 2.0], [16.0, 0.0]));
     r.entity(&ORB)
+        .environment(
+            Environment::new("orb_aura")
+                .radius(4.0, 8.0)
+                .fade(0.2, 0.2)
+                .acoustics(4000.0, 0.25, 0.8),
+        )
         .size(0.6, 0.9)
         .max_health(4.0)
         .tag(abi::comp::entity::NO_GRAVITY)
@@ -437,4 +444,31 @@ fn outpost(r: &mut Registry) {
             let halls = Pools::new().pool("halls", &[(&OUTPOST_HALL, 1)]);
             p.grow(&OUTPOST_HUB, at, Transform::NONE, &halls, 2);
         });
+}
+
+fn environment_controls(r: &mut Registry) {
+    let suns = [base_api::OVERWORLD.sky(&base_api::SUN), base_api::FLATLANDS.sky(&base_api::SUN)];
+    r.command("eclipse", "<state:word(on,off)> [entity:int]", move |cmd| {
+        let (w, player) = (cmd.world(), cmd.player());
+        let entity = cmd.int("entity").map_or(player, |id| id as u64);
+        if cmd.text("state") == Some("off") {
+            w.clear_environment(entity, "eclipse");
+        } else {
+            let mut layer = Environment::new("eclipse")
+                .priority(100)
+                .fade(1.0, 1.0)
+                .sunlight(0.0)
+                .sky_color(0x000000)
+                .fog(0x000000, 12.0, 48.0)
+                .cloud_fog(12.0, 48.0);
+            for sun in suns {
+                layer = layer.sky_object(sun, 0.0);
+            }
+            if entity != player {
+                layer = layer.radius(12.0, 24.0);
+            }
+            w.environment(entity, &layer);
+        }
+        cmd.reply("command.testmod.eclipse", &[]);
+    });
 }

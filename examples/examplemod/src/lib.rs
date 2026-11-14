@@ -162,8 +162,15 @@ fn worldgen(_r: &mut Registry) {
     // r.sky_body(&OVERWORLD, &PLANET).texture("planet").size(6.0).orbit(96000.0).phase(0.1).tilt(20.0);
     // A weather of your own in base's overworld: lists take `push`, `insert_before`, `remove_item`..
     // static ACID_RAIN: Weather = Weather::named("acid_rain");
-    // r.weather(&ACID_RAIN).darkness(0.5).duration(2400, 6000).weight(1);
+    // r.weather(&ACID_RAIN).darkness(0.5).duration(2400, 6000).weight(1)
+    //     .environment(Environment::new("acid_haze").fog(0x809070, 4.0, 64.0).cloud_color(0x809070).cloud_fog(16.0, 256.0).fade(1.0, 2.0));
     // r.edit(&OVERWORLD).push(&comps::dimension::WEATHERS, ACID_RAIN.name().to_string());
+    // Any client hook can update named atmosphere sources without a fake liquid or status.
+    // r.client_frame(|c| {
+    //     let mut layer = Environment::new("high_air").priority(20);
+    //     layer.values.fog_end = (256.0 - c.state().camera_pos.y as f32).clamp(24.0, 256.0);
+    //     c.environment(&layer);
+    // });
     // Postprocessing can inspect the completed structures and vegetation.
     // static MARKERS: Feature = Feature::named("markers");
     // static MARKER: Block = Block::named("base:cobblestone");

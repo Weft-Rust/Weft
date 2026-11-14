@@ -2,6 +2,12 @@
 
 Types that belong to no topic above.
 
+## Client
+
+- <a id="Client-environment"></a>`.environment(layer: &Environment) -> bool`: Adds or replaces a persistent local source. Repeated calls replace its target without restarting its fade. [source](https://github.com/Weft-Rust/Weft/blob/master/crates/sdk/src/environment.rs#L153)
+- <a id="Client-clear_environment"></a>`.clear_environment(name: &str)`: Removes a local source, retaining its configured fade-out. [source](https://github.com/Weft-Rust/Weft/blob/master/crates/sdk/src/environment.rs#L158)
+- <a id="Client-environment_values"></a>`.environment_values() -> EnvironmentValues`: The final parameters from the last environment evaluation. [source](https://github.com/Weft-Rust/Weft/blob/master/crates/sdk/src/environment.rs#L162)
+
 ## DeclarationBuilder
 
 A component's declaration being registered (`Registry::entity_component`, `stack_component`, `storage`); another mod's is `r.edit(COMP.declaration())`.

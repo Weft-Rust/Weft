@@ -106,6 +106,8 @@ impl Client {
                 self.entity_components
                     .retain(|(e, _), _| !ids.iter().any(|g| g.0 == *e));
                 for &(id, killed) in &ids {
+                    self.environment.remote.remove(&id);
+                    self.environment.static_entities.remove(&id);
                     self.showing_blocks.remove(&id);
                     // What is stuck in one that died goes down with it.
                     let host = self.entities.get(&id).and_then(|e| e.stuck).map(|s| s.host);
@@ -298,6 +300,18 @@ impl Client {
 
     fn spawn_entities(&mut self, list: Vec<crate::net::EntityView>) {
         for e in list {
+            if content()
+                .components
+                .id(weft_abi::environment::COMPONENT)
+                .is_some_and(|id| {
+                    content()
+                        .components
+                        .bytes(crate::components::ENTITY, e.kind, id)
+                        .is_some()
+                })
+            {
+                self.environment.static_entities.insert(e.id);
+            }
             let to = if content().game.is_block_entity(e.kind) { &mut self.showing_blocks } else { &mut self.entities };
             self.entity_render.changed_items.insert(e.id);
             let mut shown = ClientEntity::new(e.kind, e.pos, e.yaw, e.pitch);

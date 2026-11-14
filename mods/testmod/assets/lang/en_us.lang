@@ -104,3 +104,5 @@ block.testmod.red_glass = Red Glass
 item.testmod.hammer = Hammer
 
 command.testmod.display_calls = {0}: {1}
+
+command.testmod.eclipse = Environment source updated

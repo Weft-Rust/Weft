@@ -1,6 +1,7 @@
 pub mod camera;
 pub mod ctm;
 pub mod entity_render;
+pub mod environment;
 pub mod gizmo;
 pub mod glow;
 pub mod lod;
@@ -686,6 +687,7 @@ pub struct Client {
     /// How much of it there is by now, 0..1 over about five seconds.
     /// The weather's look as it is by now, going over to the weather's own (`weather_effects`).
     look: weft_abi::WeatherLook,
+    pub environment: environment::Environment,
     frame_dt: f32,
     /// Seconds left of a lightning's flash.
     lightning: f32,
@@ -977,6 +979,7 @@ impl Client {
             permission: 0,
             weather_id: 0,
             look: Default::default(),
+            environment: Default::default(),
             lightning: 0.0,
             using: None,
             others_mining: Vec::new(),
@@ -2187,66 +2190,8 @@ impl Client {
         );
     }
 
-    /// What goes over the screen: the inside of a liquid, of a block, a fire.
-    fn overlays(&self, textures: &GameTextures) -> Vec<sky::Overlay> {
-        let c = content();
-        let mut out = Vec::new();
-        if !self.camera_has(crate::tag_bits::camera::EFFECTS) || self.hide_gui {
-            return out;
-        }
-        let light = self.daylight().max(0.25);
-        let looks = looks::current();
-        if let Some(l) = self
-            .eye_liquid()
-            .map(|l| &c.liquids[l as usize])
-            .filter(|l| l.overlay_opacity > 0.0)
-        {
-            let st = &c.states[l.first_state as usize];
-            let own = looks
-                .texture_name(c, looks.drawn(l.first_state, st).textures[0])
-                .unwrap_or("");
-            let tint = if st.tint != 0 { sky::rgb(crate::content::item_tint(st.tint)) } else { Vec3::ONE };
-            out.push(sky::Overlay {
-                picture: if l.overlay.is_empty() { own.to_string() } else { l.overlay.clone() },
-                color: (tint * light)
-                    .powf(2.2)
-                    .extend(l.overlay_opacity)
-                    .to_array(),
-                tiles: 1.0,
-                lower: false,
-                frame: 0,
-            });
-        }
-        let head = (self.smooth_pos() + DVec3::Y * self.player.eye)
-            .floor()
-            .as_ivec3();
-        if !self.player.noclip {
-            if let Some(st) = self
-                .world
-                .block_or_air(head)
-                .filter(|&s| c.solid(s) && c.tight[s as usize].opacity >= 15)
-            {
-                if let Some(picture) = looks.texture_name(c, looks.drawn(st, &c.states[st as usize]).textures[1]) {
-                    out.push(sky::Overlay {
-                        picture: picture.to_string(),
-                        color: [0.01, 0.01, 0.01, 1.0],
-                        tiles: 1.0,
-                        lower: false,
-                        frame: 0,
-                    });
-                }
-            }
-        }
-        if self.me.burning {
-            if let Some(picture) = c.textures.get(c.fire_texture as usize) {
-                let ticks = self.start.elapsed().as_secs_f32() * crate::world::TPS as f32;
-                // Loaded by being asked for its picture, for mobs too.
-                textures.texture(c.fire_texture);
-                let frame = textures.strip_frame(c.fire_texture, ticks);
-                out.push(sky::Overlay { picture: picture.clone(), color: [1.0, 1.0, 1.0, 0.9], tiles: 2.0, lower: true, frame });
-            }
-        }
-        out
+    fn overlays(&self, _textures: &GameTextures) -> Vec<sky::Overlay> {
+        if !self.camera_has(crate::tag_bits::camera::EFFECTS) || self.hide_gui { Vec::new() } else { self.environment.overlays.clone() }
     }
 
     /// Like vanilla's block display ticks: random blocks around the player that name a particle
@@ -2431,15 +2376,15 @@ impl Client {
     pub fn listener(&self) -> crate::audio::Listener {
         let c = content();
         let cam = self.render_camera();
-        let eye = cam.pos.floor().as_ivec3();
         crate::audio::Listener {
             pos: cam.pos,
             yaw: cam.yaw,
             pitch: cam.pitch,
-            underwater: self
-                .eye_liquid()
-                .is_some_and(|l| !c.liquids[l as usize].burns()),
-            enclosed: crate::world::light::enclosed(&c.dims[self.world.dim as usize], self.world.light(eye)),
+            acoustics: crate::audio::Acoustics {
+                cutoff: self.environment.values.lowpass,
+                reverb: self.environment.values.reverb,
+                volume: self.environment.values.volume,
+            },
             dim: self.world.dim,
             holds: c
                 .game
@@ -2505,6 +2450,14 @@ impl Client {
             // Only in its slot.
             trash: _,
         } = c.game.fields;
+        if Some(comp) == c.components.id(weft_abi::environment::COMPONENT) {
+            let layers: Vec<weft_abi::environment::EnvironmentLayer> = weft_abi::data::from_bytes(bytes).unwrap_or_default();
+            if layers.is_empty() {
+                self.environment.remote.remove(&id);
+            } else {
+                self.environment.remote.insert(id, layers);
+            }
+        }
         let now = self.ticks();
         let arriving = self.arriving_tick();
         let f: Vec<f32> = words(bytes).map(f32::from_le_bytes).collect();
@@ -2822,9 +2775,8 @@ impl Client {
         self.gpu_terrain.destroy(gpu);
     }
 
-    /// Fraction of full daylight for the current dimension and time.
+    /// Simulation daylight used by conditions and prediction, independent of perception overrides.
     pub fn daylight(&self) -> f32 {
-        // Rain takes away a third of the day, a lightning brings it back for a moment.
         let day = content().dims[self.world.dim as usize].daylight(self.world.time) * (1.0 - self.look.darkness);
         if self.lightning > 0.0 { (day + 0.5).min(1.0) } else { day }
     }
@@ -2870,31 +2822,10 @@ impl Client {
         self.world.time as f64 + self.since_time + fraction
     }
 
-    /// Fog color (linear): the liquid's from inside one; else vanilla's dimming towards night,
-    /// warmed while looking at a sunset.
-    fn fog_linear(&self) -> Vec3 {
-        if let Some(l) = self.eye_liquid() {
-            return self.sky.liquid_color(l);
-        }
-        let d = &content().dims[self.world.dim as usize];
-        let l = self.daylight();
-        let c = sky::rained(sky::rgb(d.fog_color) * Vec3::new(l * 0.94 + 0.06, l * 0.94 + 0.06, l * 0.91 + 0.09), 1.0, self.look.fog_gray);
-        let forward = self.camera().forward();
-        sky::warmed_by_glows(self.world.dim as usize, d, self.smooth_time(), c, forward).powf(2.2)
-    }
-
     /// The frame as every world pass sees it (`gpu_layout::Scene`).
     fn scene(&self, cam: &Camera, frame: &FrameInfo) -> Scene {
-        // Fog ends where the terrain does: the view, or the distant terrain beyond it.
-        let view_distance = (self.view_radius * 16).max(lod::Lod::distance()) as f32;
-        // Vanilla's water fog starts behind the eye, lava's right at it.
-        let (fog_start, fog_end) = match self
-            .eye_liquid()
-            .map(|l| content().liquids[l as usize].fog_distance)
-        {
-            Some(end) => (if end >= 16.0 { -8.0 } else { end * 0.25 }, end),
-            None => (view_distance * 0.6, view_distance),
-        };
+        let environment = &self.environment.values;
+        let (fog_start, fog_end) = (environment.fog_start, environment.fog_end);
         let aspect = frame.width as f32 / frame.height.max(1) as f32;
         let view = cam.view();
         let inv = view.inverse();
@@ -2906,8 +2837,9 @@ impl Client {
             right: inv.transform_vector3(Vec3::X).extend(0.0).to_array(),
             up: inv.transform_vector3(Vec3::Y).extend(0.0).to_array(),
             fog_color: self.fog_color(),
-            params: [fog_start, fog_end, self.daylight(), crate::shaders::time()],
-            light: [content().dims[self.world.dim as usize].ambient as f32 / 15.0, self.brightness, ticks, self.night_vision],
+            params: [fog_start, fog_end, environment.daylight, crate::shaders::time()],
+            light: [environment.ambient, self.brightness, ticks, environment.night_vision],
+            environment: [environment.sunlight, environment.cloud_fog_start, environment.cloud_fog_end, 0.0],
             sun: self.sun(),
         }
     }
@@ -2921,7 +2853,7 @@ impl Client {
         }
         let a = d.day_turn(self.world.time as f64) * std::f64::consts::TAU;
         let v = Vec3::new(a.cos() as f32, a.sin() as f32, 0.35).normalize();
-        [v.x, v.y, v.z, v.y.max(0.0)]
+        [v.x, v.y, v.z, v.y.max(0.0) * self.environment.values.sunlight]
     }
 
     /// `list` goes in the world's pass, `early` before it.
@@ -2996,8 +2928,8 @@ impl Client {
             self.world.dim as usize,
             self.smooth_time(),
             self.camera().pos.y,
-            self.eye_liquid().is_some(),
-            &self.look,
+            &self.environment.values,
+            &self.environment.sky,
             &overlays,
         );
         self.render.draw_translucent(&mut late);
@@ -3060,7 +2992,11 @@ impl Client {
     }
 
     pub fn fog_color(&self) -> [f32; 4] {
-        self.fog_linear().extend(1.0).to_array()
+        let values = &self.environment.values;
+        sky::rained(Vec3::from_array(values.fog_color).powf(1.0 / 2.2), 1.0, values.fog_gray)
+            .powf(2.2)
+            .extend(1.0)
+            .to_array()
     }
 }
 

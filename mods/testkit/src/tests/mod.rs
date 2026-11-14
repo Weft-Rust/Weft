@@ -119,6 +119,7 @@ pub fn all() -> Vec<TestDef> {
         audit::saved_entities_stay_gone,
         audit::death_is_a_state,
         audit::reach_and_mining_attributes,
+        looks::environment_sources,
         looks::sky,
         looks::clouds,
         looks::light_by_day,

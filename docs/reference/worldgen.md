@@ -4,16 +4,16 @@ Dimensions, biomes, terrain, features, structures and the sky.
 
 ## BiomeBuilder
 
-- <a id="BiomeBuilder-temperature"></a>`.temperature(range: impl std::ops::RangeBounds<f64>)`: Where the climate fits it, like `0.35..` or `..-0.45` (from inclusive, to exclusive); the terrain's fields are about -1.4..1.4. Without one it fits everywhere. [source](https://github.com/Weft-Rust/Weft/blob/master/crates/sdk/src/content.rs#L2932)
-- <a id="BiomeBuilder-humidity"></a>`.humidity(range: impl std::ops::RangeBounds<f64>)` [source](https://github.com/Weft-Rust/Weft/blob/master/crates/sdk/src/content.rs#L2935)
-- <a id="BiomeBuilder-surface"></a>`.surface(top: &str, filler: &str, depth: i32)`: Top block, then `depth` blocks of filler, then the terrain's stone. [source](https://github.com/Weft-Rust/Weft/blob/master/crates/sdk/src/content.rs#L2939)
-- <a id="BiomeBuilder-under"></a>`.under(block: &str, layers: i32)`: The lowest `layers` of the filler become `block` (sandstone under sand). [source](https://github.com/Weft-Rust/Weft/blob/master/crates/sdk/src/content.rs#L2946)
-- <a id="BiomeBuilder-deep_top"></a>`.deep_top(block: &str, below: i32)`: Top block for columns lower than `below` (gravel on deep sea floors). [source](https://github.com/Weft-Rust/Weft/blob/master/crates/sdk/src/content.rs#L2952)
-- <a id="BiomeBuilder-bare_above"></a>`.bare_above(y: i32)`: Plain stone above this height (bare peaks). [source](https://github.com/Weft-Rust/Weft/blob/master/crates/sdk/src/content.rs#L2958)
-- <a id="BiomeBuilder-frozen"></a>`.frozen(block: &str)`: A frozen biome: the water surface freezes into `block`, and it has the tag `frozen` (decorations put no flowers there). [source](https://github.com/Weft-Rust/Weft/blob/master/crates/sdk/src/content.rs#L2963)
-- <a id="BiomeBuilder-snows"></a>`.snows()`: Rain falls as snow here: `precipitation(&precipitations::SNOW)`. [source](https://github.com/Weft-Rust/Weft/blob/master/crates/sdk/src/content.rs#L2969)
-- <a id="BiomeBuilder-precipitation"></a>`.precipitation(p: &'static Precipitation)`: What falls here when a weather brings rain: `precipitations::SNOW`, or a mod's own. [source](https://github.com/Weft-Rust/Weft/blob/master/crates/sdk/src/content.rs#L2973)
-- <a id="BiomeBuilder-tint"></a>`.tint(kind: &'static TintKind, color: u32)`: The color (`0xRRGGBB`) blocks tinted with `kind` take here (`tints::GRASS`, or a mod's own kind). Kinds not given keep their default. [source](https://github.com/Weft-Rust/Weft/blob/master/crates/sdk/src/content.rs#L2978)
+- <a id="BiomeBuilder-temperature"></a>`.temperature(range: impl std::ops::RangeBounds<f64>)`: Where the climate fits it, like `0.35..` or `..-0.45` (from inclusive, to exclusive); the terrain's fields are about -1.4..1.4. Without one it fits everywhere. [source](https://github.com/Weft-Rust/Weft/blob/master/crates/sdk/src/content.rs#L2943)
+- <a id="BiomeBuilder-humidity"></a>`.humidity(range: impl std::ops::RangeBounds<f64>)` [source](https://github.com/Weft-Rust/Weft/blob/master/crates/sdk/src/content.rs#L2946)
+- <a id="BiomeBuilder-surface"></a>`.surface(top: &str, filler: &str, depth: i32)`: Top block, then `depth` blocks of filler, then the terrain's stone. [source](https://github.com/Weft-Rust/Weft/blob/master/crates/sdk/src/content.rs#L2950)
+- <a id="BiomeBuilder-under"></a>`.under(block: &str, layers: i32)`: The lowest `layers` of the filler become `block` (sandstone under sand). [source](https://github.com/Weft-Rust/Weft/blob/master/crates/sdk/src/content.rs#L2957)
+- <a id="BiomeBuilder-deep_top"></a>`.deep_top(block: &str, below: i32)`: Top block for columns lower than `below` (gravel on deep sea floors). [source](https://github.com/Weft-Rust/Weft/blob/master/crates/sdk/src/content.rs#L2963)
+- <a id="BiomeBuilder-bare_above"></a>`.bare_above(y: i32)`: Plain stone above this height (bare peaks). [source](https://github.com/Weft-Rust/Weft/blob/master/crates/sdk/src/content.rs#L2969)
+- <a id="BiomeBuilder-frozen"></a>`.frozen(block: &str)`: A frozen biome: the water surface freezes into `block`, and it has the tag `frozen` (decorations put no flowers there). [source](https://github.com/Weft-Rust/Weft/blob/master/crates/sdk/src/content.rs#L2974)
+- <a id="BiomeBuilder-snows"></a>`.snows()`: Rain falls as snow here: `precipitation(&precipitations::SNOW)`. [source](https://github.com/Weft-Rust/Weft/blob/master/crates/sdk/src/content.rs#L2980)
+- <a id="BiomeBuilder-precipitation"></a>`.precipitation(p: &'static Precipitation)`: What falls here when a weather brings rain: `precipitations::SNOW`, or a mod's own. [source](https://github.com/Weft-Rust/Weft/blob/master/crates/sdk/src/content.rs#L2984)
+- <a id="BiomeBuilder-tint"></a>`.tint(kind: &'static TintKind, color: u32)`: The color (`0xRRGGBB`) blocks tinted with `kind` take here (`tints::GRASS`, or a mod's own kind). Kinds not given keep their default. [source](https://github.com/Weft-Rust/Weft/blob/master/crates/sdk/src/content.rs#L2989)
 
 ## BiomeRule
 
@@ -49,23 +49,23 @@ Two-noise tunnels plus large caverns. Between `lava_from` and `lava_to` some lay
 
 ## DimensionBuilder
 
-- <a id="DimensionBuilder-hazard"></a>`.hazard(h: crate::Hazard)`: What it does to whoever is in it (`Hazard::own(..).when(..)`), besides its void 64 blocks under its floor. [source](https://github.com/Weft-Rust/Weft/blob/master/crates/sdk/src/content.rs#L2991)
-- <a id="DimensionBuilder-generator"></a>`.generator(f: impl Fn(&mut Gen) + Send + Sync + 'static)`: Must be a pure function of its input: it runs in parallel and must give the same cube for the same seed and position on every machine. [source](https://github.com/Weft-Rust/Weft/blob/master/crates/sdk/src/content.rs#L2996)
-- <a id="DimensionBuilder-spawn_point"></a>`.spawn_point(f: impl Fn(u64) -> BlockPos + Send + Sync + 'static)`: The block a player starts on top of in this dimension, for a seed. Without one the engine finds open ground near 0, 0 on the dimension's columns (biomes tagged `spawn_biome` first), out of caves and trees. [source](https://github.com/Weft-Rust/Weft/blob/master/crates/sdk/src/content.rs#L3002)
-- <a id="DimensionBuilder-player_spawn"></a>`.player_spawn()`: Players start here and respawn here. When several mods claim it, the one loaded last wins; without any, the first dimension registered is used. [source](https://github.com/Weft-Rust/Weft/blob/master/crates/sdk/src/content.rs#L3007)
-- <a id="DimensionBuilder-no_block_updates"></a>`.no_block_updates()`: Blocks never update here (no neighbor updates, block ticks or growth). [source](https://github.com/Weft-Rust/Weft/blob/master/crates/sdk/src/content.rs#L3011)
-- <a id="DimensionBuilder-bare"></a>`.bare()`: Only what names it: ores, scatters and decorations meant for every dimension stay out (a superflat test world). [source](https://github.com/Weft-Rust/Weft/blob/master/crates/sdk/src/content.rs#L3016)
-- <a id="DimensionBuilder-column"></a>`.column(f: impl Fn(u64, i32, i32) -> (i32, u32) + Send + Sync + 'static)`: Surface height and biome id of column (x, z) for (seed, x, z), for a dimension without a terrain. The generator reads them from `g.columns()` instead of working them out again, and structures, scatters (trees) and the spawn search stand on them. [source](https://github.com/Weft-Rust/Weft/blob/master/crates/sdk/src/content.rs#L3022)
-- <a id="DimensionBuilder-height_cubes"></a>`.height_cubes(min_cube: i32, max_cube: i32)`: Inclusive limits in cubes (16 blocks). [source](https://github.com/Weft-Rust/Weft/blob/master/crates/sdk/src/content.rs#L3027)
-- <a id="DimensionBuilder-sky_above"></a>`.sky_above(cube_y: i32)`: Everything at or above this cube y is empty, so sky light there needs no generation. [source](https://github.com/Weft-Rust/Weft/blob/master/crates/sdk/src/content.rs#L3031)
-- <a id="DimensionBuilder-weathers"></a>`.weathers(list: &[&Weather])`: The weathers that come here now and then after clear weather, each by its weight and duration (`&[&weathers::RAIN, &weathers::THUNDER]` is vanilla's). Without, always clear. [source](https://github.com/Weft-Rust/Weft/blob/master/crates/sdk/src/content.rs#L3036)
-- <a id="DimensionBuilder-no_sky_light"></a>`.no_sky_light()` [source](https://github.com/Weft-Rust/Weft/blob/master/crates/sdk/src/content.rs#L3039)
-- <a id="DimensionBuilder-gravity"></a>`.gravity(g: f32)`: Blocks per second squared. [source](https://github.com/Weft-Rust/Weft/blob/master/crates/sdk/src/content.rs#L3043)
-- <a id="DimensionBuilder-day_length"></a>`.day_length(ticks: u32)` [source](https://github.com/Weft-Rust/Weft/blob/master/crates/sdk/src/content.rs#L3046)
-- <a id="DimensionBuilder-daylight"></a>`.daylight(points: &[(f32, f32)])`: Daylight through the day as points (turn of the sky, level 0..1): the turn 0 is sunrise, 0.25 noon, 0.5 sunset, 0.75 midnight, with straight lines between. Endless dusk is `&[(0.0, 0.4)]`, a long polar day `&[(0.0, 1.0), (0.6, 1.0), (0.7, 0.0), (0.95, 0.0)]`. Spawning, growth, burning in the sun and the sky all follow it. [source](https://github.com/Weft-Rust/Weft/blob/master/crates/sdk/src/content.rs#L3053)
-- <a id="DimensionBuilder-fixed_time"></a>`.fixed_time(time: u32)` [source](https://github.com/Weft-Rust/Weft/blob/master/crates/sdk/src/content.rs#L3060)
-- <a id="DimensionBuilder-sky_color"></a>`.sky_color(sky: u32, fog: u32)` [source](https://github.com/Weft-Rust/Weft/blob/master/crates/sdk/src/content.rs#L3064)
-- <a id="DimensionBuilder-ambient_light"></a>`.ambient_light(level: u32)` [source](https://github.com/Weft-Rust/Weft/blob/master/crates/sdk/src/content.rs#L3068)
+- <a id="DimensionBuilder-hazard"></a>`.hazard(h: crate::Hazard)`: What it does to whoever is in it (`Hazard::own(..).when(..)`), besides its void 64 blocks under its floor. [source](https://github.com/Weft-Rust/Weft/blob/master/crates/sdk/src/content.rs#L3002)
+- <a id="DimensionBuilder-generator"></a>`.generator(f: impl Fn(&mut Gen) + Send + Sync + 'static)`: Must be a pure function of its input: it runs in parallel and must give the same cube for the same seed and position on every machine. [source](https://github.com/Weft-Rust/Weft/blob/master/crates/sdk/src/content.rs#L3007)
+- <a id="DimensionBuilder-spawn_point"></a>`.spawn_point(f: impl Fn(u64) -> BlockPos + Send + Sync + 'static)`: The block a player starts on top of in this dimension, for a seed. Without one the engine finds open ground near 0, 0 on the dimension's columns (biomes tagged `spawn_biome` first), out of caves and trees. [source](https://github.com/Weft-Rust/Weft/blob/master/crates/sdk/src/content.rs#L3013)
+- <a id="DimensionBuilder-player_spawn"></a>`.player_spawn()`: Players start here and respawn here. When several mods claim it, the one loaded last wins; without any, the first dimension registered is used. [source](https://github.com/Weft-Rust/Weft/blob/master/crates/sdk/src/content.rs#L3018)
+- <a id="DimensionBuilder-no_block_updates"></a>`.no_block_updates()`: Blocks never update here (no neighbor updates, block ticks or growth). [source](https://github.com/Weft-Rust/Weft/blob/master/crates/sdk/src/content.rs#L3022)
+- <a id="DimensionBuilder-bare"></a>`.bare()`: Only what names it: ores, scatters and decorations meant for every dimension stay out (a superflat test world). [source](https://github.com/Weft-Rust/Weft/blob/master/crates/sdk/src/content.rs#L3027)
+- <a id="DimensionBuilder-column"></a>`.column(f: impl Fn(u64, i32, i32) -> (i32, u32) + Send + Sync + 'static)`: Surface height and biome id of column (x, z) for (seed, x, z), for a dimension without a terrain. The generator reads them from `g.columns()` instead of working them out again, and structures, scatters (trees) and the spawn search stand on them. [source](https://github.com/Weft-Rust/Weft/blob/master/crates/sdk/src/content.rs#L3033)
+- <a id="DimensionBuilder-height_cubes"></a>`.height_cubes(min_cube: i32, max_cube: i32)`: Inclusive limits in cubes (16 blocks). [source](https://github.com/Weft-Rust/Weft/blob/master/crates/sdk/src/content.rs#L3038)
+- <a id="DimensionBuilder-sky_above"></a>`.sky_above(cube_y: i32)`: Everything at or above this cube y is empty, so sky light there needs no generation. [source](https://github.com/Weft-Rust/Weft/blob/master/crates/sdk/src/content.rs#L3042)
+- <a id="DimensionBuilder-weathers"></a>`.weathers(list: &[&Weather])`: The weathers that come here now and then after clear weather, each by its weight and duration (`&[&weathers::RAIN, &weathers::THUNDER]` is vanilla's). Without, always clear. [source](https://github.com/Weft-Rust/Weft/blob/master/crates/sdk/src/content.rs#L3047)
+- <a id="DimensionBuilder-no_sky_light"></a>`.no_sky_light()` [source](https://github.com/Weft-Rust/Weft/blob/master/crates/sdk/src/content.rs#L3050)
+- <a id="DimensionBuilder-gravity"></a>`.gravity(g: f32)`: Blocks per second squared. [source](https://github.com/Weft-Rust/Weft/blob/master/crates/sdk/src/content.rs#L3054)
+- <a id="DimensionBuilder-day_length"></a>`.day_length(ticks: u32)` [source](https://github.com/Weft-Rust/Weft/blob/master/crates/sdk/src/content.rs#L3057)
+- <a id="DimensionBuilder-daylight"></a>`.daylight(points: &[(f32, f32)])`: Daylight through the day as points (turn of the sky, level 0..1): the turn 0 is sunrise, 0.25 noon, 0.5 sunset, 0.75 midnight, with straight lines between. Endless dusk is `&[(0.0, 0.4)]`, a long polar day `&[(0.0, 1.0), (0.6, 1.0), (0.7, 0.0), (0.95, 0.0)]`. Spawning, growth, burning in the sun and the sky all follow it. [source](https://github.com/Weft-Rust/Weft/blob/master/crates/sdk/src/content.rs#L3064)
+- <a id="DimensionBuilder-fixed_time"></a>`.fixed_time(time: u32)` [source](https://github.com/Weft-Rust/Weft/blob/master/crates/sdk/src/content.rs#L3071)
+- <a id="DimensionBuilder-sky_color"></a>`.sky_color(sky: u32, fog: u32)` [source](https://github.com/Weft-Rust/Weft/blob/master/crates/sdk/src/content.rs#L3075)
+- <a id="DimensionBuilder-ambient_light"></a>`.ambient_light(level: u32)` [source](https://github.com/Weft-Rust/Weft/blob/master/crates/sdk/src/content.rs#L3079)
 
 ## Expr
 
@@ -139,15 +139,15 @@ A feature being registered or changed (`r.edit(IRON_ORE.ore())`: what it sets re
 
 Generation context for one cube.
 
-- <a id="Gen-view"></a>`.view() -> crate::Generation<'_>` [source](https://github.com/Weft-Rust/Weft/blob/master/crates/sdk/src/content.rs#L3233)
-- <a id="Gen-read"></a>`.read(pos: impl Into<BlockPos>) -> u32`: Read a block in world coordinates, including outside this cube and earlier local writes. [source](https://github.com/Weft-Rust/Weft/blob/master/crates/sdk/src/content.rs#L3237)
-- <a id="Gen-seed"></a>`.seed() -> u64` [source](https://github.com/Weft-Rust/Weft/blob/master/crates/sdk/src/content.rs#L3240)
-- <a id="Gen-cube"></a>`.cube() -> BlockPos`: Cube coordinates (block coords = cube * 16). [source](https://github.com/Weft-Rust/Weft/blob/master/crates/sdk/src/content.rs#L3244)
-- <a id="Gen-origin"></a>`.origin() -> BlockPos` [source](https://github.com/Weft-Rust/Weft/blob/master/crates/sdk/src/content.rs#L3247)
-- <a id="Gen-blocks"></a>`.blocks() -> &mut [u32` [source](https://github.com/Weft-Rust/Weft/blob/master/crates/sdk/src/content.rs#L3251)
-- <a id="Gen-biomes"></a>`.biomes() -> &mut [u16` [source](https://github.com/Weft-Rust/Weft/blob/master/crates/sdk/src/content.rs#L3257)
-- <a id="Gen-set"></a>`.set(x: usize, y: usize, z: usize, state: u32)` [source](https://github.com/Weft-Rust/Weft/blob/master/crates/sdk/src/content.rs#L3264)
-- <a id="Gen-get"></a>`.get(x: usize, y: usize, z: usize) -> u32` [source](https://github.com/Weft-Rust/Weft/blob/master/crates/sdk/src/content.rs#L3275)
+- <a id="Gen-view"></a>`.view() -> crate::Generation<'_>` [source](https://github.com/Weft-Rust/Weft/blob/master/crates/sdk/src/content.rs#L3244)
+- <a id="Gen-read"></a>`.read(pos: impl Into<BlockPos>) -> u32`: Read a block in world coordinates, including outside this cube and earlier local writes. [source](https://github.com/Weft-Rust/Weft/blob/master/crates/sdk/src/content.rs#L3248)
+- <a id="Gen-seed"></a>`.seed() -> u64` [source](https://github.com/Weft-Rust/Weft/blob/master/crates/sdk/src/content.rs#L3251)
+- <a id="Gen-cube"></a>`.cube() -> BlockPos`: Cube coordinates (block coords = cube * 16). [source](https://github.com/Weft-Rust/Weft/blob/master/crates/sdk/src/content.rs#L3255)
+- <a id="Gen-origin"></a>`.origin() -> BlockPos` [source](https://github.com/Weft-Rust/Weft/blob/master/crates/sdk/src/content.rs#L3258)
+- <a id="Gen-blocks"></a>`.blocks() -> &mut [u32` [source](https://github.com/Weft-Rust/Weft/blob/master/crates/sdk/src/content.rs#L3262)
+- <a id="Gen-biomes"></a>`.biomes() -> &mut [u16` [source](https://github.com/Weft-Rust/Weft/blob/master/crates/sdk/src/content.rs#L3268)
+- <a id="Gen-set"></a>`.set(x: usize, y: usize, z: usize, state: u32)` [source](https://github.com/Weft-Rust/Weft/blob/master/crates/sdk/src/content.rs#L3275)
+- <a id="Gen-get"></a>`.get(x: usize, y: usize, z: usize) -> u32` [source](https://github.com/Weft-Rust/Weft/blob/master/crates/sdk/src/content.rs#L3286)
 - <a id="Gen-dimension"></a>`.dimension() -> u32`: The dimension being generated. [source](https://github.com/Weft-Rust/Weft/blob/master/crates/sdk/src/terrain.rs#L642)
 - <a id="Gen-columns"></a>`.columns() -> Option<&[Column`: The surface of the cube's 256 columns, index `z * 16 + x`: from the terrain or the dimension's `column`. None for a dimension with neither. [source](https://github.com/Weft-Rust/Weft/blob/master/crates/sdk/src/terrain.rs#L648)
 - <a id="Gen-column"></a>`.column(x: i32, z: i32) -> Column`: Any column of this dimension, in world coordinates. [source](https://github.com/Weft-Rust/Weft/blob/master/crates/sdk/src/terrain.rs#L653)
@@ -174,7 +174,7 @@ Adds to the height of every column, scaled by its mask.
 
 Blocks for templates' slots.
 
-- <a id="PaletteBuilder-slot"></a>`.slot(slot: &str, block: &str)`: Slot `slot` takes `block` (a state too: `base:oak_log[axis=x]`). [source](https://github.com/Weft-Rust/Weft/blob/master/crates/sdk/src/content.rs#L3218)
+- <a id="PaletteBuilder-slot"></a>`.slot(slot: &str, block: &str)`: Slot `slot` takes `block` (a state too: `base:oak_log[axis=x]`). [source](https://github.com/Weft-Rust/Weft/blob/master/crates/sdk/src/content.rs#L3229)
 
 ## Piece
 
@@ -224,9 +224,9 @@ Where `Plan::grow` takes pieces from: pools by name, each a weighted list of tem
 
 What falls from the sky, rain's numbers unless set.
 
-- <a id="PrecipitationBuilder-texture"></a>`.texture(texture: &str)`: `textures/<texture>.png`, a strip of drops like vanilla's rain. [source](https://github.com/Weft-Rust/Weft/blob/master/crates/sdk/src/content.rs#L500)
-- <a id="PrecipitationBuilder-speed"></a>`.speed(share: f32)`: As a share of rain's (snow drifts at 0.1). [source](https://github.com/Weft-Rust/Weft/blob/master/crates/sdk/src/content.rs#L505)
-- <a id="PrecipitationBuilder-density"></a>`.density(share: f32)`: The share of the picture shown (rain 0.1). [source](https://github.com/Weft-Rust/Weft/blob/master/crates/sdk/src/content.rs#L509)
+- <a id="PrecipitationBuilder-texture"></a>`.texture(texture: &str)`: `textures/<texture>.png`, a strip of drops like vanilla's rain. [source](https://github.com/Weft-Rust/Weft/blob/master/crates/sdk/src/content.rs#L506)
+- <a id="PrecipitationBuilder-speed"></a>`.speed(share: f32)`: As a share of rain's (snow drifts at 0.1). [source](https://github.com/Weft-Rust/Weft/blob/master/crates/sdk/src/content.rs#L511)
+- <a id="PrecipitationBuilder-density"></a>`.density(share: f32)`: The share of the picture shown (rain 0.1). [source](https://github.com/Weft-Rust/Weft/blob/master/crates/sdk/src/content.rs#L515)
 
 ## SkyBuilder
 
@@ -263,13 +263,13 @@ A thing in a dimension's sky (`Registry::sky_body`, `sky_stars`, `sky_dome`, `sk
 
 Layers from the bottom up, each a list of rows along z, each character one block along x: a key says which block it means, a space leaves what is there, `air` clears. An edit adds its blocks to the template's.
 
-- <a id="TemplateBuilder-layer"></a>`.layer(rows: &[&str])` [source](https://github.com/Weft-Rust/Weft/blob/master/crates/sdk/src/content.rs#L3117)
-- <a id="TemplateBuilder-key"></a>`.key(c: char, block: &str)`: `block` may name a state (`furnace[lit=true]`) or `air` to clear. [source](https://github.com/Weft-Rust/Weft/blob/master/crates/sdk/src/content.rs#L3123)
-- <a id="TemplateBuilder-fill"></a>`.fill(block: &str, from: impl Into<BlockPos>, to: impl Into<BlockPos>)`: A box of `block` from `from` to `to`, inclusive (a moving body's deck). [source](https://github.com/Weft-Rust/Weft/blob/master/crates/sdk/src/content.rs#L3128)
-- <a id="TemplateBuilder-slot"></a>`.slot(slot: &str, block: &str)`: What slot `slot` (a key `@slot` or `@slot:stairs[facing=north]`) takes unless a palette says otherwise. [source](https://github.com/Weft-Rust/Weft/blob/master/crates/sdk/src/content.rs#L3136)
-- <a id="TemplateBuilder-entity"></a>`.entity(kind: &crate::EntityKind, pos: impl Into<crate::Vec3>)`: An entity of `kind` standing at `pos` (from the lowest corner) whenever it is placed. [source](https://github.com/Weft-Rust/Weft/blob/master/crates/sdk/src/content.rs#L3141)
-- <a id="TemplateBuilder-loot"></a>`.loot(pos: impl Into<BlockPos>, table: &crate::LootTable)`: The block entity at `pos` (a chest) filled from loot table `table` whenever it is placed. [source](https://github.com/Weft-Rust/Weft/blob/master/crates/sdk/src/content.rs#L3149)
-- <a id="TemplateBuilder-joint"></a>`.joint(pos: impl Into<BlockPos>, face: usize, name: &str, target: &str, pool: &str)`: A joint at `pos` facing `face` (`FACE_DIRS` index), where `Plan::grow` joins a piece from pool `pool` by its joint called `target`. [source](https://github.com/Weft-Rust/Weft/blob/master/crates/sdk/src/content.rs#L3155)
+- <a id="TemplateBuilder-layer"></a>`.layer(rows: &[&str])` [source](https://github.com/Weft-Rust/Weft/blob/master/crates/sdk/src/content.rs#L3128)
+- <a id="TemplateBuilder-key"></a>`.key(c: char, block: &str)`: `block` may name a state (`furnace[lit=true]`) or `air` to clear. [source](https://github.com/Weft-Rust/Weft/blob/master/crates/sdk/src/content.rs#L3134)
+- <a id="TemplateBuilder-fill"></a>`.fill(block: &str, from: impl Into<BlockPos>, to: impl Into<BlockPos>)`: A box of `block` from `from` to `to`, inclusive (a moving body's deck). [source](https://github.com/Weft-Rust/Weft/blob/master/crates/sdk/src/content.rs#L3139)
+- <a id="TemplateBuilder-slot"></a>`.slot(slot: &str, block: &str)`: What slot `slot` (a key `@slot` or `@slot:stairs[facing=north]`) takes unless a palette says otherwise. [source](https://github.com/Weft-Rust/Weft/blob/master/crates/sdk/src/content.rs#L3147)
+- <a id="TemplateBuilder-entity"></a>`.entity(kind: &crate::EntityKind, pos: impl Into<crate::Vec3>)`: An entity of `kind` standing at `pos` (from the lowest corner) whenever it is placed. [source](https://github.com/Weft-Rust/Weft/blob/master/crates/sdk/src/content.rs#L3152)
+- <a id="TemplateBuilder-loot"></a>`.loot(pos: impl Into<BlockPos>, table: &crate::LootTable)`: The block entity at `pos` (a chest) filled from loot table `table` whenever it is placed. [source](https://github.com/Weft-Rust/Weft/blob/master/crates/sdk/src/content.rs#L3160)
+- <a id="TemplateBuilder-joint"></a>`.joint(pos: impl Into<BlockPos>, face: usize, name: &str, target: &str, pool: &str)`: A joint at `pos` facing `face` (`FACE_DIRS` index), where `Plan::grow` joins a piece from pool `pool` by its joint called `target`. [source](https://github.com/Weft-Rust/Weft/blob/master/crates/sdk/src/content.rs#L3166)
 
 ## TerrainBuilder
 
@@ -315,11 +315,11 @@ What a vein looks like (`FeatureBuilder::vein`). Every vein stays within 16 bloc
 
 A weather being registered: rain's rules unless told otherwise.
 
-- <a id="WeatherBuilder-no_falling"></a>`.no_falling()`: Nothing falls (by default rain, snow, each biome's own does). [source](https://github.com/Weft-Rust/Weft/blob/master/crates/sdk/src/content.rs#L554)
-- <a id="WeatherBuilder-lightning"></a>`.lightning()` [source](https://github.com/Weft-Rust/Weft/blob/master/crates/sdk/src/content.rs#L557)
-- <a id="WeatherBuilder-no_shelter"></a>`.no_shelter()`: Things burn in the sun under it, a sandstorm (under rain they don't). [source](https://github.com/Weft-Rust/Weft/blob/master/crates/sdk/src/content.rs#L561)
-- <a id="WeatherBuilder-darkness"></a>`.darkness(share: f32)`: Share of daylight it takes away (rain 0.3125). [source](https://github.com/Weft-Rust/Weft/blob/master/crates/sdk/src/content.rs#L565)
-- <a id="WeatherBuilder-gray"></a>`.gray(sky: f32, fog: f32, clouds: f32)`: How far the sky (rain 0.75), the fog (0.5) and the clouds (0.95) go gray. [source](https://github.com/Weft-Rust/Weft/blob/master/crates/sdk/src/content.rs#L569)
-- <a id="WeatherBuilder-sound"></a>`.sound(sound: &str)`: A sound event played now and then around players under the open sky while it falls. [source](https://github.com/Weft-Rust/Weft/blob/master/crates/sdk/src/content.rs#L575)
-- <a id="WeatherBuilder-duration"></a>`.duration(min: u32, max: u32)`: Ticks it lasts, at least and at most. [source](https://github.com/Weft-Rust/Weft/blob/master/crates/sdk/src/content.rs#L580)
-- <a id="WeatherBuilder-weight"></a>`.weight(w: u32)`: How likely it comes after clear weather next to the others (rain 3, thunder 1); 0 only by command or code. [source](https://github.com/Weft-Rust/Weft/blob/master/crates/sdk/src/content.rs#L585)
+- <a id="WeatherBuilder-no_falling"></a>`.no_falling()`: Nothing falls (by default rain, snow, each biome's own does). [source](https://github.com/Weft-Rust/Weft/blob/master/crates/sdk/src/content.rs#L560)
+- <a id="WeatherBuilder-lightning"></a>`.lightning()` [source](https://github.com/Weft-Rust/Weft/blob/master/crates/sdk/src/content.rs#L563)
+- <a id="WeatherBuilder-no_shelter"></a>`.no_shelter()`: Things burn in the sun under it, a sandstorm (under rain they don't). [source](https://github.com/Weft-Rust/Weft/blob/master/crates/sdk/src/content.rs#L567)
+- <a id="WeatherBuilder-darkness"></a>`.darkness(share: f32)`: Share of daylight it takes away (rain 0.3125). [source](https://github.com/Weft-Rust/Weft/blob/master/crates/sdk/src/content.rs#L571)
+- <a id="WeatherBuilder-gray"></a>`.gray(sky: f32, fog: f32, clouds: f32)`: How far the sky (rain 0.75), the fog (0.5) and the clouds (0.95) go gray. [source](https://github.com/Weft-Rust/Weft/blob/master/crates/sdk/src/content.rs#L575)
+- <a id="WeatherBuilder-sound"></a>`.sound(sound: &str)`: A sound event played now and then around players under the open sky while it falls. [source](https://github.com/Weft-Rust/Weft/blob/master/crates/sdk/src/content.rs#L581)
+- <a id="WeatherBuilder-duration"></a>`.duration(min: u32, max: u32)`: Ticks it lasts, at least and at most. [source](https://github.com/Weft-Rust/Weft/blob/master/crates/sdk/src/content.rs#L586)
+- <a id="WeatherBuilder-weight"></a>`.weight(w: u32)`: How likely it comes after clear weather next to the others (rain 3, thunder 1); 0 only by command or code. [source](https://github.com/Weft-Rust/Weft/blob/master/crates/sdk/src/content.rs#L591)

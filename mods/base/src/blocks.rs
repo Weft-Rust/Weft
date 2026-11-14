@@ -319,7 +319,12 @@ pub fn register(r: &mut Registry) {
                 .tag("water")
         })
         .renewable(2)
-        .fog(0x050533, 96.0)
+        .fog(0x050533, -8.0, 96.0)
+        .environment(
+            Environment::new("water_acoustics")
+                .priority(-700)
+                .acoustics(900.0, 0.0, 1.0),
+        )
         .bucket(Item::generated("water_bucket".into()), &crate::items::BUCKET, &crate::tabs::TOOLS);
     r.liquid(&LAVA)
         .block(|b| {
@@ -332,7 +337,7 @@ pub fn register(r: &mut Registry) {
         .drop_off(2)
         .slope_find(2)
         .heat(1300)
-        .fog(0x991A00, 1.0)
+        .fog(0x991A00, 0.25, 1.0)
         .no_overlay()
         .bucket(Item::generated("lava_bucket".into()), &crate::items::BUCKET, &crate::tabs::TOOLS);
     r.liquid_reaction("#cools_into_stone", "#water")

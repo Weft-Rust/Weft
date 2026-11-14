@@ -692,12 +692,7 @@ pub struct LiquidDef {
     /// Lighter than air: flows up.
     pub rises: bool,
     pub temperature: u32,
-    /// 0xRRGGBB, `None` for the average of its texture.
-    pub fog_color: Option<u32>,
-    pub fog_distance: f32,
-    /// Asset name, empty for its own texture.
-    pub overlay: String,
-    pub overlay_opacity: f32,
+    pub environment: Vec<abi::environment::EnvironmentLayer>,
 }
 
 impl LiquidDef {
@@ -2631,7 +2626,11 @@ fn declare_components(
         }
     }
     for d in decls {
-        let size = d.entity.as_ref().map(|c| c.size as usize);
+        let size = d
+            .entity
+            .as_ref()
+            .map(|c| c.size as usize)
+            .filter(|&n| n != 0);
         cb.declare(&d.name, &d.schema, size, &|| who(d.owner, "component"), errors);
     }
     cb
@@ -3955,8 +3954,22 @@ fn freeze_liquids(
                 errors.push(format!("liquid {}: its block needs 16 states, has {}", e.name, def.states));
                 return None;
             }
-            let fog: abi::LiquidFog = e.or(l::FOG, abi::LiquidFog { color: u32::MAX, distance: 96.0 });
-            let overlay: abi::LiquidOverlay = e.or(l::OVERLAY, abi::LiquidOverlay { texture: String::new(), opacity: 0.1 });
+            let mut base = abi::environment::EnvironmentLayer::new("core:liquid".into());
+            base.priority = -700;
+            base.values.fog_start = -8.0;
+            base.values.fog_end = 96.0;
+            base.values.fog_gray = 0.0;
+            base.values.sky_opacity = 0.0;
+            base.fog_from_block = true;
+            base.overlays.push(abi::environment::EnvironmentOverlay {
+                color: [1.0, 1.0, 1.0, 0.1],
+                tiles: 1.0,
+                block_face: 0,
+                lit: true,
+                ..Default::default()
+            });
+            let mut environment = vec![base];
+            environment.extend(e.or::<Vec<abi::environment::EnvironmentLayer>>(abi::environment::COMPONENT, Vec::new()));
             Some(LiquidDef {
                 name: e.name.clone(),
                 first_state: def.first_state,
@@ -3966,10 +3979,7 @@ fn freeze_liquids(
                 renewable: e.or(l::RENEWABLE, u32::MAX),
                 rises: e.or(l::DENSITY, 1000) < 0,
                 temperature: e.or(l::HEAT, 300),
-                fog_color: (fog.color != u32::MAX).then_some(fog.color),
-                fog_distance: fog.distance.max(0.1),
-                overlay: overlay.texture,
-                overlay_opacity: overlay.opacity.clamp(0.0, 1.0),
+                environment,
             })
         },
     );

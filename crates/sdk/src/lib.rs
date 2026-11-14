@@ -16,6 +16,8 @@ pub mod comps;
 mod config;
 mod content;
 mod effects;
+pub mod environment;
+pub use environment::{ENVIRONMENT, Environment, EnvironmentValues};
 mod entry;
 mod extend;
 pub mod facing;

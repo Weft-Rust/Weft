@@ -170,7 +170,7 @@ impl Block {
     pub fn ore(&self) -> &'static Feature {
         Feature::generated(self.name().to_string())
     }
-    /// Its liquid, for `Registry::edit`: `r.edit(base::WATER.liquid()).fog(0x204020, 12.0)`.
+    /// Its liquid, for `Registry::edit`: `r.edit(base::WATER.liquid()).fog(0x204020, -8.0, 12.0)`.
     pub fn liquid(&self) -> &'static Liquid {
         Liquid::generated(self.name().to_string())
     }
@@ -478,8 +478,14 @@ impl EntityEffectBuilder<'_> {
     /// What its player sees goes through this screen shader while it has it
     /// (`shaders/post/<name>.wgsl`, `PostPixel`): night vision, blindness.
     pub fn screen(self, shader: &crate::Shader) -> Self {
-        let name = shader.name().to_string();
-        self.set_text(&crate::comps::entity_effect::SCREEN, &name)
+        self.environment(
+            crate::Environment::new("core:screen")
+                .blend(crate::environment::blend::MAX)
+                .observer(crate::environment::observer::BODY)
+                .priority(-400)
+                .fade(0.0, 1.0)
+                .post(shader, 1.0),
+        )
     }
     /// Its entity isn't drawn for anyone else while it has it (invisibility).
     pub fn hides(self) -> Self {
@@ -920,6 +926,11 @@ pub trait WithComponents: Sized {
     fn tag(mut self, tag: &str) -> Self {
         self.pending().push(Pending::tag(tag));
         self
+    }
+    /// Perception from a dimension, weather, biome, sampled block/liquid, entity kind,
+    /// active entity effect or equipped item. Other entry kinds do not emit sources.
+    fn environment(self, layer: crate::Environment) -> Self {
+        crate::environment::attach(self, layer)
     }
     /// Takes a tag away (another mod's, in an edit).
     fn untag(mut self, tag: &str) -> Self {
@@ -3672,21 +3683,43 @@ impl LiquidBuilder<'_> {
     pub fn heat(self, t: u32) -> Self {
         self.set(&crate::comps::liquid::HEAT, t)
     }
-    /// The fog seen from inside: its color (0xRRGGBB) and how many blocks away it hides
-    /// everything. By default the average color of its texture, 96 blocks.
-    pub fn fog(self, rgb: u32, blocks: f32) -> Self {
-        self.set(&crate::comps::liquid::FOG, abi::LiquidFog { color: rgb, distance: blocks })
+    /// A camera environment preset: color (0xRRGGBB), start and end in blocks.
+    /// Defaults to the average texture color, start -8 and end 96. Acoustics are independent.
+    pub fn fog(self, rgb: u32, start: f32, end: f32) -> Self {
+        let mut layer = crate::Environment::new("core:liquid_fog")
+            .priority(-699)
+            .fog(rgb, start, end);
+        if rgb == u32::MAX {
+            layer.fog_from_block = true;
+        }
+        self.environment(layer)
     }
     /// The picture over the screen from inside, relative names are under `block/`, and how much
     /// of it shows. By default its own texture at 0.1; for an inside that looks unlike the surface, set
     /// this and `fog` apart from its texture.
     pub fn overlay(self, texture: &str, opacity: f32) -> Self {
         let texture = crate::asset("block", texture);
-        self.set(&crate::comps::liquid::OVERLAY, abi::LiquidOverlay { texture, opacity })
+        let mut layer = crate::Environment::new("core:liquid_overlay")
+            .priority(-698)
+            .replace_overlays();
+        let block_face = if texture.is_empty() { 0 } else { -1 };
+        layer.overlays.push(abi::environment::EnvironmentOverlay {
+            texture,
+            color: [1.0, 1.0, 1.0, opacity],
+            tiles: 1.0,
+            block_face,
+            lit: true,
+            ..Default::default()
+        });
+        self.environment(layer)
     }
     /// Nothing over the screen from inside.
     pub fn no_overlay(self) -> Self {
-        self.set(&crate::comps::liquid::OVERLAY, abi::LiquidOverlay { texture: String::new(), opacity: 0.0 })
+        self.environment(
+            crate::Environment::new("core:liquid_overlay")
+                .priority(-698)
+                .replace_overlays(),
+        )
     }
     /// Also registers `item`: `empty` (a container item, any mod's) filled with this liquid, in
     /// creative tab `tab` (any mod's). The engine fills and pours it; no code needed.

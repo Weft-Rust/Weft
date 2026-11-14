@@ -12,16 +12,16 @@ An entity category being registered (`Registry::entity_category`).
 
 `r.damage_cause(&RADIATION).bypasses_armor().death_message("death.mymod.radiation")`.
 
-- <a id="DamageCauseBuilder-bypasses_armor"></a>`.bypasses_armor()`: Armor doesn't soften it. [source](https://github.com/Weft-Rust/Weft/blob/master/crates/sdk/src/content.rs#L812)
-- <a id="DamageCauseBuilder-bypasses_blocking"></a>`.bypasses_blocking()`: Held items cannot block it. [source](https://github.com/Weft-Rust/Weft/blob/master/crates/sdk/src/content.rs#L816)
-- <a id="DamageCauseBuilder-pierces_invulnerable"></a>`.pierces_invulnerable()`: Hurts invulnerable entities and players outside survival too. [source](https://github.com/Weft-Rust/Weft/blob/master/crates/sdk/src/content.rs#L820)
-- <a id="DamageCauseBuilder-ignores_cooldown"></a>`.ignores_cooldown()`: Lands in full even right after another hit. [source](https://github.com/Weft-Rust/Weft/blob/master/crates/sdk/src/content.rs#L824)
-- <a id="DamageCauseBuilder-burning"></a>`.burning()`: What dies of it drops cooked food. [source](https://github.com/Weft-Rust/Weft/blob/master/crates/sdk/src/content.rs#L828)
-- <a id="DamageCauseBuilder-no_knockback"></a>`.no_knockback()` [source](https://github.com/Weft-Rust/Weft/blob/master/crates/sdk/src/content.rs#L831)
-- <a id="DamageCauseBuilder-silent"></a>`.silent()`: No hurt sound. [source](https://github.com/Weft-Rust/Weft/blob/master/crates/sdk/src/content.rs#L835)
-- <a id="DamageCauseBuilder-not_lethal"></a>`.not_lethal()`: Never kills: it leaves half a heart (poison). [source](https://github.com/Weft-Rust/Weft/blob/master/crates/sdk/src/content.rs#L839)
-- <a id="DamageCauseBuilder-death_message"></a>`.death_message(key: &str)`: Translation key said when a player dies of it, `{0}` their name. [source](https://github.com/Weft-Rust/Weft/blob/master/crates/sdk/src/content.rs#L843)
-- <a id="DamageCauseBuilder-death_message_by"></a>`.death_message_by(key: &str)`: The key when something did it, `{1}` that thing's name. [source](https://github.com/Weft-Rust/Weft/blob/master/crates/sdk/src/content.rs#L847)
+- <a id="DamageCauseBuilder-bypasses_armor"></a>`.bypasses_armor()`: Armor doesn't soften it. [source](https://github.com/Weft-Rust/Weft/blob/master/crates/sdk/src/content.rs#L818)
+- <a id="DamageCauseBuilder-bypasses_blocking"></a>`.bypasses_blocking()`: Held items cannot block it. [source](https://github.com/Weft-Rust/Weft/blob/master/crates/sdk/src/content.rs#L822)
+- <a id="DamageCauseBuilder-pierces_invulnerable"></a>`.pierces_invulnerable()`: Hurts invulnerable entities and players outside survival too. [source](https://github.com/Weft-Rust/Weft/blob/master/crates/sdk/src/content.rs#L826)
+- <a id="DamageCauseBuilder-ignores_cooldown"></a>`.ignores_cooldown()`: Lands in full even right after another hit. [source](https://github.com/Weft-Rust/Weft/blob/master/crates/sdk/src/content.rs#L830)
+- <a id="DamageCauseBuilder-burning"></a>`.burning()`: What dies of it drops cooked food. [source](https://github.com/Weft-Rust/Weft/blob/master/crates/sdk/src/content.rs#L834)
+- <a id="DamageCauseBuilder-no_knockback"></a>`.no_knockback()` [source](https://github.com/Weft-Rust/Weft/blob/master/crates/sdk/src/content.rs#L837)
+- <a id="DamageCauseBuilder-silent"></a>`.silent()`: No hurt sound. [source](https://github.com/Weft-Rust/Weft/blob/master/crates/sdk/src/content.rs#L841)
+- <a id="DamageCauseBuilder-not_lethal"></a>`.not_lethal()`: Never kills: it leaves half a heart (poison). [source](https://github.com/Weft-Rust/Weft/blob/master/crates/sdk/src/content.rs#L845)
+- <a id="DamageCauseBuilder-death_message"></a>`.death_message(key: &str)`: Translation key said when a player dies of it, `{0}` their name. [source](https://github.com/Weft-Rust/Weft/blob/master/crates/sdk/src/content.rs#L849)
+- <a id="DamageCauseBuilder-death_message_by"></a>`.death_message_by(key: &str)`: The key when something did it, `{1}` that thing's name. [source](https://github.com/Weft-Rust/Weft/blob/master/crates/sdk/src/content.rs#L853)
 
 ## EntityBuilder
 
@@ -95,7 +95,7 @@ An entity effect being registered: drawn by `shaders/entity_effect/<its name>.wg
 - <a id="EntityEffectBuilder-harmful"></a>`.harmful()` [source](https://github.com/Weft-Rust/Weft/blob/master/crates/sdk/src/content.rs#L471)
 - <a id="EntityEffectBuilder-instant"></a>`.instant()`: It acts once when given, its hazards times the level (healing), and doesn't stay. [source](https://github.com/Weft-Rust/Weft/blob/master/crates/sdk/src/content.rs#L475)
 - <a id="EntityEffectBuilder-screen"></a>`.screen(shader: &crate::Shader)`: What its player sees goes through this screen shader while it has it (`shaders/post/<name>.wgsl`, `PostPixel`): night vision, blindness. [source](https://github.com/Weft-Rust/Weft/blob/master/crates/sdk/src/content.rs#L480)
-- <a id="EntityEffectBuilder-hides"></a>`.hides()`: Its entity isn't drawn for anyone else while it has it (invisibility). [source](https://github.com/Weft-Rust/Weft/blob/master/crates/sdk/src/content.rs#L485)
+- <a id="EntityEffectBuilder-hides"></a>`.hides()`: Its entity isn't drawn for anyone else while it has it (invisibility). [source](https://github.com/Weft-Rust/Weft/blob/master/crates/sdk/src/content.rs#L491)
 
 ## EntityKind
 
@@ -129,17 +129,17 @@ Where a rider gets off.
 
 A game mode being registered: survival's rules unless told otherwise.
 
-- <a id="GameModeBuilder-breaks"></a>`.breaks(how: Breaking)` [source](https://github.com/Weft-Rust/Weft/blob/master/crates/sdk/src/content.rs#L726)
-- <a id="GameModeBuilder-flight"></a>`.flight(how: Flight)` [source](https://github.com/Weft-Rust/Weft/blob/master/crates/sdk/src/content.rs#L734)
-- <a id="GameModeBuilder-no_placing"></a>`.no_placing()` [source](https://github.com/Weft-Rust/Weft/blob/master/crates/sdk/src/content.rs#L742)
-- <a id="GameModeBuilder-no_costs"></a>`.no_costs()`: Nothing gets used up: placed blocks, poured buckets, wear. Picking a block gives a stack. [source](https://github.com/Weft-Rust/Weft/blob/master/crates/sdk/src/content.rs#L746)
-- <a id="GameModeBuilder-invulnerable"></a>`.invulnerable()`: No damage, hunger or air (`attribute::INVULNERABLE` 1). [source](https://github.com/Weft-Rust/Weft/blob/master/crates/sdk/src/content.rs#L750)
-- <a id="GameModeBuilder-noclip"></a>`.noclip()`: Through blocks. [source](https://github.com/Weft-Rust/Weft/blob/master/crates/sdk/src/content.rs#L754)
-- <a id="GameModeBuilder-hidden"></a>`.hidden()`: Unnoticed by mobs, spawning and other players, and not a body to hit. [source](https://github.com/Weft-Rust/Weft/blob/master/crates/sdk/src/content.rs#L758)
-- <a id="GameModeBuilder-no_interacting"></a>`.no_interacting()`: It can't use, hit, pick up, drop or hold anything. [source](https://github.com/Weft-Rust/Weft/blob/master/crates/sdk/src/content.rs#L762)
-- <a id="GameModeBuilder-no_hud"></a>`.no_hud()`: The hotbar and bars don't show. [source](https://github.com/Weft-Rust/Weft/blob/master/crates/sdk/src/content.rs#L766)
-- <a id="GameModeBuilder-creative_inventory"></a>`.creative_inventory()`: The inventory key opens the creative inventory. [source](https://github.com/Weft-Rust/Weft/blob/master/crates/sdk/src/content.rs#L770)
-- <a id="GameModeBuilder-modifier"></a>`.modifier(m: crate::Modifier)`: An attribute modifier its players have while in it (longer reach, `visibility` 0). [source](https://github.com/Weft-Rust/Weft/blob/master/crates/sdk/src/content.rs#L774)
+- <a id="GameModeBuilder-breaks"></a>`.breaks(how: Breaking)` [source](https://github.com/Weft-Rust/Weft/blob/master/crates/sdk/src/content.rs#L732)
+- <a id="GameModeBuilder-flight"></a>`.flight(how: Flight)` [source](https://github.com/Weft-Rust/Weft/blob/master/crates/sdk/src/content.rs#L740)
+- <a id="GameModeBuilder-no_placing"></a>`.no_placing()` [source](https://github.com/Weft-Rust/Weft/blob/master/crates/sdk/src/content.rs#L748)
+- <a id="GameModeBuilder-no_costs"></a>`.no_costs()`: Nothing gets used up: placed blocks, poured buckets, wear. Picking a block gives a stack. [source](https://github.com/Weft-Rust/Weft/blob/master/crates/sdk/src/content.rs#L752)
+- <a id="GameModeBuilder-invulnerable"></a>`.invulnerable()`: No damage, hunger or air (`attribute::INVULNERABLE` 1). [source](https://github.com/Weft-Rust/Weft/blob/master/crates/sdk/src/content.rs#L756)
+- <a id="GameModeBuilder-noclip"></a>`.noclip()`: Through blocks. [source](https://github.com/Weft-Rust/Weft/blob/master/crates/sdk/src/content.rs#L760)
+- <a id="GameModeBuilder-hidden"></a>`.hidden()`: Unnoticed by mobs, spawning and other players, and not a body to hit. [source](https://github.com/Weft-Rust/Weft/blob/master/crates/sdk/src/content.rs#L764)
+- <a id="GameModeBuilder-no_interacting"></a>`.no_interacting()`: It can't use, hit, pick up, drop or hold anything. [source](https://github.com/Weft-Rust/Weft/blob/master/crates/sdk/src/content.rs#L768)
+- <a id="GameModeBuilder-no_hud"></a>`.no_hud()`: The hotbar and bars don't show. [source](https://github.com/Weft-Rust/Weft/blob/master/crates/sdk/src/content.rs#L772)
+- <a id="GameModeBuilder-creative_inventory"></a>`.creative_inventory()`: The inventory key opens the creative inventory. [source](https://github.com/Weft-Rust/Weft/blob/master/crates/sdk/src/content.rs#L776)
+- <a id="GameModeBuilder-modifier"></a>`.modifier(m: crate::Modifier)`: An attribute modifier its players have while in it (longer reach, `visibility` 0). [source](https://github.com/Weft-Rust/Weft/blob/master/crates/sdk/src/content.rs#L780)
 
 ## Goals
 
@@ -168,10 +168,10 @@ What hits land on, part by part (`EntityBuilder::hitboxes`): boxes in pixels (1/
 
 What `ItemBuilder::condition` changes of a stack's look; what it doesn't set stays.
 
-- <a id="Looks-worn_model"></a>`.worn_model(model: &str, bone: &str) -> &mut Self`: A model attached to a bone while this stack is in equipment. [source](https://github.com/Weft-Rust/Weft/blob/master/crates/sdk/src/content.rs#L2892)
-- <a id="Looks-worn_texture"></a>`.worn_texture(texture: &str) -> &mut Self`: A texture on the wearer's armor geometry, under `entity/`. [source](https://github.com/Weft-Rust/Weft/blob/master/crates/sdk/src/content.rs#L2897)
-- <a id="Looks-texture"></a>`.texture(t: &str) -> &mut Self`: A texture from `item/` instead of its own. [source](https://github.com/Weft-Rust/Weft/blob/master/crates/sdk/src/content.rs#L2902)
-- <a id="Looks-model"></a>`.model(m: &str) -> &mut Self`: A model file instead of its own (`set_model`). [source](https://github.com/Weft-Rust/Weft/blob/master/crates/sdk/src/content.rs#L2907)
+- <a id="Looks-worn_model"></a>`.worn_model(model: &str, bone: &str) -> &mut Self`: A model attached to a bone while this stack is in equipment. [source](https://github.com/Weft-Rust/Weft/blob/master/crates/sdk/src/content.rs#L2903)
+- <a id="Looks-worn_texture"></a>`.worn_texture(texture: &str) -> &mut Self`: A texture on the wearer's armor geometry, under `entity/`. [source](https://github.com/Weft-Rust/Weft/blob/master/crates/sdk/src/content.rs#L2908)
+- <a id="Looks-texture"></a>`.texture(t: &str) -> &mut Self`: A texture from `item/` instead of its own. [source](https://github.com/Weft-Rust/Weft/blob/master/crates/sdk/src/content.rs#L2913)
+- <a id="Looks-model"></a>`.model(m: &str) -> &mut Self`: A model file instead of its own (`set_model`). [source](https://github.com/Weft-Rust/Weft/blob/master/crates/sdk/src/content.rs#L2918)
 
 ## Model
 
@@ -195,17 +195,17 @@ A model part (a bone): its name, pivot, boxes, free-form triangles, and the part
 
 A pose being registered: standing's box and speed unless told otherwise.
 
-- <a id="PoseBuilder-modifier"></a>`.modifier(m: crate::Modifier)`: An attribute modifier its holder gets while in it (`Modifier`). [source](https://github.com/Weft-Rust/Weft/blob/master/crates/sdk/src/content.rs#L628)
-- <a id="PoseBuilder-height"></a>`.height(share: f32)`: Box height as a share of standing (crouching is 1.5 / 1.8). [source](https://github.com/Weft-Rust/Weft/blob/master/crates/sdk/src/content.rs#L632)
-- <a id="PoseBuilder-eye"></a>`.eye(share: f32)`: Eye height as a share of standing. [source](https://github.com/Weft-Rust/Weft/blob/master/crates/sdk/src/content.rs#L636)
-- <a id="PoseBuilder-speed"></a>`.speed(share: f32)`: Walking speed as a share of normal, 0 to stay put. [source](https://github.com/Weft-Rust/Weft/blob/master/crates/sdk/src/content.rs#L640)
-- <a id="PoseBuilder-tilt"></a>`.tilt(tilt: u32)`: How the model lies (`abi::pose_tilt`): along the look like swimming, face down, on its back. [source](https://github.com/Weft-Rust/Weft/blob/master/crates/sdk/src/content.rs#L644)
-- <a id="PoseBuilder-action"></a>`.action(name: &str)`: The model's clip for it, by action name. [source](https://github.com/Weft-Rust/Weft/blob/master/crates/sdk/src/content.rs#L648)
-- <a id="PoseBuilder-no_bob"></a>`.no_bob()`: The camera doesn't bob walking in it. [source](https://github.com/Weft-Rust/Weft/blob/master/crates/sdk/src/content.rs#L652)
-- <a id="PoseBuilder-priority"></a>`.priority(p: i32)`: Of the poses a player may take, the highest is taken (the engine's: stand 0, crouch 10, crawl 20, swim 30). Without `key` or `when` a pose is only ever held by a mod. [source](https://github.com/Weft-Rust/Weft/blob/master/crates/sdk/src/content.rs#L657)
-- <a id="PoseBuilder-key"></a>`.key(key: &crate::Key)`: Taken while the player holds this action. [source](https://github.com/Weft-Rust/Weft/blob/master/crates/sdk/src/content.rs#L661)
-- <a id="PoseBuilder-when"></a>`.when(c: impl Into<crate::Cond>)`: And only where this holds (`Cond::in_liquid`, `!Cond::flying()`); again for more. [source](https://github.com/Weft-Rust/Weft/blob/master/crates/sdk/src/content.rs#L666)
-- <a id="PoseBuilder-fallback"></a>`.fallback(poses: &[&Pose])`: Where it has no room, the first of these that has and whose `when` holds; the last even without room. [source](https://github.com/Weft-Rust/Weft/blob/master/crates/sdk/src/content.rs#L671)
+- <a id="PoseBuilder-modifier"></a>`.modifier(m: crate::Modifier)`: An attribute modifier its holder gets while in it (`Modifier`). [source](https://github.com/Weft-Rust/Weft/blob/master/crates/sdk/src/content.rs#L634)
+- <a id="PoseBuilder-height"></a>`.height(share: f32)`: Box height as a share of standing (crouching is 1.5 / 1.8). [source](https://github.com/Weft-Rust/Weft/blob/master/crates/sdk/src/content.rs#L638)
+- <a id="PoseBuilder-eye"></a>`.eye(share: f32)`: Eye height as a share of standing. [source](https://github.com/Weft-Rust/Weft/blob/master/crates/sdk/src/content.rs#L642)
+- <a id="PoseBuilder-speed"></a>`.speed(share: f32)`: Walking speed as a share of normal, 0 to stay put. [source](https://github.com/Weft-Rust/Weft/blob/master/crates/sdk/src/content.rs#L646)
+- <a id="PoseBuilder-tilt"></a>`.tilt(tilt: u32)`: How the model lies (`abi::pose_tilt`): along the look like swimming, face down, on its back. [source](https://github.com/Weft-Rust/Weft/blob/master/crates/sdk/src/content.rs#L650)
+- <a id="PoseBuilder-action"></a>`.action(name: &str)`: The model's clip for it, by action name. [source](https://github.com/Weft-Rust/Weft/blob/master/crates/sdk/src/content.rs#L654)
+- <a id="PoseBuilder-no_bob"></a>`.no_bob()`: The camera doesn't bob walking in it. [source](https://github.com/Weft-Rust/Weft/blob/master/crates/sdk/src/content.rs#L658)
+- <a id="PoseBuilder-priority"></a>`.priority(p: i32)`: Of the poses a player may take, the highest is taken (the engine's: stand 0, crouch 10, crawl 20, swim 30). Without `key` or `when` a pose is only ever held by a mod. [source](https://github.com/Weft-Rust/Weft/blob/master/crates/sdk/src/content.rs#L663)
+- <a id="PoseBuilder-key"></a>`.key(key: &crate::Key)`: Taken while the player holds this action. [source](https://github.com/Weft-Rust/Weft/blob/master/crates/sdk/src/content.rs#L667)
+- <a id="PoseBuilder-when"></a>`.when(c: impl Into<crate::Cond>)`: And only where this holds (`Cond::in_liquid`, `!Cond::flying()`); again for more. [source](https://github.com/Weft-Rust/Weft/blob/master/crates/sdk/src/content.rs#L672)
+- <a id="PoseBuilder-fallback"></a>`.fallback(poses: &[&Pose])`: Where it has no room, the first of these that has and whose `when` holds; the last even without room. [source](https://github.com/Weft-Rust/Weft/blob/master/crates/sdk/src/content.rs#L677)
 
 ## Projectile
 

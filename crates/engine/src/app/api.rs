@@ -442,7 +442,6 @@ pub unsafe extern "C" fn client_command(c: *mut abi::ClientCtx, op: u32, text: S
                 }
             }
             op_::RELOAD_ASSETS => r.reload_requested = true,
-            op_::POST_EFFECT => return r.post.set(&text, num as f32) as u64,
             op_::BENCH => r.bench = Some(crate::bench::Bench::new(&text, num.max(0.1) as f32)),
             op_::RESPAWN => r.handle(vec![Request::Respawn]),
             op_::RUN_COMMAND => return r.run_command(&text) as u64,
@@ -777,6 +776,36 @@ pub unsafe extern "C" fn client_clip_length(c: *mut abi::ClientCtx, entity: u64,
         with_entity(c, entity, |g, e| g.entity_render.clip_length(entity, e, name.as_str()))
             .flatten()
             .unwrap_or(-1.0)
+    }
+}
+
+pub unsafe extern "C" fn client_environment_set(c: *mut abi::ClientCtx, name: Str, data: Slice<u8>) -> u32 {
+    unsafe {
+        let Some(r) = run(c) else { return 0 };
+        let name = name.as_str();
+        if data.len == 0 {
+            if let Some(g) = r.game.as_mut() {
+                g.client.environment.local.remove(name);
+                return 1;
+            }
+            return 0;
+        }
+        let Some(mut layer) = abi::data::from_bytes::<abi::environment::EnvironmentLayer>(data.as_slice()) else { return 0 };
+        if layer.post.iter().any(|effect| !r.post.has(&effect.name)) {
+            return 0;
+        }
+        let Some(g) = r.game.as_mut() else { return 0 };
+        layer.name = name.to_string();
+        g.client.environment.local.insert(name.to_string(), layer);
+        1
+    }
+}
+
+pub unsafe extern "C" fn client_environment_values(c: *mut abi::ClientCtx, out: *mut abi::environment::EnvironmentValues) {
+    unsafe {
+        if let Some(client) = client(c) {
+            *out = client.environment.values;
+        }
     }
 }
 

@@ -698,6 +698,7 @@ fn engine_components() -> Vec<RawEntry> {
         (abi::comp::LIGHT, "[u8;3]", own, vec![0; 3]),
         (SHOWN, "bytes", shown, Vec::new()),
         (GROUND, "bytes", shown, Vec::new()),
+        (abi::environment::COMPONENT, &<Vec<abi::environment::EnvironmentLayer> as abi::data::Data>::schema(), own | cf::SAVE, Vec::new()),
         (WORN, "bytes", shown, Vec::new()),
         (SHAPE, "bytes", own, shape),
         (HELD, "bytes", shown, Vec::new()),
@@ -1312,8 +1313,6 @@ pub struct EntityEffectDef {
     pub kind: u8,
     /// Acts once when given and doesn't stay.
     pub instant: bool,
-    /// A screen shader its player sees through while it has it; empty for none.
-    pub screen: String,
     /// Its entity isn't drawn for others.
     pub hides: bool,
     /// As registered, then resolved at freeze.
@@ -2240,10 +2239,6 @@ pub fn freeze(
                 effect_kind::NEUTRAL
             },
             instant: e.has(abi::comp::ENTITY_EFFECT_INSTANT),
-            screen: e
-                .text(abi::comp::ENTITY_EFFECT_SCREEN)
-                .unwrap_or_default()
-                .to_string(),
             hides: e.has(abi::comp::ENTITY_EFFECT_HIDES),
             raw_hazards: e.or(abi::comp::ENTITY_EFFECT_HAZARDS, Vec::new()),
             hazards: Vec::new(),

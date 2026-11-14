@@ -953,7 +953,13 @@ impl EntityRenderer {
                 Vec4::new(-1.0, 1.0, 0.5, 1.0),
             );
             for &vb in &self.icon_views {
-                let v = Scene { view_proj: proj.to_cols_array_2d(), params: [1e9, 2e9, 1.0, crate::shaders::time()], ..Default::default() };
+                let v = Scene {
+                    view_proj: proj.to_cols_array_2d(),
+                    params: [1e9, 2e9, 1.0, crate::shaders::time()],
+                    environment: [1.0, 0.0, 0.0, 0.0],
+                    light: [0.04, 0.0, 0.0, 0.0],
+                    ..Default::default()
+                };
                 gpu.mapped(vb)[..size_of::<Scene>()].copy_from_slice(bytemuck::bytes_of(&v));
             }
         }
@@ -1095,7 +1101,13 @@ impl EntityRenderer {
         }
         let vb = self.preview[frame.slot];
         // Full daylight, no fog.
-        let v = Scene { view_proj: proj.to_cols_array_2d(), params: [1e9, 2e9, 1.0, crate::shaders::time()], ..Default::default() };
+        let v = Scene {
+            view_proj: proj.to_cols_array_2d(),
+            params: [1e9, 2e9, 1.0, crate::shaders::time()],
+            environment: [1.0, 0.0, 0.0, 0.0],
+            light: [0.04, 0.0, 0.0, 0.0],
+            ..Default::default()
+        };
         gpu.mapped(vb)[..size_of::<Scene>()].copy_from_slice(bytemuck::bytes_of(&v));
         list.push(Cmd::BeginPass { color: Some((Target::Texture(col), Some([0.0; 4]))), depth: Some((dep, Some(0.0))) });
         self.models
