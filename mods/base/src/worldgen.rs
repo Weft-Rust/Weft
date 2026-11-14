@@ -70,6 +70,7 @@ static DRY: Tag = Tag::named("dry");
 pub static PLAINS: Biome = Biome::named("plains");
 pub static LAVENDER_FIELDS: Biome = Biome::named("lavender_fields");
 pub static HILLS: Biome = Biome::named("hills");
+pub static TALLGRASS_MEADOW: Biome = Biome::named("tallgrass_meadow");
 pub static FOREST: Biome = Biome::named("forest");
 pub static BIRCH_FOREST: Biome = Biome::named("birch_forest");
 pub static TAIGA: Biome = Biome::named("taiga");
@@ -366,6 +367,19 @@ pub fn register(r: &mut Registry) {
         .set(&BLUEGRASS_COVER, 0.2)
         .set_text(&FLOWERS, "base:lavender base:dandelion base:tulip_pink base:tulip_purple base:tulip_white")
         .set(&FLOWER_COVER, 0.02);
+    r.biome(&TALLGRASS_MEADOW)
+        .surface("grass", "dirt", 3)
+        .tag("animals")
+        .tag("spawn_biome")
+        .set(&TREES, 0.025)
+        .set(&GRASS_COVER, 1.0)
+        .set(&TALL_GRASS_COVER, 0.7)
+        .set(&BOULDER_COVER, 0.03)
+        .set(&BUSH_COVER, 0.03)
+        .set(&RASPBERRY_COVER, 0.005)
+        .set(&SNOWBERRY_COVER, 0.002)
+        .set_text(&FLOWERS, "base:dandelion base:inula base:verbascum")
+        .set(&FLOWER_COVER, 0.1);
     r.biome(&FOREST)
         .humidity(0.25..)
         .surface("grass", "dirt", 3)
@@ -541,6 +555,7 @@ pub fn register(r: &mut Registry) {
         .rule(BiomeRule::new("birch_forest"))
         .rule(BiomeRule::new("hills").field("base:randomness", 0.5..).height(SEA + 30..))
         .rule(BiomeRule::new("lavender_fields").field("base:weirdness", 1.0..))
+        .rule(BiomeRule::new("tallgrass_meadow").field("base:weirdness", 0.5..))
         .rule(BiomeRule::new("plains"))
         .cave_biome("deep_caves", 24, 96.0, 0.25)
         .caves(Caves::new("lava", i32::MIN, 11));
