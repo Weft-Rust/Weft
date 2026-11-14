@@ -70,6 +70,7 @@ pub static DRYADS_SADDLE_MUSHROOM: Block = Block::named("dryads_saddle_mushroom"
 pub static BUSH_LEAVES: Block = Block::named("bush_leaves");
 pub static FERN: Block = Block::named("fern");
 pub static LAVENDER: Block = Block::named("lavender");
+pub static BLUEGRASS: Block = Block::named("bluegrass");
 
 static TILLABLE: Tag = Tag::named("tillable");
 
@@ -452,6 +453,13 @@ pub fn register(r: &mut Registry) {
         .tab(&crate::tabs::NATURAL);
     r.loot(&TALL_TALL_GRASS)
         .pool(Pool::new().when(Cond::chance(0.25)).item("wheat_seeds"));
+    r.block(&BLUEGRASS)
+        .sound_group("grass")
+        .plant()
+        .replaceable()
+        .needs_below("#plant_soil")
+        .tint_kind(&tints::GRASS)
+        .tab(&crate::tabs::NATURAL);
     plant(r, &DANDELION, "flower_dandelion");
     plant(r, &ROSE, "flower_rose");
     r.block(&LAVENDER)
@@ -693,7 +701,7 @@ pub fn register(r: &mut Registry) {
         [none, none, (tex, bottom), (tex, top), none, none]
     }
     r.block(&DRYADS_SADDLE_MUSHROOM)
-        .sound_group("grass")
+        .sound_group("wood")
         .shares_cell_with("#water")
         .hardness(0.1)
         .texture("dryads_saddle_mushroom")
