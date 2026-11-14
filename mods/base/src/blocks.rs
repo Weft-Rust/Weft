@@ -462,6 +462,17 @@ pub fn register(r: &mut Registry) {
         .tab(&crate::tabs::NATURAL);
     plant(r, &DANDELION, "flower_dandelion");
     plant(r, &ROSE, "flower_rose");
+    for color in [
+        "orange",
+        "pink",
+        "purple",
+        "red",
+        "white",
+        "yellow",
+    ] {
+        let name = format!("tulip_{color}");
+        plant(r, Block::generated(name.clone()), name.as_str());
+    }
     r.block(&LAVENDER)
         .sound_group("grass")
         .tall_plant("lavender_bottom", "lavender_top")

@@ -341,7 +341,9 @@ pub fn register(r: &mut Registry) {
         .set(&BOULDER_COVER, 0.03)
         .set(&BUSH_COVER, 0.03)
         .set(&RASPBERRY_COVER, 0.005)
-        .set(&SNOWBERRY_COVER, 0.002);
+        .set(&SNOWBERRY_COVER, 0.002)
+        .set_text(&FLOWERS, "base:rose base:dandelion base:tulip_orange base:tulip_red base:tulip_yellow base:tulip_white")
+        .set(&FLOWER_COVER, 0.02);
     r.biome(&LAVENDER_FIELDS)
         .surface("grass", "dirt", 3)
         .tag("animals")
@@ -360,9 +362,10 @@ pub fn register(r: &mut Registry) {
         .tint(foliage, 0x6ba941)
         .set(&GRASS_COVER, 0.5)
         .set(&TALL_GRASS_COVER, 0.1)
-        .set(&BOULDER_COVER, 0.03)
+        .set(&BOULDER_COVER, 0.06)
         .set(&BLUEGRASS_COVER, 0.2)
-        .set_text(&FLOWERS, "base:lavender base:rose base:dandelion");
+        .set_text(&FLOWERS, "base:lavender base:dandelion base:tulip_pink base:tulip_purple base:tulip_white")
+        .set(&FLOWER_COVER, 0.02);
     r.biome(&FOREST)
         .humidity(0.25..)
         .surface("grass", "dirt", 3)
@@ -537,7 +540,7 @@ pub fn register(r: &mut Registry) {
         .rule(BiomeRule::new("forest"))
         .rule(BiomeRule::new("birch_forest"))
         .rule(BiomeRule::new("hills").field("base:randomness", 0.5..).height(SEA + 30..))
-        .rule(BiomeRule::new("lavender_fields").field("base:weirdness", 0.6..))
+        .rule(BiomeRule::new("lavender_fields").field("base:weirdness", 1.0..))
         .rule(BiomeRule::new("plains"))
         .cave_biome("deep_caves", 24, 96.0, 0.25)
         .caves(Caves::new("lava", i32::MIN, 11));
