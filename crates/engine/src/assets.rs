@@ -225,6 +225,12 @@ pub fn decode_png(bytes: &[u8]) -> Option<Image> {
     Some(Image { width: w, height: h, rgba })
 }
 
+/// Whether a 64 x 64 skin has slim arms: a slim arm leaves a specific region fully transparent
+pub fn skin_is_slim(img: &Image) -> bool {
+    let clear = |x0: u32, y0: u32| (y0..y0 + 16).all(|y| (x0..x0 + 2).all(|x| img.rgba[((y * 64 + x) * 4 + 3) as usize] == 0));
+    img.width == 64 && img.height == 64 && clear(54, 16) && clear(46, 48)
+}
+
 pub fn decode_png_file(path: &Path) -> Option<(u32, u32, Vec<u8>)> {
     let img = decode_png(&std::fs::read(path).ok()?)?;
     Some((img.width, img.height, img.rgba))

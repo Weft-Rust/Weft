@@ -384,6 +384,8 @@ pub struct Models {
     pub kinds: Vec<KindModel>,
     /// Items with a model of bones: their place in `kinds`, past the entities'.
     pub item_kinds: FxHashMap<u32, u32>,
+    /// The player's model for 64 x 64 skins, past the entities': with normal arms and with slim ones.
+    pub skinned: Option<[u32; 2]>,
     /// Models read from files, by name, also those that aren't there.
     files: FxHashMap<String, Option<u32>>,
     stock: FxHashMap<&'static str, Vec<Arc<Animation>>>,
@@ -1011,6 +1013,7 @@ impl Models {
         let mut m = Models {
             kinds: Vec::new(),
             item_kinds: FxHashMap::default(),
+            skinned: None,
             files: FxHashMap::default(),
             stock: FxHashMap::default(),
             item_clips: Vec::new(),
@@ -1070,12 +1073,16 @@ impl Models {
                 (!clips.is_empty()).then(|| (i as u32, clips.into_iter().map(Arc::new).collect()))
             })
             .collect();
+        let mut player = None;
         for k in 0..c.game.entities.len() as u32 {
             let (parts, texture, own) = load_kind(assets, k);
             let own: Vec<Arc<Animation>> = own.into_iter().map(Arc::new).collect();
-            let at = self.push_with_stock(parts, texture, &own);
             let kind = &c.game.entities[k as usize];
             let file = file_named(ENTITY, k, comp::MODEL, &kind.name).unwrap_or_else(|| kind.name.clone());
+            if k == c.game.player_kind {
+                player = Some((parts.clone(), texture, own.clone(), file.clone()));
+            }
+            let at = self.push_with_stock(parts, texture, &own);
             self.kinds[at as usize].live = live_bones(&file, &self.kinds[at as usize].parts, &motions_of(assets, &file));
         }
         // Items: where they sit in the hand, and those made of bones like an entity. Such a model
@@ -1114,7 +1121,20 @@ impl Models {
                 self.carry(holder as u32, kind, bone);
             }
         }
-
+        // The player again for 64 x 64 skins, after all it carries is known; what is worn comes with `prepare_worn`.
+        self.skinned = player.map(|(mut parts, texture, own, file)| {
+            model::skin_layers(&mut parts);
+            [false, true].map(|slim| {
+                let mut parts = parts.clone();
+                if slim {
+                    model::slim_arms(&mut parts);
+                }
+                let k = self.push_with_stock(parts, texture, &own);
+                self.kinds[k as usize].live = live_bones(&file, &self.kinds[k as usize].parts, &motions_of(assets, &file));
+                self.equip(k);
+                k
+            })
+        });
         {
             let mut i = ICONS.lock().unwrap();
             *i = Icons::default();
@@ -1222,11 +1242,20 @@ impl Models {
         let (parts, texture, clips) = checked_avatar(f)?;
         let clips: Vec<Arc<Animation>> = clips.into_iter().map(Arc::new).collect();
         let k = self.push_with_stock(parts, texture, &clips);
-        let c = content();
         let mut said = model::load_bones(&String::from_utf8_lossy(&f.bones));
         said.truncate(AVATAR_BONES);
         let m = &mut self.kinds[k as usize];
         m.live = live_bones("of an avatar", &m.parts, &said);
+        self.equip(k);
+        self.files.insert(key, Some(k));
+        self.stale = true;
+        Ok(k)
+    }
+
+    /// `k`, a model of the player's bones past the entities', carries what the player does, where
+    /// it has the bones for it. What is worn is brought by `prepare_worn`, for who wears it.
+    fn equip(&mut self, k: u32) {
+        let c = content();
         for (file, bone) in &c.game.entities[c.game.player_kind as usize].bone_models {
             if let (Some(Some(model)), true) =
                 (self.files.get(file).copied(), model::bone_named(&self.kinds[k as usize].parts, bone).is_some())
@@ -1234,9 +1263,6 @@ impl Models {
                 self.carry(k, model, bone);
             }
         }
-        self.files.insert(key, Some(k));
-        self.stale = true;
-        Ok(k)
     }
 
     /// New models' boxes and triangles to the GPU. Before anything is drawn this frame: lists
