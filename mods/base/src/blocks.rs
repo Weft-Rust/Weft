@@ -21,8 +21,11 @@ pub static IRON_ORE: Block = Block::named("iron_ore");
 pub static GOLD_ORE: Block = Block::named("gold_ore");
 pub static DIAMOND_ORE: Block = Block::named("diamond_ore");
 pub static OAK_LOG: Block = Block::named("oak_log");
+pub static OAK_WOOD: Block = Block::named("oak_wood");
 pub static BIRCH_LOG: Block = Block::named("birch_log");
+pub static BIRCH_WOOD: Block = Block::named("birch_wood");
 pub static SPRUCE_LOG: Block = Block::named("spruce_log");
+pub static SPRUCE_WOOD: Block = Block::named("spruce_wood");
 pub static OAK_PLANKS: Block = Block::named("oak_planks");
 pub static BIRCH_PLANKS: Block = Block::named("birch_planks");
 pub static SPRUCE_PLANKS: Block = Block::named("spruce_planks");
@@ -55,53 +58,117 @@ pub static GOLD_BLOCK: Block = Block::named("gold_block");
 pub static DIAMOND_BLOCK: Block = Block::named("diamond_block");
 pub static COAL_BLOCK: Block = Block::named("coal_block");
 pub static WOOL: Block = Block::named("wool");
+pub static TALL_TALL_GRASS: Block = Block::named("tall_tallgrass");
+pub static BUSH_STEM: Block = Block::named("bush_stem");
+pub static RASPBERRY_LEAVES: Block = Block::named("raspberry_leaves");
+pub static SNOWBERRY_LEAVES: Block = Block::named("snowberry_leaves");
+pub static MOSS: Block = Block::named("moss");
+pub static PORCINI_MUSHROOM: Block = Block::named("porcini_mushroom");
+pub static CHANTERELLE_MUSHROOM: Block = Block::named("chanterelle_mushroom");
+pub static TOADSTOOL_MUSHROOM: Block = Block::named("toadstool_mushroom");
+pub static DRYADS_SADDLE_MUSHROOM: Block = Block::named("dryads_saddle_mushroom");
+pub static BUSH_LEAVES: Block = Block::named("bush_leaves");
+pub static FERN: Block = Block::named("fern");
+pub static LAVENDER: Block = Block::named("lavender");
+pub static BLUEGRASS: Block = Block::named("bluegrass");
+pub static INULA: Block = Block::named("inula");
+pub static VERBASCUM: Block = Block::named("verbascum");
 
 static TILLABLE: Tag = Tag::named("tillable");
 
 /// A log that grows into a tree of `leaves` (a cone, like a spruce, when `cone`).
-fn log(r: &mut Registry, handle: &'static Block, wood: &str, leaves: &str, cone: bool) {
+fn log(r: &mut Registry, handle: &'static Block, wood: &str, wood_block: bool) {
     let side = format!("log_{wood}");
     let top = format!("log_{wood}_top");
     let b = r
         .block(handle)
-        .set_text(&crate::worldgen::TREE_LEAVES, leaves);
-    let b = if cone { b.tag("cone_tree") } else { b };
-    b.sound_group("wood")
+        .sound_group("wood")
         .hardness(2.0)
         .mined_by("axe", tool_tier::HAND)
-        .tag("logs")
-        .tag(&format!("logs/{wood}"))
         .set(&FLAMMABLE, 5)
         .set(&FUEL, 300)
-        .axis()
-        .texture(&side)
-        .ends(&top)
         .tab(&crate::tabs::NATURAL);
+    if wood_block {
+        b.tag(&format!("wood/{wood}"))
+            .tag("wood")
+            .facing(Facings::HORIZONTAL, Toward::Player)
+            .texture(side.as_str());
+    } else {
+        b.tag(&format!("logs/{wood}"))
+            .tag("logs")
+            .axis()
+            .texture(&side)
+            .ends(&top);
+    }
 }
 
 /// Dyed blocks' colors: name, glass tint, wool tint, the light the glass takes away per channel.
 const COLORS: &[(&str, u32, u32, [u8; 3])] =
     &[("red", 0xED3737, 0xB02E26, [0, 12, 12]), ("green", 0x37C837, 0x5E7C16, [12, 0, 12]), ("blue", 0x375BFF, 0x3C44AA, [12, 12, 0])];
 
-fn leaves(r: &mut Registry, handle: &'static Block, tex: &str) {
-    r.block(handle)
+fn leaves(r: &mut Registry, handle: &'static Block, tex: &str, tint: bool) {
+    let mut b = r
+        .block(handle)
         .sound_group("grass")
         .texture(tex)
         .hardness(0.2)
         .cutout()
         .light_opacity(1)
-        .tint_kind(&tints::FOLIAGE)
         .tag("leaves")
         .signal_blocker()
         .mined_by("shears", tool_tier::HAND)
         .tab(&crate::tabs::NATURAL);
-    // Vanilla: a sapling one time in 20, oak leaves an apple one time in 200.
-    let table = r
-        .loot(handle)
-        .pool(Pool::new().when(Cond::chance(0.05)).item("sapling"));
-    if std::ptr::eq(handle, &OAK_LEAVES) {
-        table.pool(Pool::new().when(Cond::chance(0.005)).item("apple"));
+    if tint {
+        b = b.tint_kind(&tints::FOLIAGE);
     }
+    std::mem::drop(b);
+    // Vanilla: a sapling one time in 20, oak leaves an apple one time in 200.
+    let mut table = r.loot(handle).pool(
+        Pool::new()
+            .when(Cond::tool("#tools/shears"))
+            .item(handle.name()),
+    );
+    let no_shears = !Cond::tool("#tools/shears");
+    table = table.pool(
+        Pool::new()
+            .when(no_shears.clone())
+            .when(Cond::chance(0.05))
+            .item("sapling"),
+    );
+    if std::ptr::eq(handle, &OAK_LEAVES) {
+        table.pool(
+            Pool::new()
+                .when(no_shears)
+                .when(Cond::chance(0.005))
+                .item("apple"),
+        );
+    }
+}
+fn berry_leaves(r: &mut Registry, handle: &'static Block, texture: &'static str, texture_berried: &'static str, item: &'static Item) {
+    r.block(handle)
+        .sound_group("grass")
+        .prop("berried", ["false", "true"])
+        .hardness(0.2)
+        .cutout()
+        .light_opacity(1)
+        .tag("leaves")
+        .signal_blocker()
+        .mined_by("shears", tool_tier::HAND)
+        .tab(&crate::tabs::NATURAL)
+        .texture(texture_berried)
+        .states(|p, s| s.texture(if p.is("berried", "true") { texture_berried } else { texture }))
+        .on_use(move |u| pick_berries(u, item));
+    r.loot(handle)
+        .pool(
+            Pool::new()
+                .when(Cond::tool("#tools/shears"))
+                .item(handle.name()),
+        )
+        .pool(
+            Pool::new()
+                .when(Cond::state("berried=true"))
+                .items(item.name(), 1, 1),
+        );
 }
 
 fn plant(r: &mut Registry, handle: &'static Block, tex: &str) {
@@ -113,6 +180,19 @@ fn plant(r: &mut Registry, handle: &'static Block, tex: &str) {
         .hitbox([5.0, 0.0, 5.0], [11.0, 10.0, 11.0])
         .needs_below("#plant_soil")
         .tab(&crate::tabs::NATURAL);
+}
+
+fn pick_berries(u: &mut Use, berry: &'static Item) -> bool {
+    let w = u.world();
+    let p = u.pos();
+    if w.prop(p, "berried") != Some("true") {
+        return false;
+    }
+    if !w.prop_set(p, "berried", "false") {
+        return false;
+    }
+    w.spawn_item(block_center(p), berry.stack(1));
+    true
 }
 
 /// Sand and gravel: with nothing under them they fall as an entity and land as a block.
@@ -286,9 +366,20 @@ pub fn register(r: &mut Registry) {
         .tag("ores/diamond")
         .tab(&crate::tabs::NATURAL);
 
-    log(r, &OAK_LOG, "oak", "oak_leaves", false);
-    log(r, &BIRCH_LOG, "birch", "birch_leaves", false);
-    log(r, &SPRUCE_LOG, "spruce", "spruce_leaves", true);
+    log(r, &OAK_LOG, "oak", false);
+    log(r, &BIRCH_LOG, "birch", false);
+    log(r, &SPRUCE_LOG, "spruce", false);
+    log(r, &OAK_WOOD, "oak", true);
+    log(r, &BIRCH_WOOD, "birch", true);
+    log(r, &SPRUCE_WOOD, "spruce", true);
+    r.block(&BUSH_STEM)
+        .sound_group("grass")
+        .hardness(0.2)
+        .cutout()
+        .light_opacity(1)
+        .signal_blocker()
+        .mined_by("shears", tool_tier::HAND)
+        .tab(&crate::tabs::NATURAL);
     for (h, wood) in [(&OAK_PLANKS, "oak"), (&BIRCH_PLANKS, "birch"), (&SPRUCE_PLANKS, "spruce")] {
         r.block(h)
             .sound_group("wood")
@@ -302,10 +393,12 @@ pub fn register(r: &mut Registry) {
             .set(&FUEL, 300)
             .tab(&crate::tabs::BUILDING);
     }
-    leaves(r, &OAK_LEAVES, "leaves_oak");
-    leaves(r, &BIRCH_LEAVES, "leaves_birch");
-    leaves(r, &SPRUCE_LEAVES, "leaves_spruce");
-
+    leaves(r, &OAK_LEAVES, "leaves_oak", true);
+    leaves(r, &BIRCH_LEAVES, "leaves_birch", true);
+    leaves(r, &SPRUCE_LEAVES, "leaves_spruce", true);
+    leaves(r, &BUSH_LEAVES, "raspberry_leaves", false);
+    berry_leaves(r, &RASPBERRY_LEAVES, "raspberry_leaves", "raspberry_leaves_berried", &crate::items::RASPBERRY);
+    berry_leaves(r, &SNOWBERRY_LEAVES, "raspberry_leaves", "snowberry_leaves_berried", &crate::items::SNOWBERRY);
     // Vanilla numbers: water steps every 5 ticks and reaches 7 blocks, lava every 30 and 3.
     // Players swim in water; what they wear may add more (`SWIMS_IN` on an item).
     r.edit(&PLAYER).set_text(&SWIMS_IN, "#water");
@@ -352,11 +445,53 @@ pub fn register(r: &mut Registry) {
         .replaceable()
         .needs_below("#plant_soil")
         .tint_kind(&tints::GRASS)
-        .no_item();
+        .tab(&crate::tabs::NATURAL);
     r.loot(&TALL_GRASS)
         .pool(Pool::new().when(Cond::chance(0.125)).item("wheat_seeds"));
+    r.block(&TALL_TALL_GRASS)
+        .sound_group("grass")
+        .texture("tall_tallgrass_bottom")
+        .tall_plant("tall_tallgrass_bottom", "tall_tallgrass_top")
+        .replaceable()
+        // .two_part("half", ["lower", "upper"], |_| Dir::Up)
+        // .state_where("half=upper", |s| s.texture("tall_tallgrass_top"))
+        // .state_where("half=lower", |s| s.needs_below("#plant_soil"))
+        .tint_kind(&tints::GRASS)
+        .tab(&crate::tabs::NATURAL);
+    r.loot(&TALL_TALL_GRASS)
+        .pool(Pool::new().when(Cond::chance(0.25)).item("wheat_seeds"));
+    r.block(&BLUEGRASS)
+        .sound_group("grass")
+        .plant()
+        .replaceable()
+        .needs_below("#plant_soil")
+        .tint_kind(&tints::GRASS)
+        .tab(&crate::tabs::NATURAL);
     plant(r, &DANDELION, "flower_dandelion");
     plant(r, &ROSE, "flower_rose");
+    for color in ["orange", "pink", "purple", "red", "white", "yellow"] {
+        let name = format!("tulip_{color}");
+        plant(r, Block::generated(name.clone()), name.as_str());
+    }
+    r.block(&INULA)
+        .sound_group("grass")
+        .tall_plant("inula_bottom", "inula_top")
+        .replaceable()
+        .needs_below("#plant_soil")
+        .tab(&crate::tabs::NATURAL);
+    r.block(&VERBASCUM)
+        .sound_group("grass")
+        .tall_plant("verbascum_bottom", "verbascum_top")
+        .replaceable()
+        .needs_below("#plant_soil")
+        .tab(&crate::tabs::NATURAL);
+    r.block(&LAVENDER)
+        .sound_group("grass")
+        .tall_plant("lavender_bottom", "lavender_top")
+        .replaceable()
+        .needs_below("#plant_soil")
+        .tab(&crate::tabs::NATURAL);
+
     r.block(&SAPLING)
         .sound_group("grass")
         .texture("sapling_oak")
@@ -543,6 +678,100 @@ pub fn register(r: &mut Registry) {
         .hardness(0.8)
         .set(&FLAMMABLE, 30)
         .tab(&crate::tabs::COLORED);
+    r.block(&MOSS)
+        .on_sides(Facings::ALL)
+        .sound_group("grass")
+        .shares_cell_with("#water")
+        .hardness(0.1)
+        .signal_blocker()
+        .tab(&crate::tabs::NATURAL);
+    r.block(&PORCINI_MUSHROOM)
+        .sound_group("grass")
+        .shares_cell_with("#water")
+        .hardness(0.1)
+        .needs_below("")
+        .plant()
+        .texture("porcini_mushroom")
+        .drops("porcini", 1)
+        .tab(&crate::tabs::NATURAL);
+    r.block(&CHANTERELLE_MUSHROOM)
+        .sound_group("grass")
+        .shares_cell_with("#water")
+        .hardness(0.1)
+        .needs_below("")
+        .plant()
+        .texture("chanterelle_mushroom")
+        .drops("chanterelle", 1)
+        .tab(&crate::tabs::NATURAL);
+    r.block(&TOADSTOOL_MUSHROOM)
+        .sound_group("grass")
+        .shares_cell_with("#water")
+        .hardness(0.1)
+        .needs_below("")
+        .plant()
+        .texture("toadstool_mushroom")
+        .drops("toadstool", 1)
+        .tab(&crate::tabs::NATURAL);
+    let uv = [0.1, 0.1, 15.9, 7.9];
+    let top_uv = [0.1, 0.1, 15.9, 7.9];
+    let bottom_uv = [0.1, 8.1, 15.9, 15.9];
+    fn flip_v(uv: [f32; 4]) -> [f32; 4] {
+        [uv[0], uv[3], uv[2], uv[1]]
+    }
+    fn shelf_faces(top: [f32; 4], bottom: [f32; 4]) -> [(&'static str, [f32; 4]); 6] {
+        let tex = "dryads_saddle_mushroom";
+        let none = (tex, UV_NO_FACE);
+        [none, none, (tex, bottom), (tex, top), none, none]
+    }
+    r.block(&DRYADS_SADDLE_MUSHROOM)
+        .sound_group("wood")
+        .shares_cell_with("#water")
+        .hardness(0.1)
+        .texture("dryads_saddle_mushroom")
+        .facing(Facings::HORIZONTAL, Toward::Face)
+        .states(|_p, s| s.needs(Dir::South, ""))
+        .model_box_faces(
+            [0.0, 12.0, 8.0],
+            [16.0, 12.2, 16.0],
+            shelf_faces(top_uv, flip_v(top_uv)), // upper: top half both sides
+        )
+        .tilted([8.0, 12.0, 16.0], Dir::East, -18.0)
+        .model_box_faces(
+            [0.0, 7.0, 8.0],
+            [16.0, 7.2, 16.0],
+            shelf_faces(bottom_uv, flip_v(bottom_uv)), // lower: bottom half both sides
+        )
+        .tilted([8.0, 7.0, 16.0], Dir::East, -24.0)
+        .not_solid()
+        .hitbox([0.0, 6.0, 8.0], [16.0, 13.0, 16.0])
+        .drops("dryads_saddle", 1)
+        .tab(&crate::tabs::NATURAL);
+    r.block(&FERN)
+        .sound_group("grass")
+        .shares_cell_with("#water")
+        .hardness(0.1)
+        .needs_below("#plant_soil")
+        .tint_kind(&tints::GRASS)
+        .tab(&crate::tabs::NATURAL)
+        .not_solid()
+        .hitbox([2.0, 0.0, 2.0], [14.0, 16.0, 14.0]);
+    r.shapes_of("hollow_log", "#logs", "_hollow")
+        .sound_group("wood")
+        .model_file("hollow_log")
+        .model_texture("inside", "{source.mod}:block/{source.name}_inner")
+        .axis()
+        .signal_blocker()
+        .shares_cell_with("#water")
+        .liquid_walls(&[Dir::North, Dir::South, Dir::East, Dir::West])
+        .outline([0.0; 3], [16.0; 3])
+        .outline([2.0, 0.0, 2.0], [14.0, 16.0, 14.0])
+        .tag("hollow_log")
+        .tab(&crate::tabs::NATURAL);
+    r.loot(&FERN).pool(
+        Pool::new()
+            .when(Cond::tool("#tools/shears"))
+            .item(FERN.name()),
+    );
 
     // What may grow or stand where, from the common `dirt` and `sand` tags like modern vanilla:
     // a mod's sand tagged `sand` gets cactus and sugar cane, in the world and from players.

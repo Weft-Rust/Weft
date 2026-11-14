@@ -10,6 +10,10 @@ pub static WHEAT: Item = Item::named("wheat");
 pub static BUCKET: Item = Item::named("bucket");
 pub static FLINT: Item = Item::named("flint");
 pub static CLAY_BALL: Item = Item::named("clay_ball");
+pub static SNOWBERRY: Item = Item::named("snowberry");
+pub static RASPBERRY: Item = Item::named("raspberry");
+pub static DRYADS_SADDLE: Item = Item::named("dryads_saddle");
+pub static TOADSTOOL: Item = Item::named("toadstool");
 pub static SHIELD: Item = Item::named("shield");
 
 pub use base_api::{ARMOR, ARMOR_PIECE, ARMOR_TOUGHNESS, FLAMMABLE, FOOD, FUEL, Food};
@@ -100,11 +104,14 @@ pub fn register(r: &mut Registry) {
         ("mutton", 2, 1.2, "raw_meat/mutton"),
         ("cooked_mutton", 6, 9.6, "cooked_meat/mutton"),
         ("spider_eye", 2, 3.2, ""),
+        ("porcini", 1, 1.2, "mushrooms"),
+        ("chanterelle", 1, 1.2, "mushrooms"),
+        ("cooked_dryads_saddle", 4, 2.4, "mushrooms"),
     ] {
         let i = r
             .item(Item::generated(name.into()))
             .set(&FOOD, Food { hunger, saturation })
-            .use_ticks(32)
+            .use_ticks(if tag == "mushrooms" { 16 } else { 32 })
             .on_use(base_api::eat)
             .tab(&crate::tabs::FOOD);
         let i = if tag.starts_with("cooked_meat/") { i.tag("cooked_meat") } else { i };
@@ -112,6 +119,28 @@ pub fn register(r: &mut Registry) {
             i.tag(tag);
         }
     }
+    r.item(&TOADSTOOL)
+        .set(&FOOD, Food { hunger: 1, saturation: 1.2 })
+        .use_ticks(16)
+        .on_use(base_api::eat)
+        .gives_effect(&crate::effects::NAUSEA, 1, 10.0)
+        .gives_effect(&crate::effects::POISON, 1, 15.0)
+        .tab(&crate::tabs::FOOD);
+    r.item(&SNOWBERRY)
+        .set(&FOOD, Food { hunger: 1, saturation: 1.0 })
+        .use_ticks(16)
+        .on_use(base_api::eat)
+        .gives_effect(&crate::effects::NAUSEA, 1, 10.0)
+        .gives_effect(&crate::effects::POISON, 1, 15.0)
+        .tab(&crate::tabs::FOOD);
+    r.item(&RASPBERRY)
+        .set(&FOOD, Food { hunger: 1, saturation: 1.0 })
+        .use_ticks(16)
+        .on_use(base_api::eat)
+        .tab(&crate::tabs::FOOD);
+    r.item(&DRYADS_SADDLE)
+        .tag("mushrooms")
+        .tab(&crate::tabs::INGREDIENTS);
     r.item(Item::generated("leather".into()))
         .tag("materials/leather")
         .tab(&crate::tabs::INGREDIENTS);
@@ -124,6 +153,9 @@ pub fn register(r: &mut Registry) {
     for m in &MATERIALS {
         // `.tool(kind)` tags it `tools/<kind>`; `<kind>s/<material>` picks its recipe.
         let tool = |r: &mut Registry, kind: &str, damage: f32, speed: f32| {
+            if kind == "shears" && m.level < tool_tier::IRON && m.name != "gold" {
+                return;
+            }
             let b = r
                 .item(Item::generated(format!("{}_{kind}", m.name)))
                 .tool(kind, m.level)
@@ -139,6 +171,8 @@ pub fn register(r: &mut Registry) {
                 b.sweeps().no_creative_break();
             } else if kind == "axe" {
                 b.set(&comps::DISABLE_BLOCKING, 5.0);
+            } else {
+                b.tag(&format!("tools/{}", m.name));
             }
         };
         tool(r, "pickaxe", 2.0 + m.damage, 1.2);
@@ -154,6 +188,7 @@ pub fn register(r: &mut Registry) {
         };
         tool(r, "axe", axe_damage, axe_speed);
         tool(r, "hoe", 1.0, hoe_speed);
+        tool(r, "shears", 1.0, 1.0);
     }
 
     // Points per piece, head to feet, as in modern.

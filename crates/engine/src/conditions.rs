@@ -305,7 +305,7 @@ impl Parser<'_, '_> {
                 Arg::Slots(slots)
             }
             k::BLOCK => Arg::Blocks(crate::refs::compile(&text, self.look.block_names, self.look.blocks, self.look.components)?),
-            k::TOOL => Arg::Tag(crate::refs::tag(self.look.components, text.trim_start_matches('#'))?),
+            k::TOOL => Arg::Tag(crate::refs::tag(self.look.components, &text)?),
             k::STATE => Arg::Text(text),
             k::SIDE | k::BESIDE | k::OPEN => {
                 let (first, rest) = text
