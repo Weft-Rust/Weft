@@ -34,6 +34,8 @@ The anchor is an element's `name` field (a text element's text), or `#index`; el
 
 Defaults below are what the engine uses where nothing is set, so an edit only needs what it changes.
 
+After loading, `name_of(kind, id)` and a handle's `lookup(name)` use the same catalog of frozen entries. Block ids name states, including their properties; looking up a block without properties returns its first state and its handle's `count()` gives the state range.
+
 ## Block
 A block and its states; its item comes along unless `.no_item()`. Entry point `r.block(&BLOCK)`, edit `r.edit(&BLOCK)`. Shapes of other blocks: `r.stairs(..)`, `r.slabs(..)`, `r.vertical_slabs(..)`, `r.shapes_of(name, sources, suffix)`. A layer against the sides of its cell, several in one block: `.on_sides(Facings::ALL)` (properties `north`..`down`).
 
@@ -134,7 +136,7 @@ A kind of entity: mobs, players, projectiles, moving platforms, block entities. 
 | `SEATS` | `[Seat]` | none | `.seat` |
 | `ATTACH` | `[Attach]` | none | components each one carries, starting as the kind's own value (`.attach`, `.attach_with`, `.attach_storage`) |
 | `LIGHT_AT` | `[f32;3]` | its middle, a block entity's block | where its light comes from, from its feet, +Z ahead, turned with it (`.light_at`) |
-| `SHOWN_SLOTS` | `[u32]` | none | inventory slots everyone around sees, in `core:shown` (`.shown_slots`) |
+| `SHOWN_SLOTS` | `[u32]` | none | inventory slots shared as public stacks (`.shown_slots`, `Client::displayed`) |
 | `ON_TICK`, `ON_INTERACT`, `STEER`, `DISMOUNT` | callback | none | `.on_tick`, `.on_interact`, `.steering`, seat exits |
 | `FRAMES` | `[callback]` | none | client frame hooks (`r.client_entity_frame`) |
 | `SLOT_GROUPS`, `INVENTORY_MENU` | `[SlotGroupDef]`, `str` | 9 + 27 | the player's inventory (`r.player_slots`, `r.player_menu`) |

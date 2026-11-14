@@ -3,6 +3,7 @@
 //! (`ui::desc`), so a replacement can do all they do.
 
 use std::rc::Rc;
+use weft_abi::entry_kind as ek;
 
 use crate::app::{Ctx, Request};
 use crate::input::{Binding, Input, Key, Trigger};
@@ -103,7 +104,8 @@ pub fn named(name: &str) -> Option<Box<dyn Screen>> {
     // A menu's screen opens on the client alone too, with nothing to sync.
     if let Some(&m) = crate::content::try_content().and_then(|c| {
         c.game
-            .menu_names
+            .catalog
+            .ids(ek::MENU)
             .get(&name)
             .filter(|&&m| c.game.menus[m as usize].screen.is_some())
     }) {

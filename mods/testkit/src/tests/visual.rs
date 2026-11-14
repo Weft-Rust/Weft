@@ -179,6 +179,24 @@ pub async fn moving_light(t: T) -> R {
     t.secs(0.5).await?;
     let c = color("shown item").await?;
     t.probe("the floor by a pedestal showing a red lamp is reddish", c[0] - c[1], c[0] - c[1] > 15.0);
+    t.op(&format!("stack_light {} {} {} 0 0 0 15", p[0], p[1], p[2]))
+        .await?;
+    t.secs(0.5).await?;
+    let c = color("shown stack light").await?;
+    t.probe("shown stack data overrides the item's red light", c[2] - c[0], c[2] - c[0] > 15.0);
+    t.set(p, "air").await?;
+    let carrier = t
+        .op(&format!("spawn testmod:display_carrier {} {} {}", p[0], p[1], p[2]))
+        .await?;
+    for (slot, label) in [(0, "main stack light"), (6, "off stack light"), (2, "equipment stack light")] {
+        t.op(&format!("put {carrier} {slot} stick 1")).await?;
+        t.op(&format!("stack_light {carrier} {slot} 0 0 15"))
+            .await?;
+        t.secs(0.5).await?;
+        let c = color(label).await?;
+        t.probe(label, c[2] - c[0], c[2] - c[0] > 15.0);
+        t.op(&format!("put {carrier} {slot} stick 0")).await?;
+    }
     Ok(())
 }
 
@@ -320,7 +338,6 @@ pub async fn multiplayer(t: T) -> R {
         .filter_map(|&id| t.c().entity(id))
         .any(|e| name_of(abi::entry_kind::ENTITY, e.kind) == "core:player");
     // What they hold reaches the others, to draw it in their hand.
-    static HELD: weft_sdk::Component<u32> = weft_sdk::Component::named("core:held");
     if let Some(other) = t.c().entities().iter().copied().find(|&id| {
         t.c()
             .entity(id)
@@ -328,7 +345,7 @@ pub async fn multiplayer(t: T) -> R {
     }) {
         t.op(&format!("put {other} 0 stone 1")).await?;
         let stone = Item::lookup("base:stone").unwrap_or(u32::MAX);
-        t.until("what the other player holds", Duration::from_secs(5), |t| t.c().view().component_of(other, &HELD) == Some(stone))
+        t.until("what the other player holds", Duration::from_secs(5), |t| t.c().held(other, weft_sdk::Hand::Main).item == stone)
             .await?;
     }
     // A synced setting the host changes while the other player is in reaches them.

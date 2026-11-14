@@ -55,8 +55,6 @@ pub struct Entity {
     pub mining: Option<Mining>,
     pub anchor: Option<IVec3>,
     pub sent: Option<(DVec3, f32, f32, crate::world::Pose, bool)>,
-    /// Worn items as last sent to clients.
-    pub worn: Vec<u32>,
     /// The solid body it rides (stands on, or flies above within its carry height).
     /// The body it is on: what it rides, or whose blocks hold it if it has an `anchor`.
     pub frame: Option<u64>,
@@ -225,7 +223,6 @@ impl Entity {
             mining: None,
             anchor: None,
             sent: None,
-            worn: Vec::new(),
             frame: None,
             motion: Motion::Free,
             falls: false,
@@ -501,11 +498,12 @@ impl Entities {
         let riding = c.game.fields.riding;
         for (k, v) in comps {
             // A loaded rider sits where it sat.
-            if k == riding && v.len() >= 12 {
-                let mount = u64::from_le_bytes(v[..8].try_into().unwrap());
-                let seat = u32::from_le_bytes(v[8..12].try_into().unwrap()) as u8;
-                if let Some(e) = self.get_mut(id).filter(|e| e.vehicle.is_none()) {
-                    e.vehicle = Some((mount, seat));
+            if k == riding {
+                use crate::net::codec::Wire;
+                if let Some(riding) = crate::net::RidingField::from_bytes(&v) {
+                    if let Some(e) = self.get_mut(id).filter(|e| e.vehicle.is_none()) {
+                        e.vehicle = Some((riding.mount, riding.seat as u8));
+                    }
                 }
             }
             self.comps.insert((id, k), v);
@@ -613,13 +611,31 @@ impl Entities {
         }
     }
 
-    /// Takes an entity out entirely (moving it to another dimension).
-    /// Whether any of `stack` would fit in its inventory.
+    /// Space in each slot under the same rules as item insertion.
+    fn item_space<'a>(&'a self, c: &'a Content, id: u64, stack: ItemStack) -> impl Iterator<Item = u32> + 'a {
+        let kind = self.get(id).map(|e| &c.game.entities[e.kind as usize]);
+        let max = c.max_stack(&stack);
+        self.inventories
+            .get(&id)
+            .into_iter()
+            .flatten()
+            .enumerate()
+            .map(move |(i, &s)| {
+                let limit = kind.map_or(0, |k| Self::pickup_limit(k, i, s, max));
+                crate::stack::room_in(s, stack, limit)
+            })
+    }
+
+    pub fn item_room(&self, c: &Content, id: u64, stack: ItemStack) -> u64 {
+        self.item_space(c, id, stack).map(u64::from).sum()
+    }
+
     pub fn can_insert(&self, c: &Content, id: u64, stack: ItemStack) -> bool {
-        self.inventories.get(&id).is_some_and(|inv| {
-            inv.iter()
-                .any(|s| s.is_empty() || (s.item == stack.item && s.data == stack.data && s.count < c.max_stack(&stack)))
-        })
+        self.item_space(c, id, stack).any(|room| room != 0)
+    }
+
+    fn pickup_limit(k: &crate::registry::EntityKind, i: usize, current: ItemStack, max: u32) -> u32 {
+        if k.worn.contains(&(i as u32)) || (k.off == Some(i as u32) && current.is_empty()) { 0 } else { max }
     }
 
     pub fn take(&mut self, id: u64) -> Option<(Entity, Option<Vec<ItemStack>>, Vec<(u32, Box<[u8]>)>)> {
@@ -679,44 +695,26 @@ impl Entities {
     }
 
     /// Merges into matching stacks, then empty slots. Returns the rest.
-    pub fn insert_item(&mut self, c: &Content, owner: u64, mut stack: ItemStack) -> ItemStack {
-        let max = c.max_stack(&stack);
-        // Pickups never go into equipment.
+    pub fn insert_item(&mut self, c: &Content, owner: u64, stack: ItemStack) -> ItemStack {
         let Some(e) = self.get(owner) else { return stack };
         let k = &c.game.entities[e.kind as usize];
-        let (off, worn) = (k.off, k.worn.clone());
+        let max = c.max_stack(&stack);
         let Some(inv) = self.inventories.get_mut(&owner) else { return stack };
-        for (_, s) in inv
-            .iter_mut()
-            .enumerate()
-            .filter(|(i, _)| !worn.contains(&(*i as u32)))
-        {
-            if stack.count == 0 {
-                break;
-            }
-            if s.item == stack.item && s.data == stack.data && s.count < max && !s.is_empty() {
-                let n = (max - s.count).min(stack.count);
-                s.count += n;
-                stack.count -= n;
-            }
+        let rest = crate::stack::insert_into(
+            stack,
+            0..inv.len(),
+            |i, value| {
+                if let Some(value) = value {
+                    inv[i] = value;
+                }
+                inv[i]
+            },
+            |i, current| Self::pickup_limit(k, i, current, max),
+        );
+        if rest != stack {
+            self.dirty_inv.insert(owner);
         }
-        // Nor into an empty other hand.
-        for (_, s) in inv
-            .iter_mut()
-            .enumerate()
-            .filter(|(i, _)| !worn.contains(&(*i as u32)) && off != Some(*i as u32))
-        {
-            if stack.count == 0 {
-                break;
-            }
-            if s.is_empty() {
-                let n = max.min(stack.count);
-                *s = ItemStack { count: n, ..stack };
-                stack.count -= n;
-            }
-        }
-        self.dirty_inv.insert(owner);
-        if stack.count == 0 { ItemStack::EMPTY } else { stack }
+        rest
     }
 
     /// Within `radius`, of `kind` (`u32::MAX`: any), `abi::near` saying what else.

@@ -123,7 +123,10 @@ example: `heights = 0-40 100-`\
 ---
 
 ### biomes
-Only in these biomes, by name or by tag. A `!` in front turns the list around.
+Names and tags use the common matcher: included terms are joined, and exclusions
+are subtracted. A leading `!` inverts the whole list, as in earlier packs.
+For example, `!base:desert #cold` excludes both desert and cold biomes. An unknown
+name or invalid expression rejects the whole filter instead of keeping valid terms.
 
 examples:\
 `biomes = base:desert base:beach`\

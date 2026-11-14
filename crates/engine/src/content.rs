@@ -5,7 +5,7 @@ use std::sync::{Arc, OnceLock};
 
 use rustc_hash::{FxHashMap, FxHashSet};
 
-use weft_abi::{self as abi, BlockModel, Callback, ModId, RenderLayer};
+use weft_abi::{self as abi, BlockModel, Callback, ModId, RenderLayer, entry_kind as ek};
 
 use crate::components::{self as comps, Components, RawValue};
 use crate::entries::{Entry, RawEntry};
@@ -512,7 +512,7 @@ pub fn in_off_hand(c: &Content, kind: u32, inventory: &[weft_abi::ItemStack]) ->
 }
 
 /// By liquid, whether `kind` wearing `worn` swims in it: what its `comp::SWIMS_IN` and theirs take.
-pub fn swims_in(c: &Content, kind: u32, worn: &[u32]) -> Vec<bool> {
+pub fn swims_in(c: &Content, kind: u32, worn: &[abi::ItemStack]) -> Vec<bool> {
     use crate::components as comps;
     let id = c.components.id(weft_abi::comp::SWIMS_IN);
     let matchers: Vec<u32> = id
@@ -520,7 +520,8 @@ pub fn swims_in(c: &Content, kind: u32, worn: &[u32]) -> Vec<bool> {
         .flat_map(|id| {
             c.components.get(comps::ENTITY, kind, id).into_iter().chain(
                 worn.iter()
-                    .filter_map(move |&i| c.components.get(comps::ITEM, i, id)),
+                    .filter(|s| !s.is_empty())
+                    .filter_map(move |s| c.stack_value::<u32>(s, Some(id))),
             )
         })
         .collect();
@@ -528,6 +529,14 @@ pub fn swims_in(c: &Content, kind: u32, worn: &[u32]) -> Vec<bool> {
         .iter()
         .map(|l| matchers.iter().any(|&m| c.matchers.has(m, l.first_state)))
         .collect()
+}
+
+/// Equipment slots, including empty slots and items without a worn model.
+pub fn equipped<'a>(c: &Content, kind: u32, inventory: &'a [abi::ItemStack]) -> &'a [abi::ItemStack] {
+    let slots = &c.game.entities[kind as usize].worn;
+    inventory
+        .get(slots.start as usize..slots.end as usize)
+        .unwrap_or_default()
 }
 
 /// What the main hand really holds: an item that needs both hands does nothing while the other
@@ -683,12 +692,7 @@ pub struct LiquidDef {
     /// Lighter than air: flows up.
     pub rises: bool,
     pub temperature: u32,
-    /// 0xRRGGBB, `None` for the average of its texture.
-    pub fog_color: Option<u32>,
-    pub fog_distance: f32,
-    /// Asset name, empty for its own texture.
-    pub overlay: String,
-    pub overlay_opacity: f32,
+    pub environment: Vec<abi::environment::EnvironmentLayer>,
 }
 
 impl LiquidDef {
@@ -900,7 +904,6 @@ pub struct Ids {
     pub conductor: Option<u32>,
     pub worn: Option<u32>,
     pub loot_rolls: Option<u32>,
-    pub worn_texture: Option<u32>,
     pub wear_per_hit: Option<u32>,
     pub spawn_egg: Option<u32>,
     pub attack_speed: Option<u32>,
@@ -1009,15 +1012,7 @@ pub struct Content {
     /// From a target, the box holding everything that may spread onto it.
     pub spread_search: (IVec3, IVec3),
     pub templates: Vec<crate::template::TemplateDef>,
-    pub template_names: FxHashMap<String, u32>,
     pub palettes: Vec<PaletteDef>,
-    pub palette_names: FxHashMap<String, u32>,
-    /// Every feature's name by id (`FeatureDef::id`); each dimension has its own list of them.
-    pub features: Vec<String>,
-    pub feature_names: FxHashMap<String, u32>,
-    /// Mods' records by id (`entry_kind::RECORD`).
-    pub records: Vec<String>,
-    pub record_names: FxHashMap<String, u32>,
     /// Weighted lists of block states from `blocks` component values, by the index the value holds.
     pub ref_lists: Vec<Vec<[u32; 2]>>,
     pub components: Components,
@@ -1049,14 +1044,10 @@ pub struct Content {
     pub commands: Vec<crate::commands::CommandDef>,
     /// The first state of `core:covered`, a big block's other cell (`StateInfo::cells`).
     pub covered: u32,
-    pub block_names: FxHashMap<String, u32>,
-    pub item_names: FxHashMap<String, u32>,
-    pub dim_names: FxHashMap<String, u32>,
     /// Where players start: the dimension marked `PLAYER_SPAWN` by the mod loaded last, else the
     /// first one registered, else the engine's void (`void_dim`).
     pub spawn_dim: u32,
     pub void_dim: u32,
-    pub biome_names: FxHashMap<String, u32>,
     pub creative_tabs: Vec<CreativeTab>,
     pub game: crate::registry::Game,
     pub liquids: Vec<LiquidDef>,
@@ -1097,6 +1088,12 @@ pub(crate) fn set(c: Content) {
 
 /// Color (0xRRGGBB) of a tint kind on items, which have no biome: the kind's default.
 impl Content {
+    pub fn component(&self, name: &str) -> Option<u32> {
+        self.components
+            .id(name)
+            .filter(|&id| self.game.components[id as usize].runtime)
+    }
+
     /// The layers texture `tex` is drawn as, bottom first, one by one: itself for most, a face's
     /// several pictures or one tinted by a kind otherwise.
     pub fn layers(&self, tex: u32) -> &[FaceLayer] {
@@ -1333,7 +1330,7 @@ impl Content {
             .or_insert_with(|| {
                 let look = crate::conditions::Look {
                     game: &self.game,
-                    block_names: &self.block_names,
+                    block_names: self.game.catalog.ids(ek::BLOCK),
                     blocks: &self.blocks,
                     components: &self.components,
                 };
@@ -1388,14 +1385,15 @@ impl Content {
         self.components.get(comps::BLOCK, state, comp?)
     }
 
-    /// Worn look of an item: inflation and texture.
-    pub fn worn(&self, item: u32) -> Option<(abi::Worn, &str)> {
-        let w = self.item_value::<abi::Worn>(item, self.ids.worn)?;
-        Some((
-            w,
-            self.components
-                .text(comps::ITEM, item, self.ids.worn_texture?)?,
-        ))
+    /// Worn look of a stack: inflation and texture, independent of slot effects.
+    pub fn worn(&self, stack: &abi::ItemStack) -> Option<(abi::Worn, &str)> {
+        if stack.is_empty() {
+            return None;
+        }
+        let w = self.stack_value::<abi::Worn>(stack, self.ids.worn)?;
+        let conditional = crate::stack::look(*stack).worn_texture;
+        let texture = if conditional.is_empty() { crate::stack::text(*stack, abi::comp::WORN_TEXTURE)? } else { conditional };
+        Some((w, texture))
     }
 
     /// The roles (`1 << role`) of the wearer's bones an item covers, from its equipment slot.
@@ -1483,13 +1481,15 @@ impl Content {
             let resolved: Resolved = list
                 .iter()
                 .filter_map(|m| {
-                    let attr = *self.game.attr_names.get(&m.attribute)?;
-                    let step = *steps
-                        .names
+                    let attr = self.game.catalog.find(ek::ATTRIBUTE, &m.attribute)?;
+                    let step = *self
+                        .game
+                        .catalog
+                        .ids(abi::entry_kind::STEP)
                         .get(if m.step.is_empty() { abi::step::ADD } else { &m.step })?;
                     let phase = match m.phase.as_str() {
                         "" => steps.defs[step as usize].phase,
-                        p => *steps.phase_names.get(p)?,
+                        p => *self.game.catalog.ids(abi::entry_kind::PHASE).get(p)?,
                     };
                     let when = (!m.when.is_empty())
                         .then(|| self.condition(&m.when.join(" & ")))
@@ -1578,12 +1578,12 @@ impl Content {
 
     /// Like `state_by_name`, saying what is wrong.
     pub fn parse_state(&self, text: &str) -> Result<u32, String> {
-        crate::refs::state(text, &self.block_names, &self.blocks)
+        crate::refs::state(text, self.game.catalog.ids(ek::BLOCK), &self.blocks)
     }
 
     /// An item by name.
     pub fn item_by_ref(&self, text: &str) -> Option<u32> {
-        crate::refs::one(text, &self.item_names, "item").ok()
+        crate::refs::one(text, self.game.catalog.ids(ek::ITEM), "item").ok()
     }
 
     /// The value of property `name` in `state`.
@@ -1759,16 +1759,15 @@ pub fn load_order(mods: &[ModMeta]) -> Vec<u32> {
 
 /// Inputs are sorted by id, also used to break a dependency cycle deterministically.
 pub(crate) fn dependency_order(count: usize, before: impl Fn(usize, usize) -> bool) -> Vec<u32> {
-    let mut placed: Vec<Option<u32>> = vec![None; count];
-    let mut next = 0;
-    while next < count as u32 {
-        let ready = (0..count).find(|&i| placed[i].is_none() && (0..count).all(|j| j == i || placed[j].is_some() || !before(j, i)));
-        // A dependency cycle: place the rest by id rather than loop forever.
-        let i = ready.unwrap_or_else(|| (0..count).find(|&i| placed[i].is_none()).unwrap());
-        placed[i] = Some(next);
-        next += 1;
+    let edges: Vec<Vec<usize>> = (0..count)
+        .map(|i| (0..count).filter(|&j| i != j && before(i, j)).collect())
+        .collect();
+    let (order, _) = crate::entries::dependency_order(&edges, |i| i, true);
+    let mut ranks = vec![0; count];
+    for (rank, i) in order.into_iter().enumerate() {
+        ranks[i] = rank as u32;
     }
-    placed.into_iter().map(|p| p.unwrap()).collect()
+    ranks
 }
 
 /// Registered tabs in mod order, filled with their tagged items in registration order; every mod
@@ -1793,6 +1792,13 @@ fn creative_tabs(
     mod_name: &dyn Fn(ModId) -> String,
     errors: &mut Vec<String>,
 ) -> Vec<CreativeTab> {
+    fn tab<'a>(tabs: &'a mut Vec<CreativeTab>, name: &str, icon: u32) -> &'a mut CreativeTab {
+        let i = tabs.iter().position(|t| t.name == name).unwrap_or_else(|| {
+            tabs.push(CreativeTab { name: name.to_owned(), icon, items: Vec::new() });
+            tabs.len() - 1
+        });
+        &mut tabs[i]
+    }
     let (made, _) = tables.bake(raw, abi::entry_kind::CREATIVE_TAB, mod_name, errors, |e, errors| {
         let icon = e.text(abi::comp::CREATIVE_TAB_ICON).unwrap_or_default();
         let Some(&icon) = item_names.get(icon) else {
@@ -1803,7 +1809,7 @@ fn creative_tabs(
     });
     let mut tabs: Vec<CreativeTab> = made.into_iter().flatten().collect();
     // Every entity's egg goes here, whichever mod's it is. Its icon is the first of them.
-    tabs.push(CreativeTab { name: "core:spawn_eggs".into(), icon: 0, items: Vec::new() });
+    tab(&mut tabs, "core:spawn_eggs", 0);
     // The tag `tab/<name>` of each tab, by component id.
     let tab_of: FxHashMap<u32, usize> = tabs
         .iter()
@@ -1844,7 +1850,7 @@ fn creative_tabs(
     }
     for (m, list) in leftover {
         let name = format!("{}:misc", mods.get(m).map_or("core", |m| m.id.as_str()));
-        tabs.push(CreativeTab { name, icon: list[0], items: list });
+        tab(&mut tabs, &name, list[0]).items.extend(list);
     }
     tabs.retain(|t| !t.items.is_empty());
     for t in tabs.iter_mut().filter(|t| t.icon == 0) {
@@ -1861,6 +1867,9 @@ fn creative_tabs(
                 .join(" ")
         );
     }
+    tables
+        .1
+        .set(abi::entry_kind::CREATIVE_TAB, tabs.iter().map(|t| t.name.as_str()));
     tabs
 }
 
@@ -2049,11 +2058,10 @@ pub fn freeze(mut mods: Vec<ModMeta>, regs: Vec<RawRegistrar>, step_order: &str)
     let (templates, template_names) = freeze_templates(&mut games, &mods, look, &mut tables, &mod_name, &mut errors);
     let (palettes, palette_names) = freeze_palettes(&mut games, look, &mut tables, &mod_name, &mut errors);
     let made = Made { templates: &templates, template_names: &template_names, palette_names: &palette_names };
-    let (features, feature_names) =
-        freeze_features(&mut games, &mut dim_defs, look, made, &mut matchers, &mut tables, &mod_name, &mut errors);
+    freeze_features(&mut games, &mut dim_defs, look, made, &mut matchers, &mut tables, &mod_name, &mut errors);
     // Mods' own data: only its table, which mods read.
     let rk = abi::entry_kind::RECORD;
-    let (records, record_names) = tables.bake(entries_of(&mut games, rk), rk, &mod_name, &mut errors, |e, _| e.name.clone());
+    tables.bake(entries_of(&mut games, rk), rk, &mod_name, &mut errors, |_, _| ());
     build_terrains(&mut games, &mut dim_defs, &biome_names, &biome_rules, look, &mut tables, &mod_name, &mut errors);
     let commands = freeze_commands(&mods, &mut games, &mut errors);
     let mut word_sets = collect_word_sets(&mut games, &mod_name, &mut errors);
@@ -2091,7 +2099,8 @@ pub fn freeze(mut mods: Vec<ModMeta>, regs: Vec<RawRegistrar>, step_order: &str)
     );
     // The kinds frozen with the game (poses, entity effects ...) get their tables before what
     // reads them.
-    for (kind, entries) in &tables.0 {
+    for (kind, entries) in &mut tables.0 {
+        game.catalog.bind(*kind, entries);
         let mut matcher = |text: &str, c: &Components| matchers.add(text, &block_names, &block_defs, c);
         components.add_table(*kind as usize, entries, &mut matcher, &mut errors);
     }
@@ -2122,7 +2131,14 @@ pub fn freeze(mut mods: Vec<ModMeta>, regs: Vec<RawRegistrar>, step_order: &str)
             continue;
         }
         let count = game.weathers.len() as u32;
-        match crate::refs::set(&names.join(" "), abi::entry_kind::WEATHER as usize, &game.weather_names, count, &components, "weather") {
+        match crate::refs::set(
+            &names.join(" "),
+            abi::entry_kind::WEATHER as usize,
+            game.catalog.ids(ek::WEATHER),
+            count,
+            &components,
+            "weather",
+        ) {
             Ok(w) => d.weathers = w,
             Err(e) => errors.push(format!("dimension {}: {e}", d.name)),
         }
@@ -2147,9 +2163,8 @@ pub fn freeze(mut mods: Vec<ModMeta>, regs: Vec<RawRegistrar>, step_order: &str)
                 .and_then(|id| components.text(comps::BIOME, b, id));
             match own {
                 Some(name) => game
-                    .precipitation_names
-                    .get(name)
-                    .copied()
+                    .catalog
+                    .find(ek::PRECIPITATION, name)
                     .unwrap_or_else(|| {
                         errors.push(format!("biome {}: no precipitation {name}", biome_defs[b as usize].name));
                         0
@@ -2212,6 +2227,14 @@ pub fn freeze(mut mods: Vec<ModMeta>, regs: Vec<RawRegistrar>, step_order: &str)
     let covered = block_names
         .get(COVERED)
         .map_or(u32::MAX, |&b| block_defs[b as usize].first_state);
+    for (kind, names) in [
+        (abi::entry_kind::BLOCK, block_names),
+        (abi::entry_kind::ITEM, item_names),
+        (abi::entry_kind::BIOME, biome_names),
+        (abi::entry_kind::DIMENSION, dim_names),
+    ] {
+        game.catalog.set_ids(kind, names);
+    }
     Ok(Content {
         liquid_walls,
         spread_targets,
@@ -2223,13 +2246,7 @@ pub fn freeze(mut mods: Vec<ModMeta>, regs: Vec<RawRegistrar>, step_order: &str)
         items: item_defs,
         biomes: biome_defs,
         templates,
-        template_names,
         palettes,
-        palette_names,
-        features,
-        feature_names,
-        records,
-        record_names,
         ref_lists,
         word_sets,
         tint_kinds,
@@ -2249,13 +2266,9 @@ pub fn freeze(mut mods: Vec<ModMeta>, regs: Vec<RawRegistrar>, step_order: &str)
         fire_texture,
         commands,
         covered,
-        block_names,
-        item_names,
         creative_tabs,
-        dim_names,
         spawn_dim,
         void_dim,
-        biome_names,
         game,
         liquids,
         item_liquid,
@@ -2622,7 +2635,11 @@ fn declare_components(
         }
     }
     for d in decls {
-        let size = d.entity.as_ref().map(|c| c.size as usize);
+        let size = d
+            .entity
+            .as_ref()
+            .map(|c| c.size as usize)
+            .filter(|&n| n != 0);
         cb.declare(&d.name, &d.schema, size, &|| who(d.owner, "component"), errors);
     }
     cb
@@ -2759,7 +2776,6 @@ fn component_ids(components: &Components) -> Ids {
         conductor: id(abi::comp::CONDUCTOR),
         worn: id(abi::comp::WORN),
         loot_rolls: id(abi::comp::LOOT_ROLLS),
-        worn_texture: id(abi::comp::WORN_TEXTURE),
         wear_per_hit: id(abi::comp::WEAR_PER_HIT),
         spawn_egg: id(abi::comp::SPAWN_EGG),
         attack_speed: id(abi::comp::ATTACK_SPEED),
@@ -2908,14 +2924,14 @@ fn freeze_features(
     tables: &mut crate::entries::Tables,
     mod_name: &dyn Fn(ModId) -> String,
     errors: &mut Vec<String>,
-) -> (Vec<String>, FxHashMap<String, u32>) {
+) {
     use crate::features::{Chance, FeatureDef, Fit, Shape, Spread, Write};
     use abi::comp::feature as f;
     use abi::entry_kind as ek;
     let Lookups { block_defs, block_names, components, .. } = look;
     // (dimensions, def, stage, after, before)
     type Baked = (Vec<usize>, FeatureDef, u32, Vec<String>, Vec<String>);
-    let (baked, names) = tables.bake(entries_of(games, ek::FEATURE), ek::FEATURE, mod_name, errors, |e, errors| -> Option<Baked> {
+    let (baked, _) = tables.bake(entries_of(games, ek::FEATURE), ek::FEATURE, mod_name, errors, |e, errors| -> Option<Baked> {
         let what = format!("feature {}", e.name);
         let id = 0;
         let generate = e.callback(f::GENERATE);
@@ -3115,10 +3131,6 @@ fn freeze_features(
         }
         Some((look.targets(dim_defs, &what, e, errors), def, stage, e.or(f::AFTER, Vec::new()), e.or(f::BEFORE, Vec::new())))
     });
-    let mut by_id = vec![String::new(); baked.len()];
-    for (name, &id) in &names {
-        by_id[id as usize] = name.clone();
-    }
     // Each dimension's in order: stage and load order, moved for `after` and `before`.
     let mut lists: Vec<Vec<(u32, u32, FeatureDef, Vec<String>, Vec<String>)>> = (0..dim_defs.len()).map(|_| Vec::new()).collect();
     for (id, b) in baked.into_iter().enumerate() {
@@ -3138,7 +3150,6 @@ fn freeze_features(
             .map(|_| weft_noise::cache::ColumnCache::new(4096))
             .collect();
     }
-    (by_id, names)
 }
 
 /// The order a dimension's features are placed in: stage, then load order, then each `after` and
@@ -3151,14 +3162,12 @@ fn feature_order(
     let at = |name: &str| list.iter().position(|e| e.2.name == name);
     // Edges: must come before.
     let mut before: Vec<Vec<usize>> = vec![Vec::new(); list.len()];
-    let mut needs = vec![0usize; list.len()];
     for (i, e) in list.iter().enumerate() {
         for (names, after) in [(&e.3, true), (&e.4, false)] {
             for n in names {
                 let Some(j) = at(n) else { continue };
                 let (a, b) = if after { (j, i) } else { (i, j) };
                 before[a].push(b);
-                needs[b] += 1;
             }
         }
     }
@@ -3166,30 +3175,13 @@ fn feature_order(
         for (j, b) in list.iter().enumerate() {
             if a.0 < b.0 && !before[i].contains(&j) {
                 before[i].push(j);
-                needs[j] += 1;
             }
         }
     }
-    let mut out = Vec::with_capacity(list.len());
-    let mut ready: Vec<usize> = (0..list.len()).filter(|&i| needs[i] == 0).collect();
-    while !ready.is_empty() {
-        ready.sort_by_key(|&i| std::cmp::Reverse((list[i].0, list[i].1)));
-        let i = ready.pop().unwrap();
-        out.push(i);
-        for &b in &before[i] {
-            needs[b] -= 1;
-            if needs[b] == 0 {
-                ready.push(b);
-            }
-        }
-    }
-    if out.len() < list.len() {
-        let stuck: Vec<&str> = (0..list.len())
-            .filter(|i| !out.contains(i))
-            .map(|i| list[i].2.name.as_str())
-            .collect();
+    let (mut out, rest) = crate::entries::dependency_order(&before, |i| (list[i].0, list[i].1), false);
+    if !rest.is_empty() {
+        let stuck: Vec<&str> = rest.iter().map(|&i| list[i].2.name.as_str()).collect();
         errors.push(format!("{dim}: features {} must each come after another of them", stuck.join(", ")));
-        let rest: Vec<usize> = (0..list.len()).filter(|i| !out.contains(i)).collect();
         out.extend(rest);
     }
     out
@@ -3202,7 +3194,7 @@ fn freeze_palettes(
     tables: &mut crate::entries::Tables,
     mod_name: &dyn Fn(ModId) -> String,
     errors: &mut Vec<String>,
-) -> (Vec<PaletteDef>, FxHashMap<String, u32>) {
+) -> (Vec<PaletteDef>, crate::entries::Names) {
     let kind = abi::entry_kind::PALETTE;
     tables.bake(entries_of(games, kind), kind, mod_name, errors, |e, errors| {
         let mut slots = FxHashMap::default();
@@ -3235,7 +3227,7 @@ fn freeze_templates(
     tables: &mut crate::entries::Tables,
     mod_name: &dyn Fn(ModId) -> String,
     errors: &mut Vec<String>,
-) -> (Vec<crate::template::TemplateDef>, FxHashMap<String, u32>) {
+) -> (Vec<crate::template::TemplateDef>, crate::entries::Names) {
     use abi::comp::template as t;
     let mut files: FxHashMap<String, crate::template::Parts> = FxHashMap::default();
     for m in mods {
@@ -3276,7 +3268,7 @@ fn freeze_templates(
         }
         template_of(look, name, parts, errors)
     };
-    let (mut defs, mut names) = tables.bake_by(
+    let (mut defs, _) = tables.bake_by(
         entries_of(games, kind),
         kind,
         mod_name,
@@ -3290,9 +3282,9 @@ fn freeze_templates(
     let mut rest: Vec<(String, crate::template::Parts)> = files.into_iter().collect();
     rest.sort_by(|a, b| a.0.cmp(&b.0));
     for (name, parts) in rest {
-        names.insert(name.clone(), defs.len() as u32);
         defs.push(make(&name, parts, None, errors));
     }
+    let names = tables.1.set(kind, defs.iter().map(|d| d.name.as_str()));
     (defs, names)
 }
 
@@ -3566,7 +3558,7 @@ fn resolve_hazards(
     errors: &mut Vec<String>,
 ) {
     use abi::hazard_at as at;
-    let causes = &game.damage_cause_names;
+    let causes = game.catalog.ids(ek::DAMAGE_CAUSE);
     let mut resolve = |list: Vec<abi::Hazard>, allowed: &[u32], conds: &mut crate::conditions::Texts| -> Vec<Hazard> {
         let mut out = Vec::new();
         for h in list {
@@ -3634,18 +3626,18 @@ fn resolve_source_mods(
     let mut resolve = |list: Vec<abi::Modifier>| -> Vec<SourceMod> {
         list.into_iter()
             .filter_map(|m| {
-                let Some(&attr) = game.attr_names.get(&m.attribute) else {
+                let Some(attr) = game.catalog.find(ek::ATTRIBUTE, &m.attribute) else {
                     errors.push(format!("modifier: no attribute {}", m.attribute));
                     return None;
                 };
                 let step_name = if m.step.is_empty() { abi::step::ADD } else { &m.step };
-                let Some(&step) = steps.names.get(step_name) else {
+                let Some(&step) = game.catalog.ids(abi::entry_kind::STEP).get(step_name) else {
                     errors.push(format!("modifier of {}: no step {step_name}", m.attribute));
                     return None;
                 };
                 let phase = match m.phase.as_str() {
                     "" => steps.defs[step as usize].phase,
-                    p => match steps.phase_names.get(p) {
+                    p => match game.catalog.ids(abi::entry_kind::PHASE).get(p) {
                         Some(&p) => p,
                         None => {
                             errors.push(format!("modifier of {}: no phase {p}", m.attribute));
@@ -3719,10 +3711,16 @@ fn freeze_loot(
 }
 
 fn collect_stack_flags(decls: &[crate::registry::ComponentDecl], components: &Components) -> FxHashMap<u32, u32> {
-    decls
+    let mut flags: FxHashMap<u32, u32> = decls
         .iter()
         .filter_map(|d| Some((components.id(&d.name)?, d.stack?)))
-        .collect()
+        .collect();
+    for name in [abi::comp::WEAR, abi::comp::LAYERS, abi::comp::MODEL, abi::comp::WORN, abi::comp::WORN_MODEL, abi::comp::WORN_TEXTURE] {
+        if let Some(id) = components.id(name) {
+            *flags.entry(id).or_default() |= abi::stack_flags::VISUAL;
+        }
+    }
+    flags
 }
 
 fn link_particles(game: &mut crate::registry::Game, textures: &mut Interner) {
@@ -3740,7 +3738,7 @@ fn check_ambient_particles(game: &crate::registry::Game, components: &Components
         let mut named: Vec<&str> = (0..state_count)
             .filter_map(|s| components.text(comps::BLOCK, s, id))
             .flat_map(|n| n.split(','))
-            .filter(|n| !game.particle_names.contains_key(*n))
+            .filter(|n| !game.catalog.ids(ek::PARTICLE).contains_key(*n))
             .collect();
         named.dedup();
         errors.extend(
@@ -3799,7 +3797,7 @@ fn link_menus(
 ) {
     for (b, menu) in opens_names.iter().enumerate().filter(|m| !m.1.is_empty()) {
         let def = &mut block_defs[b + 1];
-        match game.menu_names.get(menu) {
+        match game.catalog.ids(ek::MENU).get(menu) {
             Some(&m) => {
                 def.opens = Some(m);
                 if let Some(item) = item_defs
@@ -3832,7 +3830,7 @@ fn check_loot_smelting(loot: &FxHashMap<String, crate::loot::Table>, game: &crat
             .flat_map(|p| &p.entries)
             .filter_map(|e| e.smelt.as_ref())
         {
-            if !game.recipe_kinds.contains_key(k) {
+            if !game.catalog.ids(ek::RECIPE_KIND).contains_key(k) {
                 errors.push(format!("loot table {table} smelts by recipe kind {k}, which no mod registers"));
             }
         }
@@ -3851,7 +3849,7 @@ fn resolve_effects(
 ) {
     let sc = components.id(abi::comp::SOUND);
     let fx = components.id(abi::comp::EFFECTS);
-    let particle = |name: &str| game.particle_names.get(name).copied().unwrap_or(u32::MAX);
+    let particle = |name: &str| game.catalog.find(ek::PARTICLE, name).unwrap_or(u32::MAX);
     let (pieces, smoke) = (particle(abi::particle::BLOCK), particle(abi::particle::POOF));
     // A prefix with none of its events registered is a typo (`.sounds("stnoe")`).
     let mut unknown: Vec<(String, String)> = Vec::new();
@@ -3860,9 +3858,8 @@ fn resolve_effects(
         if let Some(pre) = prefix {
             for (e, f) in events.iter().zip(out.iter_mut()) {
                 f.sound = game
-                    .sound_names
-                    .get(&format!("{pre}.{e}"))
-                    .copied()
+                    .catalog
+                    .find(ek::SOUND, &format!("{pre}.{e}"))
                     .unwrap_or(u32::MAX);
             }
             if out.iter().all(|f| f.sound == u32::MAX) && !unknown.iter().any(|u| u.0 == pre) {
@@ -3888,8 +3885,8 @@ fn resolve_effects(
                     None => errors.push(format!("{what}: {} has no {n}", e.event)),
                 },
             };
-            set(&e.sound, &game.sound_names, &mut out[i].sound);
-            set(&e.particle, &game.particle_names, &mut out[i].particle);
+            set(&e.sound, game.catalog.ids(ek::SOUND), &mut out[i].sound);
+            set(&e.particle, game.catalog.ids(ek::PARTICLE), &mut out[i].particle);
         }
     };
     for (i, s) in states.iter_mut().enumerate() {
@@ -3941,8 +3938,22 @@ fn freeze_liquids(
                 errors.push(format!("liquid {}: its block needs 16 states, has {}", e.name, def.states));
                 return None;
             }
-            let fog: abi::LiquidFog = e.or(l::FOG, abi::LiquidFog { color: u32::MAX, distance: 96.0 });
-            let overlay: abi::LiquidOverlay = e.or(l::OVERLAY, abi::LiquidOverlay { texture: String::new(), opacity: 0.1 });
+            let mut base = abi::environment::EnvironmentLayer::new("core:liquid".into());
+            base.priority = -700;
+            base.values.fog_start = -8.0;
+            base.values.fog_end = 96.0;
+            base.values.fog_gray = 0.0;
+            base.values.sky_opacity = 0.0;
+            base.fog_from_block = true;
+            base.overlays.push(abi::environment::EnvironmentOverlay {
+                color: [1.0, 1.0, 1.0, 0.1],
+                tiles: 1.0,
+                block_face: 0,
+                lit: true,
+                ..Default::default()
+            });
+            let mut environment = vec![base];
+            environment.extend(e.or::<Vec<abi::environment::EnvironmentLayer>>(abi::environment::COMPONENT, Vec::new()));
             Some(LiquidDef {
                 name: e.name.clone(),
                 first_state: def.first_state,
@@ -3952,10 +3963,7 @@ fn freeze_liquids(
                 renewable: e.or(l::RENEWABLE, u32::MAX),
                 rises: e.or(l::DENSITY, 1000) < 0,
                 temperature: e.or(l::HEAT, 300),
-                fog_color: (fog.color != u32::MAX).then_some(fog.color),
-                fog_distance: fog.distance.max(0.1),
-                overlay: overlay.texture,
-                overlay_opacity: overlay.opacity.clamp(0.0, 1.0),
+                environment,
             })
         },
     );

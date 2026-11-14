@@ -16,9 +16,17 @@ Conditions are one predicate language for music, text, loot, spawning, poses and
 | `in_liquid`, `flying`, `sprinting` | about the actor, handy for poses |
 | `attribute(core:can_fly, 1..)` | an attribute of who it is about is in range (`Cond::attribute(&attribute::CAN_FLY, 1.0, f64::MAX)`) |
 | `wears(head)` | something is worn over that bone, or in the equipment slot of that name: a helmet keeps the sun off a zombie |
+| `side(down, #soil)` | that side contains a matching block; without a matcher, a solid block |
+| `open(up)` | that side is air or replaceable |
+| `beside(#water)` | a horizontal neighbor contains a matching block; `beside(down, #water)` checks around the cell below |
+| `covered` | the cell above is opaque |
+| `sky(min..max)`, `height(min..max)` | sky light or world height is in range |
+| `sheltered` | the current weather permits shelter |
 | `creative` and the rest | every game mode by its name |
 
 The engine's go without their namespace.
+
+Built-in checks use the same rules on the client and server, including neighboring cells and compound blocks. An unloaded cell is unknown rather than air. `chance` rolls only on the server. Custom callbacks run on the side that asks.
 
 ## In code
 

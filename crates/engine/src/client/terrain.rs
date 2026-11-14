@@ -7,6 +7,7 @@
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
+use weft_abi::entry_kind as ek;
 
 use crossbeam_channel::{Receiver, Sender, select, unbounded};
 use glam::{IVec2, IVec3};
@@ -119,7 +120,8 @@ fn visibility_on(gpu: bool) -> bool {
     let c = content();
     match c
         .game
-        .config_names
+        .catalog
+        .ids(ek::CONFIG)
         .get("core:client_visibility")
         .map(|&id| crate::config::get(id) as i32)
     {

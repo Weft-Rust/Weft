@@ -51,6 +51,16 @@ impl<'a> R<'a> {
 const MAX_LEN: usize = 1 << 20;
 
 pub trait Wire: Sized {
+    fn to_bytes(&self) -> Vec<u8> {
+        let mut w = W::default();
+        self.put(&mut w);
+        w.0
+    }
+    fn from_bytes(bytes: &[u8]) -> Option<Self> {
+        let mut r = R(bytes);
+        let value = Self::get(&mut r)?;
+        r.0.is_empty().then_some(value)
+    }
     fn put(&self, w: &mut W);
     fn get(r: &mut R) -> Option<Self>;
 }

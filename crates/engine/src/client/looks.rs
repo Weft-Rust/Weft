@@ -60,15 +60,57 @@ impl Drawn<'_> {
     }
 }
 
-/// What an item is drawn as, in a slot and in the hand alike.
+/// Resolved geometry and colors, shared by slots, hands and dropped stacks.
 pub enum ItemDraw<'a> {
-    /// Its own boxes.
-    Model(&'a [ModelBox]),
-    /// A sprite.
-    Icon(u32),
-    /// As its block shows, `Looks::block_sprite` or else `block_shape`.
-    Block(u32),
+    Model { boxes: std::borrow::Cow<'a, [ModelBox]>, state: u32 },
+    Sprite(SpriteLayer),
+    Sprites(Vec<SpriteLayer>),
     Nothing,
+}
+
+pub struct SpriteLayer {
+    pub texture: SpriteTexture,
+    pub color: u32,
+}
+
+pub enum SpriteTexture {
+    Id(u32),
+    Layers(&'static str),
+}
+
+impl SpriteLayer {
+    pub fn texture(&self, textures: &super::textures::GameTextures) -> u32 {
+        match self.texture {
+            SpriteTexture::Id(id) => id,
+            SpriteTexture::Layers(spec) => textures.layered(spec),
+        }
+    }
+    pub fn outline(&self, looks: &Looks, c: &Content) -> Option<String> {
+        match self.texture {
+            SpriteTexture::Layers(spec) => Some(format!("layers:{spec}")),
+            SpriteTexture::Id(id) => {
+                let name = looks.texture_name(c, id)?;
+                Some(
+                    crate::content::tinted_copy(name)
+                        .map_or(name, |(of, _)| of)
+                        .to_string(),
+                )
+            }
+        }
+    }
+}
+
+impl ItemDraw<'_> {
+    pub fn solid(&self) -> bool {
+        matches!(self, Self::Model { .. })
+    }
+    pub fn sprites(&self) -> &[SpriteLayer] {
+        match self {
+            Self::Sprite(sprite) => std::slice::from_ref(sprite),
+            Self::Sprites(sprites) => sprites,
+            _ => &[],
+        }
+    }
 }
 
 impl Looks {
@@ -89,16 +131,43 @@ impl Looks {
         }
     }
 
-    pub fn item_draw<'a>(&'a self, c: &'a Content, item: u32) -> ItemDraw<'a> {
+    pub fn item_draw<'a>(&'a self, c: &'a Content, stack: &weft_abi::ItemStack, biome: Option<u16>, front: &str) -> ItemDraw<'a> {
+        let item = stack.item;
         let Some(def) = c.items.get(item as usize).filter(|_| item != 0) else { return ItemDraw::Nothing };
         let look = self.item(item);
         let model = look.and_then(|l| l.model.as_deref()).unwrap_or(&def.model);
         let icon = look.and_then(|l| l.icon).unwrap_or(def.icon);
-        match def.block {
-            _ if !model.is_empty() => ItemDraw::Model(model),
-            _ if icon != u32::MAX => ItemDraw::Icon(icon),
-            Some(state) => ItemDraw::Block(state),
-            None => ItemDraw::Nothing,
+        if !model.is_empty() {
+            return ItemDraw::Model { boxes: model.into(), state: 0 };
+        }
+        if icon != u32::MAX {
+            let (texture, color) = match crate::stack::layers(stack) {
+                Some(spec) => (SpriteTexture::Layers(spec), 0xFF_FFFF),
+                None => {
+                    let tint = c
+                        .item_fluid
+                        .get(&item)
+                        .map_or(0, |&l| c.states[c.liquids[l as usize].first_state as usize].tint);
+                    (SpriteTexture::Id(icon), c.kind_color(tint, biome))
+                }
+            };
+            return ItemDraw::Sprite(SpriteLayer { texture, color });
+        }
+        def.block
+            .map_or(ItemDraw::Nothing, |state| self.block_draw(c, c.facing_toward(state, front), biome))
+    }
+
+    pub fn block_draw<'a>(&'a self, c: &'a Content, state: u32, biome: Option<u16>) -> ItemDraw<'a> {
+        let Some(s) = c.states.get(state as usize) else { return ItemDraw::Nothing };
+        if let Some(t) = self.block_sprite(state, s) {
+            ItemDraw::Sprites(
+                super::mesher::face_layers(c, s, t, 0)
+                    .iter()
+                    .map(|l| SpriteLayer { texture: SpriteTexture::Id(l.tex), color: c.kind_color(l.tint, biome) })
+                    .collect(),
+            )
+        } else {
+            ItemDraw::Model { boxes: self.block_shape(state, s).into(), state }
         }
     }
 

@@ -5,6 +5,7 @@
 //! loaded costs nothing until someone goes there.
 
 use std::sync::Arc;
+use weft_abi::entry_kind as ek;
 
 use glam::{DVec3, IVec2, IVec3};
 use rayon::prelude::*;
@@ -106,7 +107,7 @@ impl AreaFill {
         let (keep, only) = (keep.trim(), only.trim());
         let kept = c
             .matchers
-            .kept(keep, only, &c.block_names, &c.blocks, &c.components)?;
+            .kept(keep, only, c.game.catalog.ids(ek::BLOCK), &c.blocks, &c.components)?;
         Ok(AreaFill { id: 0, shape, state, keep: keep.into(), only: only.into(), kept, covered: c.covered })
     }
 

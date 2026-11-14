@@ -7,7 +7,7 @@ use crate::tag_bits::entity as ef;
 use glam::{DVec3, IVec3};
 use rayon::prelude::*;
 use rustc_hash::{FxHashMap, FxHashSet};
-use weft_abi::{self as abi, ItemStack, block_flags as bf, damage_cause as damage};
+use weft_abi::{self as abi, ItemStack, block_flags as bf, damage_cause as damage, entry_kind as ek};
 
 use super::entity::{Entities, Entity, Motion, Told, step};
 use super::space::{BlockTimer, Space};
@@ -370,6 +370,7 @@ impl Dim {
     /// Writes the fields clients show (`registry::HEALTH` ...) into their synced components when
     /// they differ, so they travel like mods' components. Absent ones stay absent while default.
     pub fn mirror_fields(&mut self, c: &'static Content) {
+        use crate::net::{HealthField, RidingField, ShapeField, StuckField, UsingField, codec::Wire};
         let crate::registry::FieldComps {
             health,
             burning,
@@ -384,6 +385,7 @@ impl Dim {
             permission,
             attributes,
             shown,
+            ground,
             ..
         } = c.game.fields;
         // What lives has attributes; a dropped item or a block's entity none worth sending. A
@@ -428,18 +430,19 @@ impl Dim {
                 }
                 None => {}
             };
+            put(comps, ground, &crate::stack::client_bytes(e.item));
             let slots = &c.game.entities[e.kind as usize].shown_slots;
             if !slots.is_empty() {
                 let inv = inventories.get(&e.id);
-                let items: Vec<u8> = slots
+                let items: Vec<ItemStack> = slots
                     .iter()
-                    .flat_map(|&s| {
+                    .map(|&s| {
                         inv.and_then(|i| i.get(s as usize))
-                            .map_or(0, |s| s.item)
-                            .to_le_bytes()
+                            .copied()
+                            .unwrap_or_default()
                     })
                     .collect();
-                put(comps, shown, &items);
+                put(comps, shown, &crate::stack::shown_bytes(&items));
             }
             // A block entity is heard of only for what it shows.
             if e.anchor.is_some() {
@@ -450,63 +453,43 @@ impl Dim {
             let max_at = crate::registry::attr::MAX_HEALTH as usize;
             let max = attrs.map(|a| a[max_at]).unwrap_or_else(|| {
                 comps
-                    .get(&(e.id, attributes))
-                    .and_then(|b| b.get(max_at * 4..max_at * 4 + 4))
-                    .map_or(0.0, |b| f32::from_le_bytes(b.try_into().unwrap()))
+                    .get(&(e.id, health))
+                    .and_then(|b| HealthField::from_bytes(b))
+                    .map_or(0.0, |hp| hp.maximum)
             });
-            let mut hp = [0u8; 8];
-            hp[..4].copy_from_slice(&e.health.max(0.0).to_le_bytes());
-            hp[4..].copy_from_slice(&max.to_le_bytes());
-            put(comps, health, &hp);
+            put(comps, health, &HealthField { current: e.health.max(0.0), maximum: max }.to_bytes());
             put(comps, burning, &[(e.fire > 0) as u8]);
-            let items: Vec<u8> = e.worn.iter().flat_map(|i| i.to_le_bytes()).collect();
-            put(comps, worn, &items);
-            let mut sh = [0u8; 16];
+            let inv = inventories.get(&e.id).map_or(&[][..], Vec::as_slice);
+            put(comps, worn, &crate::stack::shown_bytes(crate::content::equipped(c, e.kind, inv)));
             let size = e.size.unwrap_or_default();
-            for (i, v) in [size.width, size.height, size.eye].into_iter().enumerate() {
-                sh[i * 4..i * 4 + 4].copy_from_slice(&v.to_le_bytes());
-            }
-            sh[12..].copy_from_slice(&e.look.unwrap_or(u32::MAX).to_le_bytes());
-            put(comps, shape, &sh);
-            let rides: Vec<u8> = e.vehicle.map_or(Vec::new(), |(m, seat)| {
-                m.to_le_bytes()
-                    .into_iter()
-                    .chain((seat as u32).to_le_bytes())
-                    .collect()
-            });
-            put(comps, riding, &rides);
-            let held_by: Vec<u8> = match e.stuck {
-                Some(super::entity::Stuck { into: super::entity::StuckIn::Entity(host), at, yaw, .. }) => host
-                    .to_le_bytes()
-                    .into_iter()
-                    .chain(
-                        at.as_vec3()
-                            .to_array()
-                            .into_iter()
-                            .chain([yaw])
-                            .flat_map(f32::to_le_bytes),
-                    )
-                    .collect(),
+            put(
+                comps,
+                shape,
+                &ShapeField { width: size.width, height: size.height, eye: size.eye, look: e.look.unwrap_or(u32::MAX) }.to_bytes(),
+            );
+            put(
+                comps,
+                riding,
+                &e.vehicle
+                    .map_or_else(Vec::new, |(mount, seat)| RidingField { mount, seat: seat as u32 }.to_bytes()),
+            );
+            let held_by = match e.stuck {
+                Some(super::entity::Stuck { into: super::entity::StuckIn::Entity(host), at, yaw, .. }) => {
+                    StuckField { host, at: at.as_vec3().to_array(), yaw }.to_bytes()
+                }
                 _ => Vec::new(),
             };
             put(comps, stuck, &held_by);
             if let Some(a) = attrs {
-                let bytes: Vec<u8> = a.iter().flat_map(|v| v.to_le_bytes()).collect();
+                let bytes = a.to_bytes();
                 put(comps, attributes, &bytes);
             }
-            if let Some(inv) = inventories.get(&e.id) {
-                use crate::net::codec::Wire;
-                let item = crate::content::in_main_hand(c, e.kind, inv, e.selected);
-                let mut bytes = crate::net::codec::W::default();
-                crate::stack::for_client(item).put(&mut bytes);
-                put(comps, held, &bytes.0);
-                let off = crate::content::in_off_hand(c, e.kind, inv);
-                let mut bytes = crate::net::codec::W::default();
-                crate::stack::for_client(off).put(&mut bytes);
-                put(comps, off_held, &bytes.0);
+            for (comp, item) in
+                [(held, crate::content::in_main_hand(c, e.kind, inv, e.selected)), (off_held, crate::content::in_off_hand(c, e.kind, inv))]
+            {
+                put(comps, comp, &crate::stack::client_bytes(item));
             }
-            let use_value = e.using.0 | (e.using.1 as u32) << 31;
-            put(comps, using, &use_value.to_le_bytes());
+            put(comps, using, &UsingField { ticks: e.using.0, offhand: e.using.1 }.to_bytes());
             if e.player {
                 put(comps, game_mode, &(e.mode.0 as u32).to_le_bytes());
                 put(comps, permission, &e.permission.to_le_bytes());
@@ -1363,9 +1346,8 @@ impl Dim {
                     burst: abi::ParticleBurst {
                         kind: c
                             .game
-                            .particle_names
-                            .get(abi::particle::CRIT)
-                            .copied()
+                            .catalog
+                            .find(ek::PARTICLE, abi::particle::CRIT)
                             .unwrap_or(0),
                         pos: pos.to_array().into(),
                         count: 16,
@@ -1569,7 +1551,7 @@ impl Dim {
                     .components
                     .id(comp)
                     .and_then(|id| c.components.text(comps::BLOCK, state, id))
-                    .and_then(|n| c.game.particle_names.get(n))
+                    .and_then(|n| c.game.catalog.ids(ek::PARTICLE).get(n))
                 else {
                     continue;
                 };
@@ -2654,12 +2636,17 @@ impl Dim {
                 .entities
                 .comps
                 .get(&(id, forced_comp))
-                .filter(|b| b.len() >= 4)
-                .map(|b| crate::world::Pose::from_id(u32::from_le_bytes(b[..4].try_into().unwrap())));
+                .and_then(|b| <crate::net::ForcedPoseField as crate::net::codec::Wire>::from_bytes(b))
+                .map(|f| crate::world::Pose::from_id(f.pose));
             let size = e.size.unwrap_or(k.size());
             let (pos, walk, hw) = (e.pos, e.walk, size.width as f64 / 2.0);
             let low = e.pose.def().tilt != abi::pose_tilt::UPRIGHT;
-            let swims = crate::content::swims_in(c, e.kind, &e.worn);
+            let inv = self
+                .entities
+                .inventories
+                .get(&id)
+                .map_or(&[][..], Vec::as_slice);
+            let swims = crate::content::swims_in(c, e.kind, crate::content::equipped(c, e.kind, inv));
             let block = super::space::CubeCells(&self.space.cubes);
             let swim_at = pos + DVec3::Y * if low { 0.1 } else { e.dims(c).eye };
             let in_liquid = crate::physics::liquid_at(c, &block, swim_at).is_some_and(|l| swims.get(l as usize) == Some(&true));
@@ -2747,9 +2734,8 @@ impl Dim {
                 if taken > 0 {
                     let pickup = c
                         .game
-                        .sound_names
-                        .get("core:item.pickup")
-                        .copied()
+                        .catalog
+                        .find(ek::SOUND, "core:item.pickup")
                         .unwrap_or(u32::MAX);
                     self.sound(pickup, pos, 1.0, 0.0);
                     self.emit_engine(c, abi::action::PICKUP_ITEM, &abi::Pickup { entity: pid, stack: ItemStack { count: taken, ..stack } });

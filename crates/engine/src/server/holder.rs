@@ -176,39 +176,23 @@ pub fn insert(d: &mut Dim, c: &Content, inv: Inv, stack: ItemStack) -> ItemStack
         (At::Entity(id), 0) => d.entities.insert_item(c, id, stack),
         _ => {
             let mut list = stored(d, c, inv);
-            let rest = merge_into(c, &mut list, stack, |_| true);
+            let rest = stack::insert_into(
+                stack,
+                0..list.len(),
+                |i, value| {
+                    if let Some(value) = value {
+                        list[i] = value;
+                    }
+                    list[i]
+                },
+                |_, _| c.max_stack(&stack),
+            );
             if rest != stack {
                 store(d, c, inv, &list);
             }
             rest
         }
     }
-}
-
-/// `stack` merged into `list` where `allowed` says, matching stacks first. Returns the rest.
-pub fn merge_into(c: &Content, list: &mut [ItemStack], mut stack: ItemStack, allowed: impl Fn(usize) -> bool) -> ItemStack {
-    let max = c.max_stack(&stack);
-    for (_, s) in list.iter_mut().enumerate().filter(|(i, _)| allowed(*i)) {
-        if stack.count == 0 {
-            break;
-        }
-        if s.stacks_with(&stack) && s.count < max && !s.is_empty() {
-            let n = (max - s.count).min(stack.count);
-            s.count += n;
-            stack.count -= n;
-        }
-    }
-    for (_, s) in list.iter_mut().enumerate().filter(|(i, _)| allowed(*i)) {
-        if stack.count == 0 {
-            break;
-        }
-        if s.is_empty() {
-            let n = max.min(stack.count);
-            *s = ItemStack { count: n, ..stack };
-            stack.count -= n;
-        }
-    }
-    if stack.count == 0 { ItemStack::EMPTY } else { stack }
 }
 
 /// The holder's `comp`, as bytes.

@@ -988,32 +988,13 @@ fn expand_templates(
         return (Vec::new(), Vec::new());
     }
     templates.sort_by(|&a, &b| blocks[a].name.cmp(&blocks[b].name));
-    // What any template takes; what it leaves out (`!#tag`) is checked per template.
-    let words: Vec<String> = templates
-        .iter()
-        .flat_map(|&t| {
-            let of: abi::ShapesOf = blocks[t].or(b::SHAPES_OF, abi::ShapesOf::default());
-            abi::matcher_terms(&of.sources)
-                .filter(|w| !w.starts_with('!'))
-                .map(str::to_string)
-                .collect::<Vec<_>>()
-        })
-        .collect();
     // The first state of each block a template may take, by its own registration, and its tags
     // with what edits by name gave it.
     let firsts: Vec<Option<(Values, Vec<&str>)>> = blocks
         .iter()
         .zip(own)
         .map(|(e, &own)| {
-            let named = |w: &String| match w.strip_prefix('#') {
-                Some(pattern) => e
-                    .parts
-                    .iter()
-                    .flat_map(|p| &p.1)
-                    .any(|op| op.value.schema.is_empty() && matches(pattern, &op.value.name)),
-                None => *w == e.name,
-            };
-            if e.has(b::SHAPES_OF) || !words.iter().any(named) {
+            if e.has(b::SHAPES_OF) {
                 return None;
             }
             let tags = first_state(e, &e.parts)
@@ -1053,16 +1034,27 @@ fn expand_templates(
                     .values
             })
             .collect();
+        let taken = crate::refs::compile_with(&of.sources, blocks.len() as u32, |term| {
+            Ok(blocks
+                .iter()
+                .enumerate()
+                .filter_map(|(i, source)| {
+                    let (_, tags) = firsts[i].as_ref()?;
+                    let fits = match &term {
+                        crate::refs::Ref::Tags(pattern) => tags.iter().any(|t| matches(pattern, t)),
+                        crate::refs::Ref::Name(n, props) => props.is_empty() && source.name == *n,
+                    };
+                    fits.then_some(i as u32)
+                })
+                .collect())
+        })
+        .unwrap_or_else(|e| {
+            errors.push(format!("{}: {e}", template.name));
+            Vec::new()
+        });
         for (s, source) in blocks.iter().enumerate() {
-            let Some((first, tags)) = &firsts[s] else { continue };
-            let fits = |w: &str| match w.strip_prefix('#') {
-                Some(pattern) => tags.iter().any(|t| matches(pattern, t)),
-                None => source.name == w,
-            };
-            let terms: Vec<&str> = abi::matcher_terms(&of.sources).collect();
-            let taken =
-                terms.iter().any(|w| !w.starts_with('!') && fits(w)) && !terms.iter().any(|w| w.strip_prefix('!').is_some_and(fits));
-            if model_of(first.or(b::MODEL, BlockModel::Cube as u32)) != BlockModel::Cube || !taken {
+            let Some((first, _)) = &firsts[s] else { continue };
+            if !crate::refs::has(&taken, s as u32) || model_of(first.or(b::MODEL, BlockModel::Cube as u32)) != BlockModel::Cube {
                 continue;
             }
             let name = format!("{}{}", source.name, of.suffix);

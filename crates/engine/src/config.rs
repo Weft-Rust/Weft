@@ -9,7 +9,7 @@ use std::path::Path;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Mutex, OnceLock, RwLock};
 
-use weft_abi::{config_kind as ck, config_scope as scope};
+use weft_abi::{config_kind as ck, config_scope as scope, entry_kind as ek};
 
 use crate::content::content;
 use crate::entries::{Entry, RawEntry};
@@ -181,7 +181,7 @@ fn save_of(id: u32) {
 }
 
 pub fn by_name(name: &str) -> Option<u32> {
-    content().game.config_names.get(name).copied()
+    content().game.catalog.find(ek::CONFIG, name)
 }
 
 pub fn automated() -> bool {
@@ -387,6 +387,7 @@ pub fn engine_configs(keys: &[(String, String)]) -> Vec<RawEntry> {
         number("core:lod_detail", ck::FLOAT, if phone { 2.0 } else { 4.0 }, 1.0, 4.0, 0.5),
         // Blocks clouds float above where their dimension puts them.
         number("core:cloud_height", ck::INT, 0.0, 0.0, 512.0, 16.0),
+        number("core:cloud_distance", ck::INT, if phone { 2048.0 } else { 6144.0 }, 0.0, 8192.0, 16.0),
         // Vanilla's: in GUI pixels, and percent of the dark behind the text.
         number("core:chat_width", ck::INT, 320.0, 40.0, 1000.0, 1.0),
         number("core:chat_height", ck::INT, 180.0, 20.0, 1000.0, 1.0),
@@ -446,7 +447,18 @@ pub fn engine_configs(keys: &[(String, String)]) -> Vec<RawEntry> {
         ("core:settings", &["fov", "view_distance"]),
         (
             "core:video",
-            &["gui_scale", "render_scale", "brightness", "lod_distance", "lod_detail", "cloud_height", "vsync", "fullscreen", "renderer"],
+            &[
+                "gui_scale",
+                "render_scale",
+                "brightness",
+                "lod_distance",
+                "lod_detail",
+                "cloud_height",
+                "cloud_distance",
+                "vsync",
+                "fullscreen",
+                "renderer",
+            ],
         ),
         ("core:controls", &["sensitivity", "invert_y", "touch_controls"]),
         ("core:accessibility", &["fov_effects"]),
@@ -487,7 +499,7 @@ pub fn volume(name: &str) -> RawEntry {
 
 fn number(name: &str, kind: u32, default: f64, min: f64, max: f64, step: f64) -> RawEntry {
     use weft_abi::comp::config as c;
-    RawEntry::engine(weft_abi::entry_kind::CONFIG, name)
+    RawEntry::engine(ek::CONFIG, name)
         .set(c::KIND, kind)
         .set(c::DEFAULT, default)
         .set(c::RANGE, [min, max])

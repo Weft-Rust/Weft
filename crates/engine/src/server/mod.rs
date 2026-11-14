@@ -42,7 +42,7 @@ use glam::{DVec3, IVec3};
 use parking_lot::Mutex;
 use rayon::prelude::*;
 use rustc_hash::FxHashSet;
-use weft_abi::{self as abi, ItemStack, component_flags as cf};
+use weft_abi::{self as abi, ItemStack, component_flags as cf, entry_kind as ek};
 
 pub use dim::{Dim, DimEvent};
 
@@ -404,31 +404,33 @@ impl Server {
             .collect();
         if let Some(s) = &storage {
             for (name, t) in &s.meta.times {
-                if let Some(&i) = c.dim_names.get(name) {
+                if let Some(i) = c.game.catalog.find(ek::DIMENSION, name) {
                     dims[i as usize].set_time(*t);
                 }
             }
             for (name, weather, until) in &s.meta.weather {
-                if let (Some(&i), Some(&w)) = (c.dim_names.get(name), c.game.weather_names.get(weather)) {
+                if let (Some(&i), Some(&w)) = (c.game.catalog.ids(ek::DIMENSION).get(name), c.game.catalog.ids(ek::WEATHER).get(weather)) {
                     let d = &mut dims[i as usize];
                     d.set_weather(w as u16, 0);
                     d.weather_until = *until;
                 }
             }
             for (name, at, event, data) in &s.meta.timers {
-                if let (Some(&i), Some(&e)) = (c.dim_names.get(name), c.game.event_names.get(event)) {
+                if let (Some(&i), Some(&e)) = (c.game.catalog.ids(ek::DIMENSION).get(name), c.game.event_names.get(event)) {
                     dims[i as usize]
                         .timers
                         .push((*at, e, data.as_slice().into()));
                 }
             }
             for (name, o) in &s.meta.day_offsets {
-                if let Some(&i) = c.dim_names.get(name) {
+                if let Some(i) = c.game.catalog.find(ek::DIMENSION, name) {
                     dims[i as usize].day_offset = *o;
                 }
             }
             for (name, spec) in &s.meta.edits {
-                let (Some(&i), Some(fill)) = (c.dim_names.get(name), area::AreaFill::parse(c, spec)) else { continue };
+                let (Some(&i), Some(fill)) = (c.game.catalog.ids(ek::DIMENSION).get(name), area::AreaFill::parse(c, spec)) else {
+                    continue;
+                };
                 Arc::make_mut(&mut dims[i as usize].edits).push(fill);
             }
         }
@@ -1379,23 +1381,6 @@ impl Server {
         self.full_view(p)
             .cut(crate::config::get(content().game.simulation_distance) as i32)
     }
-}
-
-/// Items in an entity's equipment slots that show on the model.
-fn worn_of(c: &Content, ents: &entity::Entities, id: u64) -> Vec<u32> {
-    let Some(e) = ents.get(id) else { return Vec::new() };
-    let worn = &c.game.entities[e.kind as usize].worn;
-    let Some(inv) = ents
-        .inventories
-        .get(&id)
-        .and_then(|i| i.get(worn.start as usize..worn.end as usize))
-    else {
-        return Vec::new();
-    };
-    inv.iter()
-        .filter(|s| !s.is_empty() && c.worn(s.item).is_some())
-        .map(|s| s.item)
-        .collect()
 }
 
 pub(super) fn serialize(c: &Content, d: &Dim, ids: &[u64]) -> Vec<u8> {

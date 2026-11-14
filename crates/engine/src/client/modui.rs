@@ -3,7 +3,7 @@
 
 use std::rc::Rc;
 
-use weft_abi::{self as abi, Callback, ModId, Str, ui_kind as uk};
+use weft_abi::{self as abi, Callback, ModId, Str, entry_kind as ek, ui_kind as uk};
 
 use super::Client;
 use crate::app::Ctx;
@@ -514,9 +514,8 @@ pub unsafe extern "C" fn client_attribute(c: *mut abi::ClientCtx, name: abi::Str
     unsafe {
         let id = crate::content::content()
             .game
-            .attr_names
-            .get(name.as_str())
-            .copied();
+            .catalog
+            .find(ek::ATTRIBUTE, name.as_str());
         id.and_then(|id| view(c)?.attributes.get(id as usize).copied())
             .map_or(f64::NAN, |v| v as f64)
     }
@@ -650,8 +649,8 @@ pub unsafe extern "C" fn client_entity(c: *mut abi::ClientCtx, id: u64, out: *mu
                     max_health: {
                         cl.entity_components
                             .get(&(id, content.game.fields.health))
-                            .and_then(|b| b.get(4..8))
-                            .map(|b| f32::from_le_bytes(b.try_into().unwrap()))
+                            .and_then(|b| <crate::net::HealthField as crate::net::codec::Wire>::from_bytes(b))
+                            .map(|h| h.maximum)
                             .unwrap_or_else(|| {
                                 let attr = &content.game.attributes[crate::registry::attr::MAX_HEALTH as usize];
                                 attr.comp

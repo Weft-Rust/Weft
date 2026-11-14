@@ -1,6 +1,7 @@
 //! What players ask for, one list of what each message takes (`allowed`), then the actions.
 
 use super::*;
+use weft_abi::entry_kind as ek;
 
 impl Server {
     pub(super) fn handle_messages(&mut self, c: &'static Content) {
@@ -746,7 +747,7 @@ impl Dim {
             .and_then(abi::data::from_bytes::<Vec<abi::EffectGift>>);
         let give = |d: &mut Dim, gifts: &[abi::EffectGift]| {
             for g in gifts {
-                if let Some(&effect) = c.game.entity_effect_names.get(&g.effect) {
+                if let Some(effect) = c.game.catalog.find(ek::ENTITY_EFFECT, &g.effect) {
                     d.give_effect(c, entity, effect, g.level, g.ticks);
                 }
             }

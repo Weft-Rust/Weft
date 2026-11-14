@@ -3,6 +3,7 @@
 //! JSON, structgen's `.wst`) and from `/structure save`.
 
 use std::sync::Arc;
+use weft_abi::entry_kind as ek;
 
 use glam::{DVec3, IVec3, Vec3};
 use rustc_hash::FxHashMap;
@@ -246,12 +247,7 @@ impl TemplateDef {
             .iter()
             .map(|e| {
                 let at = t.point(self.size, Vec3::from_array(e.pos)).as_dvec3();
-                let kind = c
-                    .game
-                    .entity_names
-                    .get(&e.kind)
-                    .copied()
-                    .unwrap_or(u32::MAX);
+                let kind = c.game.catalog.find(ek::ENTITY, &e.kind).unwrap_or(u32::MAX);
                 (at, kind, (!e.data.is_empty()).then(|| Arc::from(e.data.as_slice())))
             })
             .collect();
@@ -295,7 +291,7 @@ fn slot_state(c: &Content, block: &str, shape: &str, props: &str) -> Option<u32>
             .find(|(_, (s, k))| s == source && *k == key)
             .map(|(made, _)| made.clone())?
     };
-    let def = &c.blocks[*c.block_names.get(&name)? as usize];
+    let def = &c.blocks[c.game.catalog.find(ek::BLOCK, &name)? as usize];
     let mut state = if shape.is_empty() { base } else { def.first_state };
     for (k, v) in crate::content::prop_pairs(props).ok()? {
         if let Ok(s) = def.changed(state, &[(k, v)]) {

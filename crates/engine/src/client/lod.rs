@@ -16,7 +16,7 @@ use std::time::{Duration, Instant};
 use crossbeam_channel::{Receiver, Sender, unbounded};
 use glam::{DVec3, IVec2};
 use rustc_hash::{FxHashMap, FxHashSet};
-use weft_abi::{BlockModel, FACE_DIRS};
+use weft_abi::{BlockModel, FACE_DIRS, entry_kind as ek};
 
 use crate::background;
 use crate::config;
@@ -775,7 +775,8 @@ impl Lod {
     pub fn distance() -> i32 {
         let c = content();
         c.game
-            .config_names
+            .catalog
+            .ids(ek::CONFIG)
             .get("core:lod_distance")
             .map_or(0, |&id| config::get(id) as i32)
             * 16

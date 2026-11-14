@@ -4,6 +4,7 @@
 
 use std::cell::RefCell;
 use std::sync::atomic::Ordering;
+use weft_abi::entry_kind as ek;
 
 use weft_abi as abi;
 
@@ -191,7 +192,7 @@ impl Dim {
         let mut value = base;
         if !list.is_empty() || !extra.is_empty() {
             let mut next = 0;
-            for rank in 0..steps.phases.len() as u32 {
+            for rank in 0..c.game.catalog.ids(ek::PHASE).len() as u32 {
                 let start = value;
                 let mine = list[next..]
                     .iter()
@@ -227,7 +228,11 @@ impl Dim {
                         if value != before {
                             let def = &steps.defs[s as usize];
                             let from = if from.is_empty() { String::new() } else { format!(" of {from}") };
-                            t.push_str(&format!(", {} {}{from}: {before} -> {value}", steps.phases[rank as usize], def.name));
+                            t.push_str(&format!(
+                                ", {} {}{from}: {before} -> {value}",
+                                c.game.catalog.name(ek::PHASE, rank).unwrap(),
+                                def.name
+                            ));
                         }
                     }
                 }
@@ -456,7 +461,8 @@ impl Dim {
                 continue;
             }
             let step = &c.game.steps.defs[m.step as usize];
-            let phase = if m.phase == step.phase { 0 } else { crate::registry::name_hash(&c.game.steps.phases[m.phase as usize]) };
+            let phase =
+                if m.phase == step.phase { 0 } else { crate::registry::name_hash(c.game.catalog.name(ek::PHASE, m.phase).unwrap()) };
             let one = (c.game.attributes[m.attr as usize].hash, step.hash, phase, m.amount);
             now.extend(std::iter::repeat_n(one, times.min(MAX_LEVELS) as usize));
         }
@@ -492,7 +498,7 @@ impl Dim {
 
     /// Attribute by name, the default for unknown entities, NaN for unknown names.
     pub fn attribute_named(&mut self, c: &'static Content, entity: u64, name: &str, explain: bool) -> f64 {
-        match c.game.attr_names.get(name) {
+        match c.game.catalog.ids(ek::ATTRIBUTE).get(name) {
             Some(&a) => self.attribute(c, entity, a, explain),
             None => f64::NAN,
         }

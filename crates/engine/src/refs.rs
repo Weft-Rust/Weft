@@ -92,6 +92,20 @@ pub fn compile_in(
     c: &Components,
     name: &dyn Fn(&str, &[(&str, &str)]) -> Result<Vec<u32>, String>,
 ) -> Result<Vec<u64>, String> {
+    compile_with(text, count, |term| match term {
+        Ref::Tags(p) if !p.contains('*') && c.id(p).is_none() => Ok(Vec::new()),
+        Ref::Tags(p) => {
+            let t = tags(c, p)?;
+            Ok((0..count)
+                .filter(|&i| t.iter().any(|&t| c.has(kind, i, t)))
+                .collect())
+        }
+        Ref::Name(n, props) => name(n, &props),
+    })
+}
+
+/// Shared expression evaluation; the source supplies what each name or tag refers to.
+pub fn compile_with(text: &str, count: u32, mut resolve: impl FnMut(Ref<'_>) -> Result<Vec<u32>, String>) -> Result<Vec<u64>, String> {
     if terms(text).next().is_none() {
         return Err("an empty reference".into());
     }
@@ -105,16 +119,7 @@ pub fn compile_in(
                 (&mut yes, term)
             }
         };
-        let ids = match Ref::parse(t)? {
-            Ref::Tags(p) if !p.contains('*') && c.id(p).is_none() => continue,
-            Ref::Tags(p) => {
-                let t = tags(c, p)?;
-                (0..count)
-                    .filter(|&i| t.iter().any(|&t| c.has(kind, i, t)))
-                    .collect()
-            }
-            Ref::Name(n, props) => name(n, &props)?,
-        };
+        let ids = resolve(Ref::parse(t)?)?;
         for i in ids {
             out[i as usize / 64] |= 1 << (i % 64);
         }

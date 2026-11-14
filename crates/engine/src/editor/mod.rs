@@ -8,6 +8,7 @@ pub mod code;
 
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
+use weft_abi::entry_kind as ek;
 
 use code::{Call, Param, Thing, What};
 
@@ -179,7 +180,9 @@ fn item_with(c: &Content, comp: Option<u32>) -> Icon {
 
 /// A block's own item, by the block's name.
 fn block_item(c: &Content, block: &str) -> Icon {
-    c.item_names
+    c.game
+        .catalog
+        .ids(ek::ITEM)
         .get(block)
         .map_or(Icon::None, |&i| Icon::Item(i))
 }
@@ -208,7 +211,8 @@ fn choices(c: &Content, kind: What, list: List, things: &[Thing], cx: &BuildCx) 
             let sound = c.components.id(weft_abi::comp::SOUND);
             let mut groups: Vec<String> = c
                 .game
-                .sound_names
+                .catalog
+                .ids(ek::SOUND)
                 .keys()
                 .filter_map(|k| k.strip_suffix(".break"))
                 .filter(|k| k.contains(":block."))
@@ -265,7 +269,7 @@ fn choices(c: &Content, kind: What, list: List, things: &[Thing], cx: &BuildCx) 
                 .filter(|t| t.kind == What::Item)
                 .map(|t| plain(&t.name, t.picture().map_or(Icon::None, |p| picture(c, &p)), code::quote(&t.name)))
                 .collect();
-            let mut names: Vec<(&String, &u32)> = c.item_names.iter().collect();
+            let mut names: Vec<(&String, &u32)> = c.game.catalog.ids(ek::ITEM).iter().collect();
             names.sort();
             v.extend(
                 names
@@ -280,7 +284,7 @@ fn choices(c: &Content, kind: What, list: List, things: &[Thing], cx: &BuildCx) 
 /// Whether an item of this name exists. A name without a namespace is the mod's own (as in the
 /// SDK), so only the session can have it.
 fn known_item(c: &Content, things: &[Thing], name: &str) -> bool {
-    if name.contains(':') { c.item_names.contains_key(name) } else { things.iter().any(|t| t.name == name) }
+    if name.contains(':') { c.game.catalog.ids(ek::ITEM).contains_key(name) } else { things.iter().any(|t| t.name == name) }
 }
 
 fn icon(ui: &mut Ui, icon: &Icon, side: f32) {

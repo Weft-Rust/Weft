@@ -7,6 +7,7 @@ use super::models::{MAX_LAYERS, PoseLod, Posed};
 use crate::gpu_layout::box_mode;
 use glam::{DVec3, IVec3, Mat4, Quat, Vec3, Vec4};
 use rustc_hash::FxHashMap;
+use weft_abi::entry_kind as ek;
 
 use super::models::{Act, Clips, Fade, Play};
 use crate::block_model::Display;
@@ -113,6 +114,12 @@ struct Sprite {
     pixels: Vec<(u8, u8, u32)>,
 }
 
+#[derive(Clone, Copy)]
+struct ItemModel {
+    boxes: (u32, u32),
+    solid: bool,
+}
+
 pub struct EntityRenderer {
     /// What the head's move in an action does to the camera: offset in view space, roll, pitch.
     pub camera_kick: (Vec3, f32, f32),
@@ -154,13 +161,12 @@ pub struct EntityRenderer {
     /// When the last frame was, and from where.
     last_draw: std::time::Instant,
     last_cam: DVec3,
-    /// The local player's stacks in hand: others show by the item alone.
-    own_stacks: [ItemStack; 2],
     icon_views: Vec<BufferId>,
     icon_sheets: Vec<IconSheet>,
-    /// Frames drawn, for what doesn't happen every one; and the entities `preload` last went through.
+    /// Frames drawn, for pose LOD; assets are prepared on changes.
     frame_count: u32,
-    preloaded: usize,
+    preloaded: bool,
+    pub changed_items: rustc_hash::FxHashSet<u64>,
     /// Stacks whose picture comes next, and the model it is of.
     icons_todo: Vec<(ItemStack, u32)>,
     /// Pictures by model: however many stacks show as one have the one.
@@ -175,16 +181,13 @@ pub struct EntityRenderer {
     sprites: FxHashMap<String, Option<Sprite>>,
     /// Entities to pose this frame, kept between frames.
     posed: Vec<Posed>,
-    /// `preload`'s kinds and items already looked at this frame.
-    seen_kinds: Vec<bool>,
-    seen_items: Vec<bool>,
     /// Item models drawn instanced: pipelines for the world and the hand, each item's boxes
     /// (first, count) in `item_boxes`, the GPU copy (buffer, capacity, boxes uploaded) and the
     /// texture generation they were made with.
     item_pipe: PipelineId,
     hand_item_pipe: PipelineId,
     /// Boxes of each item's model, (first, count), by item and its stack's `layers` if any.
-    item_models: FxHashMap<(u32, Option<&'static str>, Option<u16>), (u32, u32)>,
+    item_models: FxHashMap<(u32, Option<&'static str>, Option<u16>), ItemModel>,
     item_boxes: Vec<GpuBox>,
     item_buf: Option<(BufferId, u32, usize)>,
     item_generation: u64,
@@ -245,14 +248,14 @@ impl EntityRenderer {
             avatar_pending: Vec::new(),
             gone_pending: Vec::new(),
             frame_count: 0,
-            preloaded: 0,
+            preloaded: false,
+            changed_items: Default::default(),
             icon_of_model: FxHashMap::default(),
             show_avatars: true,
             fades: FxHashMap::default(),
             warned_actions: Default::default(),
             last_draw: std::time::Instant::now(),
             last_cam: DVec3::ZERO,
-            own_stacks: [ItemStack::default(); 2],
             icon_views,
             icon_sheets: Vec::new(),
             icons_todo: Vec::new(),
@@ -263,7 +266,6 @@ impl EntityRenderer {
             item_buf: None,
             item_generation: 0,
             instances: Vec::new(),
-            seen_items: Vec::new(),
             pipeline,
             overlay,
             camera_kick: (Vec3::ZERO, 0.0, 0.0),
@@ -284,7 +286,6 @@ impl EntityRenderer {
             effect_slots,
             sprites: FxHashMap::default(),
             posed: Vec::new(),
-            seen_kinds: Vec::new(),
         })
     }
 
@@ -405,6 +406,7 @@ impl EntityRenderer {
             Err(e) => log::error!("model shader: {e}"),
         }
         self.models.reload(gpu, assets);
+        self.preloaded = false;
         // Avatars are models, gone with the others: they come back from what was sent.
         for (id, a) in self.avatars.drain() {
             a.destroy(gpu);
@@ -494,6 +496,7 @@ impl EntityRenderer {
             old.destroy(gpu);
         }
         self.avatar_sent.insert(entity, sent);
+        self.changed_items.insert(entity);
     }
 
     /// Skins, glow masks and icon sheets: loaded when first used, freed on a reload and at the end.
@@ -548,17 +551,9 @@ impl EntityRenderer {
         }
     }
 
-    /// Gets ready what this frame draws, before anything is recorded: it may put new models in the
-    /// tables. Loads skins and worn textures the first time something visible uses them; `worn` is
-    /// what the local player wears.
-    pub fn preload(
-        &mut self,
-        gpu: &mut dyn Backend,
-        assets: &Assets,
-        entities: &FxHashMap<u64, ClientEntity>,
-        worn: &[u32],
-        held: [ItemStack; 2],
-    ) {
+    /// Prepares changed displayed stacks before recording draws, including models and textures
+    /// supplied by stack data. The local player's presentation follows prediction each frame.
+    pub fn preload(&mut self, gpu: &mut dyn Backend, assets: &Assets, entities: &FxHashMap<u64, ClientEntity>, me: &ClientEntity) {
         let c = content();
         self.frame_count = self.frame_count.wrapping_add(1);
         for (id, sent) in std::mem::take(&mut self.avatar_pending) {
@@ -573,16 +568,38 @@ impl EntityRenderer {
                 gpu.destroy_texture(t);
             }
         }
-        for s in held {
-            self.load_sprite(assets, &s);
-            self.models.model_for(assets, s);
-            for embedded in crate::stack::embedded(&s) {
-                if let Some(&k) = c.game.entity_names.get(&embedded.kind) {
-                    self.load(gpu, assets, &c.game.entities[k as usize].texture);
+        let mut changed = std::mem::take(&mut self.changed_items);
+        if !self.preloaded {
+            changed.extend(entities.keys());
+            self.preloaded = true;
+        }
+        for (id, e) in changed
+            .iter()
+            .filter_map(|id| entities.get(id).map(|e| (*id, e)))
+            .chain(std::iter::once((self.local, me)))
+        {
+            self.load(gpu, assets, &c.game.entities[e.look() as usize].texture);
+            for stack in e.displayed() {
+                self.load_sprite(assets, &stack);
+                self.models.model_for(assets, stack);
+                for embedded in crate::stack::embedded(&stack) {
+                    if let Some(kind) = c.game.catalog.find(ek::ENTITY, &embedded.kind) {
+                        self.load(gpu, assets, &c.game.entities[kind as usize].texture);
+                    }
+                }
+            }
+            let avatar = self.avatars.get(&id).map(|a| a.kind);
+            for &stack in &e.worn {
+                if let Some((_, texture)) = c.worn(&stack) {
+                    self.load(gpu, assets, texture);
+                }
+                for holder in std::iter::once(e.look()).chain(avatar) {
+                    self.models.prepare_worn(assets, holder, stack);
                 }
             }
         }
-        self.own_stacks = held;
+        changed.clear();
+        self.changed_items = changed;
         let wanted = std::mem::take(&mut super::models::ICONS.lock().unwrap().wanted);
         for stack in wanted {
             match self.models.model_for(assets, stack) {
@@ -595,64 +612,6 @@ impl EntityRenderer {
         }
         for skin in std::mem::take(&mut self.models.new_skins) {
             self.load(gpu, assets, &skin);
-        }
-        // What is new shows up soon enough; going through thousands of entities each frame to learn
-        // that nothing is costs more than the rest of this.
-        if entities.len() == self.preloaded && self.frame_count % 16 != 0 {
-            self.models.sync(gpu);
-            return;
-        }
-        self.preloaded = entities.len();
-        // Each kind and item looked at once per frame, without listing thousands of entities.
-        let mut seen = std::mem::take(&mut self.seen_kinds);
-        seen.clear();
-        seen.resize(c.game.entities.len(), false);
-        let mut seen_items = std::mem::take(&mut self.seen_items);
-        seen_items.clear();
-        seen_items.resize(c.items.len(), false);
-        for e in entities.values() {
-            if !e.item.is_empty() && seen_items.get(e.item.item as usize).is_some_and(|s| !s) {
-                seen_items[e.item.item as usize] = true;
-            }
-            if !e.item.is_empty() {
-                self.load_sprite(assets, &e.item);
-                for embedded in crate::stack::embedded(&e.item) {
-                    if let Some(&k) = c.game.entity_names.get(&embedded.kind) {
-                        self.load(gpu, assets, &c.game.entities[k as usize].texture);
-                    }
-                }
-            }
-            if !e.item.is_empty() && !c.game.item_model_for_stack.is_empty() {
-                self.models.model_for(assets, e.item);
-            }
-            if !std::mem::replace(&mut seen[e.look() as usize], true) {
-                self.load(gpu, assets, &c.game.entities[e.look() as usize].texture);
-            }
-            for &i in &e.worn {
-                if let Some((_, t)) = c.worn(i) {
-                    self.load(gpu, assets, t);
-                }
-            }
-            for stack in e.held_stacks {
-                let i = stack.item;
-                if i != 0 {
-                    self.load_sprite(assets, &stack);
-                    self.models.model_for(assets, stack);
-                }
-                for embedded in crate::stack::embedded(&stack) {
-                    if let Some(&k) = c.game.entity_names.get(&embedded.kind) {
-                        self.load(gpu, assets, &c.game.entities[k as usize].texture);
-                    }
-                }
-            }
-        }
-        self.seen_kinds = seen;
-        self.seen_items = seen_items;
-        self.load(gpu, assets, &c.game.entities[c.game.player_kind as usize].texture);
-        for &i in worn {
-            if let Some((_, t)) = c.worn(i) {
-                self.load(gpu, assets, t);
-            }
         }
         self.models.sync(gpu);
     }
@@ -678,7 +637,10 @@ impl EntityRenderer {
 
     /// The opaque pixels of a stack's sprites, read the first time it is held or dropped.
     fn load_sprite(&mut self, assets: &Assets, stack: &ItemStack) {
-        for name in sprite_names(stack) {
+        let looks = super::looks::current();
+        let c = content();
+        let draw = looks.item_draw(c, stack, None, "west");
+        for name in draw.sprites().iter().filter_map(|s| s.outline(&looks, c)) {
             self.load_sprite_named(assets, name);
         }
     }
@@ -737,54 +699,32 @@ impl EntityRenderer {
     /// An item's model as boxes in the unit cube, made once: a block item's shape, else its
     /// sprite one texel thick (flat when the sprite could not be read). (first box, count). A
     /// block's layers tinted by a kind take its colors in `biome`, where the item is.
-    fn item_model(&mut self, textures: &GameTextures, stack: &ItemStack, biome: Option<u16>) -> Option<(u32, u32)> {
+    fn item_model(&mut self, textures: &GameTextures, stack: &ItemStack, biome: Option<u16>) -> Option<ItemModel> {
         let c = content();
         let looks = super::looks::current();
         let (item, layers) = (stack.item, crate::stack::layers(stack));
-        let draw = looks.item_draw(c, item);
-        let biome = if matches!(draw, ItemDraw::Block(_)) { biome } else { None };
         if let Some(&m) = self.item_models.get(&(item, layers, biome)) {
             return Some(m);
         }
+        let draw = looks.item_draw(c, stack, biome, "west");
         let first = self.item_boxes.len();
         let white = Vec4::new(1.0, 1.0, 1.0, 0.0);
-        // Pictures drawn as sprites, bottom first: texture and color.
-        let sprites: Vec<(u32, Vec4)> = match draw {
-            ItemDraw::Model(model) => {
-                boxes_shape(&mut self.item_boxes, textures, Mat4::IDENTITY, model, &c.states[0], None, white);
-                Vec::new()
-            }
-            ItemDraw::Icon(t) => vec![(layers.map_or(t, |l| textures.layered(l)), white)],
-            ItemDraw::Block(state) => {
-                // Its front toward whoever holds it.
-                let state = c.facing_toward(state, "west");
-                let s = &c.states[state as usize];
-                match looks.block_sprite(state, s) {
-                    Some(t) => super::mesher::face_layers(c, s, t, 0)
-                        .iter()
-                        .map(|l| {
-                            let [r, g, b, _] = (c.kind_color(l.tint, biome) << 8)
-                                .to_be_bytes()
-                                .map(|v| v as f32 / 255.0);
-                            (l.tex, Vec4::new(r, g, b, 0.0))
-                        })
-                        .collect(),
-                    None => {
-                        boxes_shape(&mut self.item_boxes, textures, Mat4::IDENTITY, &looks.block_shape(state, s), s, biome, white);
-                        Vec::new()
-                    }
-                }
-            }
-            ItemDraw::Nothing => return None,
-        };
-        let names = sprite_names(stack);
-        for (k, (t, color)) in sprites.into_iter().enumerate() {
+        if let ItemDraw::Model { boxes, state } = &draw {
+            boxes_shape(&mut self.item_boxes, textures, Mat4::IDENTITY, boxes, &c.states[*state as usize], biome, white);
+        }
+        if matches!(draw, ItemDraw::Nothing) {
+            return None;
+        }
+        for (k, sprite) in draw.sprites().iter().enumerate() {
+            let t = sprite.texture(textures);
+            let [r, g, b, _] = (sprite.color << 8).to_be_bytes().map(|v| v as f32 / 255.0);
+            let color = Vec4::new(r, g, b, 0.0);
             let l = textures.texture(t);
             // A layer over another is a hair thicker, so it covers it on both sides.
             let more = k as f32 * 0.002;
-            match names
-                .get(k)
-                .and_then(|n| self.sprites.get(n))
+            match sprite
+                .outline(&looks, c)
+                .and_then(|name| self.sprites.get(&name))
                 .and_then(|s| s.as_ref())
             {
                 Some(sp) => {
@@ -815,7 +755,7 @@ impl EntityRenderer {
                 }
             }
         }
-        let m = (first as u32, (self.item_boxes.len() - first) as u32);
+        let m = ItemModel { boxes: (first as u32, (self.item_boxes.len() - first) as u32), solid: draw.solid() };
         self.item_models.insert((item, layers, biome), m);
         Some(m)
     }
@@ -872,7 +812,7 @@ impl EntityRenderer {
 
     /// Model instances of `entity`, of `kind`: its skin (a player's own if they sent one) and what
     /// it wears (how many in `.1`).
-    fn layers(&self, kind: u32, entity: u64, worn: &[u32], light: u32, effect: (u32, f32)) -> ([Instance; MAX_LAYERS], usize) {
+    fn layers(&self, kind: u32, entity: u64, worn: &[ItemStack], light: u32, effect: (u32, f32)) -> ([Instance; MAX_LAYERS], usize) {
         let c = content();
         let k = &c.game.entities[kind as usize];
         let mut out = ([Instance::default(); MAX_LAYERS], 0);
@@ -917,8 +857,9 @@ impl EntityRenderer {
         };
         out.1 = 1;
         let model = avatar.map_or(kind, |a| a.kind);
-        for &i in worn {
-            if let Some((w, t)) = c.worn(i) {
+        for stack in worn {
+            let i = stack.item;
+            if let Some((w, t)) = c.worn(stack) {
                 if let Some(Some((_, idx, size))) = self.skins.get(t).filter(|_| out.1 < MAX_LAYERS) {
                     let names = c.worn_bones(i);
                     let bone_mask = self.models.kinds.get(model as usize).map_or(0, |m| {
@@ -950,7 +891,7 @@ impl EntityRenderer {
     pub fn action_of<'a>(&self, id: u64, e: &'a ClientEntity) -> Option<&'a str> {
         let (name, start, looping) = e.action.as_ref()?;
         let m = self.models.kinds.get(self.model_kind(id, e) as usize)?;
-        let last = *m.action(e.held, name).last()?;
+        let last = *m.action(e.held.item, name).last()?;
         let done = m
             .anims
             .get(last as usize)?
@@ -960,7 +901,7 @@ impl EntityRenderer {
 
     pub fn clip_length(&self, id: u64, e: &ClientEntity, name: &str) -> Option<f32> {
         let m = self.models.kinds.get(self.model_kind(id, e) as usize)?;
-        let last = *m.action(e.held, name).last()?;
+        let last = *m.action(e.held.item, name).last()?;
         Some(m.anims.get(last as usize)?.anim.length)
     }
 
@@ -1000,7 +941,13 @@ impl EntityRenderer {
                 Vec4::new(-1.0, 1.0, 0.5, 1.0),
             );
             for &vb in &self.icon_views {
-                let v = Scene { view_proj: proj.to_cols_array_2d(), params: [1e9, 2e9, 1.0, crate::shaders::time()], ..Default::default() };
+                let v = Scene {
+                    view_proj: proj.to_cols_array_2d(),
+                    params: [1e9, 2e9, 1.0, crate::shaders::time()],
+                    environment: [1.0, 0.0, 0.0, 0.0],
+                    light: [0.04, 0.0, 0.0, 0.0],
+                    ..Default::default()
+                };
                 gpu.mapped(vb)[..size_of::<Scene>()].copy_from_slice(bytemuck::bytes_of(&v));
             }
         }
@@ -1076,7 +1023,7 @@ impl EntityRenderer {
         frame: &FrameInfo,
         size: [u32; 2],
         look: glam::Vec2,
-        worn: &[u32],
+        worn: &[ItemStack],
     ) -> Option<u32> {
         let c = content();
         if size[0] == 0 || size[1] == 0 {
@@ -1142,7 +1089,13 @@ impl EntityRenderer {
         }
         let vb = self.preview[frame.slot];
         // Full daylight, no fog.
-        let v = Scene { view_proj: proj.to_cols_array_2d(), params: [1e9, 2e9, 1.0, crate::shaders::time()], ..Default::default() };
+        let v = Scene {
+            view_proj: proj.to_cols_array_2d(),
+            params: [1e9, 2e9, 1.0, crate::shaders::time()],
+            environment: [1.0, 0.0, 0.0, 0.0],
+            light: [0.04, 0.0, 0.0, 0.0],
+            ..Default::default()
+        };
         gpu.mapped(vb)[..size_of::<Scene>()].copy_from_slice(bytemuck::bytes_of(&v));
         list.push(Cmd::BeginPass { color: Some((Target::Texture(col), Some([0.0; 4]))), depth: Some((dep, Some(0.0))) });
         self.models
@@ -1280,7 +1233,7 @@ impl EntityRenderer {
             let in_view = own_view && !body;
             let effect = if own_view { (0, 0.0) } else { effect };
             // Arms held in the view are bare, as vanilla's: armor is for a body.
-            let worn: &[u32] = if in_view { &[] } else { &e.worn };
+            let worn: &[ItemStack] = if in_view { &[] } else { &e.worn };
             let (mut layers, mut layer_count) = self.layers(look, id, worn, lit, effect);
             if layer_count == 0 {
                 continue;
@@ -1384,11 +1337,10 @@ impl EntityRenderer {
             posed.push(Posed { id, kind, lod, root, pitch, head_yaw, clips: (from, self.models.clips.len() as u32), layers, layer_count });
             let carry = |what| Carry { holder: posed.len() - 1, what, lit, biome: here, age: e.age, id };
             if !sleeping {
-                for (item, off) in [(e.held, false), (e.off_held, true)] {
-                    if item != 0 {
-                        let shown = if id == self.local { self.own_stacks[off as usize] } else { e.held_stacks[off as usize] };
-                        let model = self.models.model_seen(shown);
-                        carried.push(carry(Carrying::Held { stack: shown, model, off }));
+                for (stack, off) in [(e.held, false), (e.off_held, true)] {
+                    if !stack.is_empty() {
+                        let model = self.models.model_seen(stack);
+                        carried.push(carry(Carrying::Held { stack, model, off }));
                     }
                 }
             }
@@ -1530,8 +1482,8 @@ impl EntityRenderer {
                 layers,
                 layer_count: 1,
             });
-        } else if let Some(m) = self.item_model(textures, &e.item, biome) {
-            instances.push((run_key(m), item_instance(ground_transform(base, e.age, e.item.item), m.0, hurt, lit)));
+        } else if let Some(ItemModel { boxes: m, solid }) = self.item_model(textures, &e.item, biome) {
+            instances.push((run_key(m), item_instance(ground_transform(base, e.age, solid), m.0, hurt, lit)));
         }
     }
 
@@ -1653,26 +1605,34 @@ impl EntityRenderer {
                 one.unwrap_or_else(|| swapped(item, hold_of(c, m, item)))
             };
             let held_how = Play { looping: true, aim: true, hand: true, ..how };
-            if e.held != 0 {
-                m.play(&mut clips, m.action_seen(e.held, hold_in(e.held, e.off_held != 0), in_view), &held_how);
+            if e.held.item != 0 {
+                m.play(&mut clips, m.action_seen(e.held.item, hold_in(e.held.item, e.off_held.item != 0), in_view), &held_how);
             } else if in_view {
                 m.play(&mut clips, m.action_seen(0, "hold_empty", true), &held_how);
             }
-            if e.off_held != 0 {
-                m.play(&mut clips, m.action_seen(e.off_held, hold_in(e.off_held, true), in_view), &Play { mirror: true, ..held_how });
+            if e.off_held.item != 0 {
+                m.play(
+                    &mut clips,
+                    m.action_seen(e.off_held.item, hold_in(e.off_held.item, true), in_view),
+                    &Play { mirror: true, ..held_how },
+                );
             }
             let progress = Play { drive: Drive::Progress, aim: in_view, hand: true, ..how };
             if let Some(lowered) = lowered {
-                m.play(&mut clips, m.action_seen(e.held, swapped(e.held, "equip"), true), &Play { progress: lowered, ..progress });
+                m.play(
+                    &mut clips,
+                    m.action_seen(e.held.item, swapped(e.held.item, "equip"), true),
+                    &Play { progress: lowered, ..progress },
+                );
             }
             if let Some(p) = e.arm_swing {
-                let item = if e.swing_off { e.off_held } else { e.held };
+                let item = if e.swing_off { e.off_held.item } else { e.held.item };
                 let swing =
                     if item == 0 && !in_view { act(Act::Swing) } else { m.action_seen(item, swapped(item, m.swing_of(item)), in_view) };
                 m.play(&mut clips, swing, &Play { progress: p, mirror: e.swing_off, ..progress });
             }
             if let Some((p, off)) = e.using {
-                let item = if off { e.off_held } else { e.held };
+                let item = if off { e.off_held.item } else { e.held.item };
                 // Used until let go (a bow drawn), it plays by the seconds held and stays at its end.
                 let how = if super::endless_use(e.use_ticks) {
                     Play { drive: Drive::Clock, clock: p, mirror: off, ..progress }
@@ -1687,7 +1647,7 @@ impl EntityRenderer {
         }
         if let Some((name, start, looping)) = &e.action {
             let secs = e.age - start;
-            let list = m.action_seen(e.held, name, in_view);
+            let list = m.action_seen(e.held.item, name, in_view);
             if list.is_empty() && !self.warned_actions.contains(&(kind, name.clone())) {
                 log::warn!("no clip for action {name} on {}", c.game.entities[look as usize].name);
                 self.warned_actions.insert((kind, name.clone()));
@@ -1875,9 +1835,9 @@ impl EntityRenderer {
                         }
                     };
                     if model.is_none() {
-                        if let Some(m) = self.item_model(textures, &stack, biome) {
+                        if let Some(ItemModel { boxes: m, solid }) = self.item_model(textures, &stack, biome) {
                             let display = self.models.displays.get(&item).copied();
-                            let inst = item_instance(held_transform(arm, item, off, display), m.0, 0.0, lit);
+                            let inst = item_instance(held_transform(arm, item, solid, off, display), m.0, 0.0, lit);
                             if own {
                                 hand_items.push((inst, m.1));
                             } else {
@@ -1922,7 +1882,7 @@ impl EntityRenderer {
     fn embedded_models(&mut self, stack: ItemStack, kind: u32, bones: usize, lit: u32) -> Vec<(u32, u32, Instance)> {
         let mut out = Vec::new();
         for projectile in crate::stack::embedded(&stack) {
-            let Some(&model) = content().game.entity_names.get(&projectile.kind) else { continue };
+            let Some(model) = content().game.catalog.find(ek::ENTITY, &projectile.kind) else { continue };
             let bone = self.models.kinds[kind as usize]
                 .parts
                 .iter()
@@ -2069,37 +2029,6 @@ fn run_key(m: (u32, u32)) -> u64 {
     (m.0 as u64) << 32 | m.1 as u64
 }
 
-/// Pictures a held item is drawn from as solid sprites, bottom first: its own `layers` (one, made
-/// of them), its icon, or the layers of a plant block's face.
-fn sprite_names(stack: &ItemStack) -> Vec<String> {
-    if let Some(spec) = crate::stack::layers(stack) {
-        return vec![format!("layers:{spec}")];
-    }
-    let c = content();
-    let looks = super::looks::current();
-    let name = |t: u32| -> Option<String> {
-        let n = looks.texture_name(c, t)?;
-        // A tinted copy's outline is its picture's.
-        Some(
-            crate::content::tinted_copy(n)
-                .map_or(n, |(of, _)| of)
-                .to_string(),
-        )
-    };
-    match looks.item_draw(c, stack.item) {
-        ItemDraw::Icon(t) => name(t).into_iter().collect(),
-        ItemDraw::Block(state) => {
-            let s = &c.states[state as usize];
-            let Some(t) = looks.block_sprite(state, s) else { return Vec::new() };
-            super::mesher::face_layers(c, s, t, 0)
-                .iter()
-                .filter_map(|l| name(l.tex))
-                .collect()
-        }
-        _ => Vec::new(),
-    }
-}
-
 /// Model boxes (a block's, or an item's from its file) in the unit cube `m` maps, each face's
 /// layers one over the other as in the world, a kind's in `biome` (an item's own boxes pass air).
 fn boxes_shape(
@@ -2143,23 +2072,10 @@ fn item_instance(m: Mat4, first: u32, hurt: f32, light: u32) -> GpuBox {
     GpuBox { rows: rows(m), color: [1.0, 1.0, 1.0, hurt], ids: [0, 0, first, 0], ids2: [0, light, 0, 0], ..Default::default() }
 }
 
-/// Whether the item shows as its block's shape (else as a sprite).
-fn shows_block(item: u32) -> bool {
-    let c = content();
-    let looks = super::looks::current();
-    match looks.item_draw(c, item) {
-        ItemDraw::Model(_) => true,
-        ItemDraw::Block(state) => looks
-            .block_sprite(state, &c.states[state as usize])
-            .is_none(),
-        _ => false,
-    }
-}
-
 /// Where an item goes in the hand of a model, from its arm at the shoulder (pixels): vanilla's
 /// ItemInHandLayer, then the item model's third person display transform. Vanilla's model space is
 /// ours turned around z, and it measures from a shoulder one pixel closer to the body.
-fn held_transform(arm: Mat4, item: u32, off: bool, display: Option<Display>) -> Mat4 {
+fn held_transform(arm: Mat4, item: u32, solid: bool, off: bool, display: Option<Display>) -> Mat4 {
     use std::f32::consts::{FRAC_PI_2, PI};
     let deg = |d: f32| d.to_radians();
     let hand = arm
@@ -2172,7 +2088,7 @@ fn held_transform(arm: Mat4, item: u32, off: bool, display: Option<Display>) -> 
     // handheld.json or generated.json.
     let plain = |rotation, translation, scale| Display { rotation, translation, scale: [scale; 3] };
     let d = display.unwrap_or_else(|| {
-        if shows_block(item) {
+        if solid {
             plain([0.0, 0.0, 0.0], [0.0, 2.5, 0.0], 0.375)
         } else if content().item_has(item, content().ids.handheld) {
             plain([0.0, -90.0, 55.0], [0.0, 4.0, 0.5], 0.85)
@@ -2219,9 +2135,9 @@ fn ground_spin(base: Vec3, age: f32) -> Mat4 {
 
 /// Dropped items spin and bob: a block a quarter of a block across, a sprite half a block
 /// (vanilla's ground transforms).
-fn ground_transform(base: Vec3, age: f32, item: u32) -> Mat4 {
+fn ground_transform(base: Vec3, age: f32, solid: bool) -> Mat4 {
     let spin = ground_spin(base, age);
-    if shows_block(item) {
+    if solid {
         spin * Mat4::from_translation(Vec3::splat(-0.125)) * Mat4::from_scale(Vec3::splat(0.25))
     } else {
         spin * Mat4::from_translation(Vec3::new(-0.25, 0.0, -0.25)) * Mat4::from_scale(Vec3::splat(0.5))

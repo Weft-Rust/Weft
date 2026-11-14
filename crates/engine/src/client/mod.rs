@@ -1,6 +1,7 @@
 pub mod camera;
 pub mod ctm;
 pub mod entity_render;
+pub mod environment;
 pub mod gizmo;
 pub mod glow;
 pub mod lod;
@@ -24,7 +25,7 @@ use std::time::Instant;
 use crate::gpu_layout::Scene;
 use glam::{DVec3, IVec3, Vec3};
 use rustc_hash::{FxHashMap, FxHashSet};
-use weft_abi::{ItemStack, block_flags as bf};
+use weft_abi::{ItemStack, block_flags as bf, entry_kind as ek};
 use weft_render::{Backend, BufferId, CommandList, FrameInfo};
 
 use crate::content::content;
@@ -106,12 +107,9 @@ pub struct ClientEntity {
     pub item: ItemStack,
     pub health: f32,
     pub hurt: f32,
-    pub worn: Vec<u32>,
-    /// A player's item in hand, 0 for none.
-    pub held: u32,
-    /// And in the other hand.
-    pub off_held: u32,
-    pub held_stacks: [ItemStack; 2],
+    pub worn: Vec<ItemStack>,
+    pub held: ItemStack,
+    pub off_held: ItemStack,
     /// Into using what it holds, 0..1 (seconds for what is used until let go, `endless_use`),
     /// and whether with the other hand.
     pub using: Option<(f32, bool)>,
@@ -163,7 +161,7 @@ pub struct ClientEntity {
     /// Every effect on it, its level and the tick it ends (`ClientWorld::ticks`).
     pub effects: Vec<crate::world::OnEffect>,
     /// The items its kind shows (`registry::SHOWN`), 0 empty.
-    pub shown: Vec<u32>,
+    pub shown: Vec<ItemStack>,
     /// Solid bodies: where the server had them at its last ticks (tick, position), oldest
     /// first; they are shown `INTERP_TICKS` behind the server (`pose`).
     pub track: std::collections::VecDeque<(f64, DVec3)>,
@@ -309,11 +307,6 @@ fn seat_at(c: &crate::content::Content, kind: u32, pos: DVec3, yaw: f32, seat: u
     Some(pos + crate::world::turned(s.pos, yaw))
 }
 
-/// `u32` and `f32` values of an engine field component (`registry::HEALTH` ...).
-fn words(bytes: &[u8]) -> impl Iterator<Item = [u8; 4]> + '_ {
-    bytes.chunks_exact(4).map(|w| [w[0], w[1], w[2], w[3]])
-}
-
 fn parse_swaps(bytes: &[u8]) -> Vec<(String, String)> {
     String::from_utf8_lossy(bytes)
         .lines()
@@ -328,6 +321,14 @@ fn fade_pose(now: f32, on: bool, dt: f32) -> f32 {
 }
 
 impl ClientEntity {
+    pub fn displayed(&self) -> impl Iterator<Item = ItemStack> + '_ {
+        [self.held, self.off_held, self.item]
+            .into_iter()
+            .chain(self.worn.iter().copied())
+            .chain(self.shown.iter().copied())
+            .filter(|s| !s.is_empty())
+    }
+
     /// The shader effect drawn on it at tick `now`: of several, the latest that `drawn` says has a
     /// shader.
     pub fn shader_effect(&self, now: u64, drawn: impl Fn(u32) -> bool) -> Option<(u32, f32)> {
@@ -338,7 +339,7 @@ impl ClientEntity {
             .map(|f| (f.id, 1.0))
     }
 
-    pub fn new(kind: u32, pos: DVec3, yaw: f32, pitch: f32, item: ItemStack) -> ClientEntity {
+    pub fn new(kind: u32, pos: DVec3, yaw: f32, pitch: f32) -> ClientEntity {
         ClientEntity {
             kind,
             pos,
@@ -359,14 +360,13 @@ impl ClientEntity {
             shown: Vec::new(),
             pitch,
             target_pitch: pitch,
-            item,
+            item: ItemStack::EMPTY,
             // Arrives as a component right after: no hurt flash for the first.
             health: f32::NAN,
             hurt: 0.0,
             worn: Vec::new(),
-            held: 0,
-            off_held: 0,
-            held_stacks: [ItemStack::EMPTY; 2],
+            held: ItemStack::EMPTY,
+            off_held: ItemStack::EMPTY,
             using: None,
             use_ticks: 0.0,
             stuck: None,
@@ -682,6 +682,7 @@ pub struct Client {
     /// How much of it there is by now, 0..1 over about five seconds.
     /// The weather's look as it is by now, going over to the weather's own (`weather_effects`).
     look: weft_abi::WeatherLook,
+    pub environment: environment::Environment,
     frame_dt: f32,
     /// Seconds left of a lightning's flash.
     lightning: f32,
@@ -887,7 +888,7 @@ impl Client {
             joined: false,
             player_id: 0,
             sprint_stopped: false,
-            me: ClientEntity::new(content().game.player_kind, DVec3::ZERO, 0.0, 0.0, ItemStack::EMPTY),
+            me: ClientEntity::new(content().game.player_kind, DVec3::ZERO, 0.0, 0.0),
             drive: Drive::default(),
             key_ticks: Vec::new(),
             accum: 0.0,
@@ -973,6 +974,7 @@ impl Client {
             permission: 0,
             weather_id: 0,
             look: Default::default(),
+            environment: Default::default(),
             lightning: 0.0,
             using: None,
             others_mining: Vec::new(),
@@ -2130,9 +2132,8 @@ impl Client {
             .collect();
         let Some(kind) = c
             .game
-            .particle_names
-            .get(weft_abi::particle::EFFECT)
-            .copied()
+            .catalog
+            .find(ek::PARTICLE, weft_abi::particle::EFFECT)
         else {
             return;
         };
@@ -2183,66 +2184,8 @@ impl Client {
         );
     }
 
-    /// What goes over the screen: the inside of a liquid, of a block, a fire.
-    fn overlays(&self, textures: &GameTextures) -> Vec<sky::Overlay> {
-        let c = content();
-        let mut out = Vec::new();
-        if !self.camera_has(crate::tag_bits::camera::EFFECTS) || self.hide_gui {
-            return out;
-        }
-        let light = self.daylight().max(0.25);
-        let looks = looks::current();
-        if let Some(l) = self
-            .eye_liquid()
-            .map(|l| &c.liquids[l as usize])
-            .filter(|l| l.overlay_opacity > 0.0)
-        {
-            let st = &c.states[l.first_state as usize];
-            let own = looks
-                .texture_name(c, looks.drawn(l.first_state, st).textures[0])
-                .unwrap_or("");
-            let tint = if st.tint != 0 { sky::rgb(crate::content::item_tint(st.tint)) } else { Vec3::ONE };
-            out.push(sky::Overlay {
-                picture: if l.overlay.is_empty() { own.to_string() } else { l.overlay.clone() },
-                color: (tint * light)
-                    .powf(2.2)
-                    .extend(l.overlay_opacity)
-                    .to_array(),
-                tiles: 1.0,
-                lower: false,
-                frame: 0,
-            });
-        }
-        let head = (self.smooth_pos() + DVec3::Y * self.player.eye)
-            .floor()
-            .as_ivec3();
-        if !self.player.noclip {
-            if let Some(st) = self
-                .world
-                .block_or_air(head)
-                .filter(|&s| c.solid(s) && c.tight[s as usize].opacity >= 15)
-            {
-                if let Some(picture) = looks.texture_name(c, looks.drawn(st, &c.states[st as usize]).textures[1]) {
-                    out.push(sky::Overlay {
-                        picture: picture.to_string(),
-                        color: [0.01, 0.01, 0.01, 1.0],
-                        tiles: 1.0,
-                        lower: false,
-                        frame: 0,
-                    });
-                }
-            }
-        }
-        if self.me.burning {
-            if let Some(picture) = c.textures.get(c.fire_texture as usize) {
-                let ticks = self.start.elapsed().as_secs_f32() * crate::world::TPS as f32;
-                // Loaded by being asked for its picture, for mobs too.
-                textures.texture(c.fire_texture);
-                let frame = textures.strip_frame(c.fire_texture, ticks);
-                out.push(sky::Overlay { picture: picture.clone(), color: [1.0, 1.0, 1.0, 0.9], tiles: 2.0, lower: true, frame });
-            }
-        }
-        out
+    fn overlays(&self, _textures: &GameTextures) -> Vec<sky::Overlay> {
+        if !self.camera_has(crate::tag_bits::camera::EFFECTS) || self.hide_gui { Vec::new() } else { self.environment.overlays.clone() }
     }
 
     /// Like vanilla's block display ticks: random blocks around the player that name a particle
@@ -2258,7 +2201,7 @@ impl Client {
                     .map_or(Vec::new(), |names| {
                         names
                             .split(',')
-                            .filter_map(|n| c.game.particle_names.get(n).copied())
+                            .filter_map(|n| c.game.catalog.find(ek::PARTICLE, n))
                             .collect()
                     })
             };
@@ -2400,9 +2343,8 @@ impl Client {
             let state = c.liquids[l as usize].first_state;
             let id = c.components.id(weft_abi::comp::BUBBLE)?;
             c.game
-                .particle_names
-                .get(c.components.text(crate::components::BLOCK, state, id)?)
-                .copied()
+                .catalog
+                .find(ek::PARTICLE, c.components.text(crate::components::BLOCK, state, id)?)
         });
         if let Some(kind) = bubble.filter(|_| self.chance() < a.dt * 1.5) {
             self.particles.spawn(
@@ -2427,15 +2369,15 @@ impl Client {
     pub fn listener(&self) -> crate::audio::Listener {
         let c = content();
         let cam = self.render_camera();
-        let eye = cam.pos.floor().as_ivec3();
         crate::audio::Listener {
             pos: cam.pos,
             yaw: cam.yaw,
             pitch: cam.pitch,
-            underwater: self
-                .eye_liquid()
-                .is_some_and(|l| !c.liquids[l as usize].burns()),
-            enclosed: crate::world::light::enclosed(&c.dims[self.world.dim as usize], self.world.light(eye)),
+            acoustics: crate::audio::Acoustics {
+                cutoff: self.environment.values.lowpass,
+                reverb: self.environment.values.reverb,
+                volume: self.environment.values.volume,
+            },
             dim: self.world.dim,
             holds: c
                 .game
@@ -2477,6 +2419,7 @@ impl Client {
 
     /// Copies an engine field component into the entity (or the own player) that shows it.
     fn engine_field(&mut self, id: u64, comp: u32, bytes: &[u8]) {
+        use crate::net::codec::Wire;
         let c = content();
         let crate::registry::FieldComps {
             health,
@@ -2496,43 +2439,48 @@ impl Client {
             permission,
             attributes,
             shown,
+            ground,
             // Only in its slot.
             trash: _,
         } = c.game.fields;
+        if Some(comp) == c.components.id(weft_abi::environment::COMPONENT) {
+            let layers: Vec<weft_abi::environment::EnvironmentLayer> = weft_abi::data::from_bytes(bytes).unwrap_or_default();
+            if layers.is_empty() {
+                self.environment.remote.remove(&id);
+            } else {
+                self.environment.remote.insert(id, layers);
+            }
+        }
         let now = self.ticks();
         let arriving = self.arriving_tick();
-        let f: Vec<f32> = words(bytes).map(f32::from_le_bytes).collect();
-        let shaped = || {
-            let size = (f.len() == 4 && f[0] > 0.0).then(|| weft_abi::EntitySize { width: f[0], height: f[1], eye: f[2] });
-            let look = words(bytes)
-                .nth(3)
-                .map(u32::from_le_bytes)
-                .filter(|&l| l != u32::MAX);
-            (size, look)
-        };
+        let hp = (comp == health)
+            .then(|| crate::net::HealthField::from_bytes(bytes))
+            .flatten();
+        let shaped = (comp == shape)
+            .then(|| crate::net::ShapeField::from_bytes(bytes))
+            .flatten();
+        if [held, off_held, worn, shown, ground, shape].contains(&comp) {
+            self.entity_render.changed_items.insert(id);
+        }
         let mine = id == self.player_id;
         let other = self
             .entities
             .get_mut(&id)
             .or(self.showing_blocks.get_mut(&id));
         let Some(e) = (if mine { Some(&mut self.me) } else { other }) else { return };
-        if comp == health && f.len() == 2 {
+        if let Some(hp) = &hp {
             // Lower health out of a lower maximum, or on joining, isn't a hit.
-            if f[0] < e.health && (!mine || (f[1] >= self.max_health && e.health > 0.0)) {
+            if hp.current < e.health && (!mine || (hp.maximum >= self.max_health && e.health > 0.0)) {
                 e.hurt = HURT_FLASH;
             }
-            e.health = f[0];
+            e.health = hp.current;
         } else if comp == riding {
-            e.vehicle = (bytes.len() >= 12).then(|| {
-                let mount = u64::from_le_bytes(bytes[..8].try_into().unwrap());
-                (mount, u32::from_le_bytes(bytes[8..12].try_into().unwrap()) as u8)
-            });
+            e.vehicle = crate::net::RidingField::from_bytes(bytes).map(|r| (r.mount, r.seat as u8));
         } else if comp == stuck {
-            // Its pitch is the one it flew in with, as it arrives with its moves.
-            e.stuck = (bytes.len() >= 24).then(|| Stuck {
-                host: u64::from_le_bytes(bytes[..8].try_into().unwrap()),
-                at: DVec3::new(f[2] as f64, f[3] as f64, f[4] as f64),
-                yaw: f[5],
+            e.stuck = crate::net::StuckField::from_bytes(bytes).map(|s| Stuck {
+                host: s.host,
+                at: glam::Vec3::from_array(s.at).as_dvec3(),
+                yaw: s.yaw,
                 pitch: f32::NAN,
                 bone: None,
                 looked: false,
@@ -2544,14 +2492,13 @@ impl Client {
         } else if comp == burning {
             e.burning = bytes.first().is_some_and(|&b| b != 0);
         } else if comp == worn {
-            e.worn = words(bytes).map(u32::from_le_bytes).collect();
+            e.worn = Vec::<ItemStack>::get(&mut crate::net::codec::R(bytes)).unwrap_or_default();
         } else if comp == shown {
-            e.shown = words(bytes).map(u32::from_le_bytes).collect();
+            e.shown = Vec::<ItemStack>::get(&mut crate::net::codec::R(bytes)).unwrap_or_default();
+        } else if comp == ground {
+            e.item = ItemStack::get(&mut crate::net::codec::R(bytes)).unwrap_or_default();
         } else if comp == held {
-            use crate::net::codec::Wire;
-            let stack = ItemStack::get(&mut crate::net::codec::R(bytes)).unwrap_or_default();
-            e.held = stack.item;
-            e.held_stacks[0] = stack;
+            e.held = ItemStack::get(&mut crate::net::codec::R(bytes)).unwrap_or_default();
         } else if comp == swaps {
             e.swaps = parse_swaps(bytes);
         } else if comp == looping {
@@ -2561,20 +2508,17 @@ impl Client {
                 e.action = Some((name.into_owned(), ((arriving - e.born).max(0.0) / crate::world::TPS as f64) as f32, true));
             }
         } else if comp == off_held {
-            use crate::net::codec::Wire;
-            let stack = ItemStack::get(&mut crate::net::codec::R(bytes)).unwrap_or_default();
-            e.off_held = stack.item;
-            e.held_stacks[1] = stack;
+            e.off_held = ItemStack::get(&mut crate::net::codec::R(bytes)).unwrap_or_default();
         } else if comp == using {
-            let v = words(bytes).next().map_or(0, u32::from_le_bytes);
-            let ticks = (v & !(1 << 31)) as f32;
-            if v != 0 && (e.using.is_none() || e.use_ticks != ticks) {
+            let v = crate::net::UsingField::from_bytes(bytes).unwrap_or_default();
+            let ticks = v.ticks as f32;
+            if v.ticks != 0 && (e.using.is_none() || e.use_ticks != ticks) {
                 e.use_at = arriving;
             }
             e.use_ticks = ticks;
-            e.using = (v != 0).then(|| (e.using.map_or(0.0, |u| u.0), v >> 31 != 0));
-        } else if comp == shape {
-            (e.size, e.look) = shaped();
+            e.using = (v.ticks != 0).then(|| (e.using.map_or(0.0, |u| u.0), v.offhand));
+        } else if let Some(shaped) = &shaped {
+            (e.size, e.look) = (shaped.size(), shaped.look());
         } else if comp == effect {
             e.effects = crate::world::effects_on(Some(bytes), now).collect();
         }
@@ -2583,32 +2527,34 @@ impl Client {
         }
         // What the local player's own movement and screens go by.
         if comp == forced {
-            self.player.forced = (bytes.len() >= 8).then(|| {
-                let yaw = f32::from_le_bytes(bytes[4..8].try_into().unwrap());
-                (Pose::from_id(u32::from_le_bytes(bytes[..4].try_into().unwrap())), (!yaw.is_nan()).then_some(yaw))
-            });
-        } else if comp == health && f.len() == 2 {
-            self.max_health = f[1];
-            if f[0] > 0.0 {
+            self.player.forced =
+                crate::net::ForcedPoseField::from_bytes(bytes).map(|f| (Pose::from_id(f.pose), (!f.yaw.is_nan()).then_some(f.yaw)));
+        } else if let Some(hp) = hp {
+            self.max_health = hp.maximum;
+            if hp.current > 0.0 {
                 self.dead = false;
             }
-        } else if comp == shape {
-            self.player.size = shaped()
-                .0
+        } else if let Some(shaped) = shaped {
+            self.player.size = shaped
+                .size()
                 .unwrap_or(c.game.entities[c.game.player_kind as usize].size());
         } else if comp == game_mode {
-            let mode = crate::world::GameMode(words(bytes).next().map_or(0, u32::from_le_bytes) as u16);
+            let mode = crate::world::GameMode(u32::from_bytes(bytes).unwrap_or(0) as u16);
             self.mode = mode;
             self.player.flying = mode.has(crate::tag_bits::game_mode::ALWAYS_FLY) || (self.can_fly() && self.player.flying);
             self.player.noclip = mode.has(crate::tag_bits::game_mode::NOCLIP);
             self.player.fly_speed = 1.0;
         } else if comp == permission {
-            self.permission = words(bytes).next().map_or(0, u32::from_le_bytes);
+            self.permission = u32::from_bytes(bytes).unwrap_or(0);
         } else if comp == attributes {
             use crate::registry::attr as a;
             let could = self.can_fly();
-            for (dst, v) in self.attributes.iter_mut().zip(&f) {
-                *dst = *v;
+            for (dst, v) in self
+                .attributes
+                .iter_mut()
+                .zip(Vec::<f32>::from_bytes(bytes).unwrap_or_default())
+            {
+                *dst = v;
             }
             self.player.speed_mul = self.attributes[a::MOVEMENT_SPEED as usize] as f64;
             self.player.jump_mul = self.attributes[a::JUMP_STRENGTH as usize] as f64;
@@ -2627,18 +2573,11 @@ impl Client {
     fn update_glow(&mut self, c: &crate::content::Content) {
         let (now, light) = (self.ticks(), c.ids.light.unwrap_or(u32::MAX));
         let mut sources = Vec::new();
-        if !self.mode.has(crate::tag_bits::game_mode::HIDDEN) && !self.dead {
-            let mut own = vec![self.held(), self.off_held()];
-            let w = &c.game.player_layout.worn;
-            own.extend_from_slice(
-                self.inventory
-                    .get(w.start as usize..w.end as usize)
-                    .unwrap_or_default(),
-            );
-            let stored = self.components.get(&light).map(Vec::as_slice);
-            sources.push(glow::entity_glow(c, &self.me, now, self.player.pos, self.me.body_yaw, stored, &own));
-        }
-        let all = self.entities.iter().chain(&self.showing_blocks);
+        let mine = (!self.mode.has(crate::tag_bits::game_mode::HIDDEN) && !self.dead).then_some((&self.player_id, &self.me));
+        let all = mine
+            .into_iter()
+            .chain(self.entities.iter())
+            .chain(&self.showing_blocks);
         let hidden = |e: &ClientEntity| {
             e.effects.iter().any(|f| {
                 f.until > now
@@ -2649,34 +2588,13 @@ impl Client {
             })
         };
         for (id, e) in all.filter(|e| e.1.dying.is_none() && !hidden(e.1)) {
-            let shown: Vec<ItemStack> = [e.held, e.off_held]
-                .iter()
-                .chain(&e.worn)
-                .chain(&e.shown)
-                .filter(|&&i| i != 0)
-                .map(|&i| ItemStack::new(i, 1))
-                .chain([e.item])
-                .collect();
-            let stored = self.entity_components.get(&(*id, light)).map(Vec::as_slice);
-            sources.push(glow::entity_glow(c, e, now, e.pos, e.body_yaw, stored, &shown));
+            let stored = if *id == self.player_id { self.components.get(&light) } else { self.entity_components.get(&(*id, light)) }
+                .map(Vec::as_slice);
+            let pos = if *id == self.player_id { self.player.pos } else { e.pos };
+            sources.push(glow::entity_glow(c, e, now, pos, e.body_yaw, stored));
         }
         let eye = self.player.pos;
         self.world.set_glow(c, eye, sources);
-    }
-
-    /// Items the local player wears.
-    pub fn worn(&self) -> Vec<u32> {
-        let c = content();
-        let w = &c.game.player_layout.worn;
-        let slots = self
-            .inventory
-            .get(w.start as usize..w.end as usize)
-            .unwrap_or_default();
-        slots
-            .iter()
-            .filter(|s| !s.is_empty() && c.worn(s.item).is_some())
-            .map(|s| s.item)
-            .collect()
     }
 
     /// Wire of the world and of bodies, before the frame's passes.
@@ -2808,12 +2726,8 @@ impl Client {
     /// The local player as an entity.
     /// Brings `me` up to what prediction, the inventory and the hand say this frame.
     fn sync_me(&mut self) {
-        let w = &content().game.player_layout.worn;
-        let worn: Vec<u32> = self
-            .inventory
-            .get(w.start as usize..w.end as usize)
-            .map_or(Vec::new(), |s| s.iter().filter(|s| !s.is_empty()).map(|s| s.item).collect());
-        let (held, off_held) = (self.shown_held().item, self.off_held().item);
+        let worn = crate::content::equipped(content(), self.me.kind, &self.inventory).to_vec();
+        let (held, off_held) = (self.shown_held(), self.off_held());
         let into = |(held, all): (f32, f32)| if endless_use(all) { held / self.tick_rate as f32 } else { held / all.max(1.0) };
         let using = self.using.map(|u| (into(u), self.using_off));
         let me = &mut self.me;
@@ -2823,7 +2737,7 @@ impl Client {
         (me.arm_swing, me.swing_off, me.pose) = (self.hand_swing, self.hand_swing_off, self.player.pose);
         me.sprinting = self.player.sprinting && self.player.on_ground;
         me.age = self.start.elapsed().as_secs_f32();
-        self.player.swims_in = crate::content::swims_in(content(), self.me.kind, &self.worn());
+        self.player.swims_in = crate::content::swims_in(content(), self.me.kind, &self.me.worn);
     }
 
     /// Columns distant terrain takes from saved cubes.
@@ -2849,9 +2763,8 @@ impl Client {
         self.gpu_terrain.destroy(gpu);
     }
 
-    /// Fraction of full daylight for the current dimension and time.
+    /// Simulation daylight used by conditions and prediction, independent of perception overrides.
     pub fn daylight(&self) -> f32 {
-        // Rain takes away a third of the day, a lightning brings it back for a moment.
         let day = content().dims[self.world.dim as usize].daylight(self.world.time) * (1.0 - self.look.darkness);
         if self.lightning > 0.0 { (day + 0.5).min(1.0) } else { day }
     }
@@ -2897,31 +2810,10 @@ impl Client {
         self.world.time as f64 + self.since_time + fraction
     }
 
-    /// Fog color (linear): the liquid's from inside one; else vanilla's dimming towards night,
-    /// warmed while looking at a sunset.
-    fn fog_linear(&self) -> Vec3 {
-        if let Some(l) = self.eye_liquid() {
-            return self.sky.liquid_color(l);
-        }
-        let d = &content().dims[self.world.dim as usize];
-        let l = self.daylight();
-        let c = sky::rained(sky::rgb(d.fog_color) * Vec3::new(l * 0.94 + 0.06, l * 0.94 + 0.06, l * 0.91 + 0.09), 1.0, self.look.fog_gray);
-        let forward = self.camera().forward();
-        sky::warmed_by_glows(self.world.dim as usize, d, self.smooth_time(), c, forward).powf(2.2)
-    }
-
     /// The frame as every world pass sees it (`gpu_layout::Scene`).
     fn scene(&self, cam: &Camera, frame: &FrameInfo) -> Scene {
-        // Fog ends where the terrain does: the view, or the distant terrain beyond it.
-        let view_distance = (self.view_radius * 16).max(lod::Lod::distance()) as f32;
-        // Vanilla's water fog starts behind the eye, lava's right at it.
-        let (fog_start, fog_end) = match self
-            .eye_liquid()
-            .map(|l| content().liquids[l as usize].fog_distance)
-        {
-            Some(end) => (if end >= 16.0 { -8.0 } else { end * 0.25 }, end),
-            None => (view_distance * 0.6, view_distance),
-        };
+        let environment = &self.environment.values;
+        let (fog_start, fog_end) = (environment.fog_start, environment.fog_end);
         let aspect = frame.width as f32 / frame.height.max(1) as f32;
         let view = cam.view();
         let inv = view.inverse();
@@ -2933,8 +2825,9 @@ impl Client {
             right: inv.transform_vector3(Vec3::X).extend(0.0).to_array(),
             up: inv.transform_vector3(Vec3::Y).extend(0.0).to_array(),
             fog_color: self.fog_color(),
-            params: [fog_start, fog_end, self.daylight(), crate::shaders::time()],
-            light: [content().dims[self.world.dim as usize].ambient as f32 / 15.0, self.brightness, ticks, self.night_vision],
+            params: [fog_start, fog_end, environment.daylight, crate::shaders::time()],
+            light: [environment.ambient, self.brightness, ticks, environment.night_vision],
+            environment: [environment.sunlight, environment.cloud_fog_start, environment.cloud_fog_end, 0.0],
             sun: self.sun(),
         }
     }
@@ -2948,7 +2841,7 @@ impl Client {
         }
         let a = d.day_turn(self.world.time as f64) * std::f64::consts::TAU;
         let v = Vec3::new(a.cos() as f32, a.sin() as f32, 0.35).normalize();
-        [v.x, v.y, v.z, v.y.max(0.0)]
+        [v.x, v.y, v.z, v.y.max(0.0) * self.environment.values.sunlight]
     }
 
     /// `list` goes in the world's pass, `early` before it.
@@ -3023,8 +2916,8 @@ impl Client {
             self.world.dim as usize,
             self.smooth_time(),
             self.camera().pos.y,
-            self.eye_liquid().is_some(),
-            &self.look,
+            &self.environment.values,
+            &self.environment.sky,
             &overlays,
         );
         self.render.draw_translucent(&mut late);
@@ -3087,7 +2980,11 @@ impl Client {
     }
 
     pub fn fog_color(&self) -> [f32; 4] {
-        self.fog_linear().extend(1.0).to_array()
+        let values = &self.environment.values;
+        sky::rained(Vec3::from_array(values.fog_color).powf(1.0 / 2.2), 1.0, values.fog_gray)
+            .powf(2.2)
+            .extend(1.0)
+            .to_array()
     }
 }
 

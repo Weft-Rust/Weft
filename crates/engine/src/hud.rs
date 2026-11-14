@@ -2,6 +2,7 @@
 //! Rebuilt only when what it shows changes; mod parts update through their bindings.
 
 use weft_abi::ItemStack;
+use weft_abi::entry_kind as ek;
 
 use crate::app::Ctx;
 use crate::client::Client;
@@ -840,7 +841,7 @@ impl Place {
 pub fn engine_places() -> Vec<crate::entries::RawEntry> {
     use weft_abi::comp::text_place as t;
     let n = weft_abi::show_place::NAMES;
-    let e = |name: &str| crate::entries::RawEntry::engine(weft_abi::entry_kind::TEXT_PLACE, name);
+    let e = |name: &str| crate::entries::RawEntry::engine(ek::TEXT_PLACE, name);
     let title = |name: &str, scale: f32, dy: f32, sample: &str| {
         e(name)
             .set(t::SCALE, scale)
@@ -1260,7 +1261,8 @@ pub fn item_tooltip(lang: &Lang, input: &crate::input::Input, stack: weft_abi::I
     for g in gifts {
         let Some(d) = c
             .game
-            .entity_effect_names
+            .catalog
+            .ids(ek::ENTITY_EFFECT)
             .get(&g.effect)
             .and_then(|&e| c.game.entity_effects.get(e as usize))
         else {

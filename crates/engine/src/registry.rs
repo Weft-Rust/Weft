@@ -299,6 +299,38 @@ pub enum Use {
     Leaves(u32),
 }
 
+/// Ingredient transformation, independent of where the caller puts the byproduct.
+pub fn use_ingredient(
+    c: &crate::content::Content,
+    stack: abi::ItemStack,
+    use_: Use,
+    count: u32,
+    times: u32,
+) -> (abi::ItemStack, abi::ItemStack) {
+    use abi::ItemStack;
+    let remainder = || {
+        c.item_value::<u32>(stack.item, c.components.id(abi::comp::REMAINDER))
+            .filter(|&x| x != 0)
+    };
+    match use_ {
+        Use::Keep => (stack, ItemStack::EMPTY),
+        Use::Wear(wear) => {
+            let after = crate::stack::worn(c, stack, wear.saturating_mul(times));
+            let back = if after.is_empty() { remainder().map_or(ItemStack::EMPTY, |x| ItemStack::new(x, 1)) } else { ItemStack::EMPTY };
+            (after, back)
+        }
+        _ => {
+            let n = count.saturating_mul(times).min(stack.count);
+            let after = if n == stack.count { ItemStack::EMPTY } else { ItemStack { count: stack.count - n, ..stack } };
+            let back = match use_ {
+                Use::Leaves(x) => Some(x),
+                _ => remainder(),
+            };
+            (after, back.map_or(ItemStack::EMPTY, |x| ItemStack::new(x, n)))
+        }
+    }
+}
+
 pub struct Recipe {
     /// Shaped: width, height, cells (row major).
     pub shaped: Option<(u32, u32, Vec<Ingredient>)>,
@@ -346,43 +378,34 @@ pub struct RecipeKindDef {
 
 #[derive(Default)]
 pub struct Game {
+    pub event_names: FxHashMap<String, u32>,
+    pub packet_names: FxHashMap<String, u32>,
+    pub catalog: crate::entries::Catalog,
     /// Camera modes by id (`abi::comp::camera`): the engine's (`camera::*`) first.
     pub cameras: Vec<CameraMode>,
-    pub camera_names: FxHashMap<String, u32>,
     pub entities: Vec<EntityKind>,
-    pub entity_names: FxHashMap<String, u32>,
     pub components: Vec<ComponentDef>,
-    pub component_names: FxHashMap<String, u32>,
     pub menus: Vec<MenuDef>,
-    pub menu_names: FxHashMap<String, u32>,
     pub recipes: FxHashMap<String, Vec<Recipe>>,
-    pub recipe_kinds: FxHashMap<String, u32>,
     pub recipe_kind_defs: FxHashMap<String, RecipeKindDef>,
     /// Entity categories by `EntityKind::category`: the engine's three first.
     pub categories: Vec<CategoryDef>,
     /// By id: the engine's (`abi::damage_cause`) first.
     pub damage_causes: Vec<DamageCauseDef>,
-    pub damage_cause_names: FxHashMap<String, u32>,
     /// By id: the engine's (`abi::entity_effect`) first.
     pub entity_effects: Vec<EntityEffectDef>,
-    pub entity_effect_names: FxHashMap<String, u32>,
     /// By id: the engine's (`abi::show_place`) first.
     pub text_places: Vec<crate::hud::Place>,
-    pub text_place_names: FxHashMap<String, u32>,
     /// By id: the engine's (`abi::game_mode`) first.
     pub game_modes: Vec<GameModeDef>,
-    pub game_mode_names: FxHashMap<String, u32>,
     /// By id: the engine's (`abi::pose`) first.
     pub poses: Vec<PoseDef>,
     /// Poses by priority, highest first.
     pub pose_order: Vec<crate::world::Pose>,
-    pub pose_names: FxHashMap<String, u32>,
     /// By id: the engine's (`abi::weather`) first.
     pub weathers: Vec<WeatherDef>,
-    pub weather_names: FxHashMap<String, u32>,
     /// By id: rain, snow, then mods'.
     pub precipitations: Vec<PrecipitationDef>,
-    pub precipitation_names: FxHashMap<String, u32>,
     /// Sound categories by `SoundDef::category`: the engine's six first.
     pub sound_categories: Vec<SoundCategory>,
     pub huds: Vec<HudElement>,
@@ -407,14 +430,11 @@ pub struct Game {
     pub item_model_for_stack: FxHashMap<u32, (ModId, Callback)>,
     /// Mod message channels by id (sorted by name, so both sides agree).
     pub packets: Vec<PacketDef>,
-    pub packet_names: FxHashMap<String, u32>,
     /// Key bindings, the engine's and the mods'.
     pub keys: Vec<KeyDef>,
     pub events: Vec<EventDef>,
-    pub event_names: FxHashMap<String, u32>,
     pub steps: crate::steps::Steps,
     pub attributes: Vec<AttrDef>,
-    pub attr_names: FxHashMap<String, u32>,
     /// The engine component holding entities' attribute modifiers.
     pub modifiers_comp: u32,
     /// `TIMERS` as an entity component.
@@ -458,12 +478,10 @@ pub struct Game {
     /// `{if:name}` conditions mods answer.
     /// By id: the engine's (`abi::condition`, answered by the engine) first, then mods'.
     pub conditions: Vec<ConditionDef>,
-    pub condition_names: FxHashMap<String, u32>,
     /// What is in the sky of each dimension, in drawing order.
     pub sky: Vec<Vec<SkyDef>>,
     /// Particle kinds by id (sorted by name).
     pub particles: Vec<ParticleDef>,
-    pub particle_names: FxHashMap<String, u32>,
     /// Particle texture names while freezing; the content moves them into its one list.
     pub particle_textures: Vec<String>,
     /// Block tags particle rules ask about, in the order of their bits.
@@ -472,7 +490,6 @@ pub struct Game {
     pub recipe_stations: FxHashMap<String, Vec<u32>>,
     /// Sound events by id (sorted by name).
     pub sounds: Vec<SoundDef>,
-    pub sound_names: FxHashMap<String, u32>,
     /// Background music, in mod load order.
     pub music: Vec<MusicDef>,
     /// Natural spawning rules, in mod load order.
@@ -585,10 +602,10 @@ fn bake_sky(e: &Entry, dims: &FxHashMap<String, u32>, errors: &mut Vec<String>) 
     use abi::comp::sky as s;
     use abi::sky_kind as k;
     // Either name may have slashes of its own.
-    let Some((dim, name)) = e
+    let Some(dim) = e
         .name
         .match_indices('/')
-        .find_map(|(i, _)| dims.get(&e.name[..i]).map(|&d| (d, &e.name[i + 1..])))
+        .find_map(|(i, _)| dims.get(&e.name[..i]).copied())
     else {
         errors.push(format!("sky object {}: not <dimension>/<object> of a dimension there is", e.name));
         return None;
@@ -605,7 +622,7 @@ fn bake_sky(e: &Entry, dims: &FxHashMap<String, u32>, errors: &mut Vec<String>) 
     Some((
         dim,
         SkyDef {
-            name: name.to_string(),
+            name: e.name.clone(),
             kind,
             texture,
             shader,
@@ -679,8 +696,9 @@ fn engine_components() -> Vec<RawEntry> {
     };
     let shown = cf::SYNC_WATCHERS;
     let own = cf::SYNC_OWNER | shown;
-    let mut shape = vec![0u8; 12];
-    shape.extend(u32::MAX.to_le_bytes());
+    use crate::net::codec::Wire;
+    let shape = crate::net::ShapeField::default().to_bytes();
+    let health_schema = crate::net::HealthField::schema();
     let energy = (<abi::Energy as abi::Schema>::SCHEMA, cf::SAVE | cf::SYNC_MENU, vec![0; size_of::<abi::Energy>()]);
     // What items, entity kinds, poses and entity effects give (`content::SourceMods`).
     let modifiers = <Vec<abi::Modifier> as abi::data::Data>::schema();
@@ -693,15 +711,17 @@ fn engine_components() -> Vec<RawEntry> {
         (TIMERS, "bytes", cf::SAVE, Vec::new()),
         (abi::comp::NAME, "bytes", cf::SAVE | cf::CARRIED, Vec::new()),
         (abi::comp::PERSISTENT, "bytes", cf::SAVE, Vec::new()),
-        (HEALTH, "[f32;2]", own, vec![0; 8]),
+        (HEALTH, health_schema.as_str(), own, crate::net::HealthField::default().to_bytes()),
         (BURNING, "u8", shown, vec![0]),
         (abi::comp::LIGHT, "[u8;3]", own, vec![0; 3]),
         (SHOWN, "bytes", shown, Vec::new()),
+        (GROUND, "bytes", shown, Vec::new()),
+        (abi::environment::COMPONENT, &<Vec<abi::environment::EnvironmentLayer> as abi::data::Data>::schema(), own | cf::SAVE, Vec::new()),
         (WORN, "bytes", shown, Vec::new()),
         (SHAPE, "bytes", own, shape),
         (HELD, "bytes", shown, Vec::new()),
         (OFF_HELD, "bytes", shown, Vec::new()),
-        (USING, "u32", shown, vec![0; 4]),
+        (USING, "bytes", shown, crate::net::UsingField::default().to_bytes()),
         (SWAPS, "bytes", own | shown, Vec::new()),
         (LOOPING_ACTION, "bytes", shown, Vec::new()),
         (EFFECT, "bytes", own | cf::SAVE, Vec::new()),
@@ -1061,7 +1081,7 @@ impl WeatherDef {
 fn engine_weathers() -> Vec<RawEntry> {
     use weft_abi::comp::weather as w;
     let e = |name: &str, duration: [u32; 2], weight: u32| {
-        RawEntry::engine(weft_abi::entry_kind::WEATHER, &format!("core:{name}"))
+        RawEntry::engine(ek::WEATHER, &format!("core:{name}"))
             .set(w::DURATION, duration)
             .set(w::WEIGHT, weight)
     };
@@ -1311,8 +1331,6 @@ pub struct EntityEffectDef {
     pub kind: u8,
     /// Acts once when given and doesn't stay.
     pub instant: bool,
-    /// A screen shader its player sees through while it has it; empty for none.
-    pub screen: String,
     /// Its entity isn't drawn for others.
     pub hides: bool,
     /// As registered, then resolved at freeze.
@@ -1593,6 +1611,7 @@ pub fn name_hash(s: &str) -> u64 {
 fn bake_spawn(
     e: &Entry,
     g: &Game,
+    entity_names: &FxHashMap<String, u32>,
     c: &Components,
     conds: &mut crate::conditions::Texts,
     dim_names: &FxHashMap<String, u32>,
@@ -1602,7 +1621,7 @@ fn bake_spawn(
     use abi::comp::{common as p, spawn as s};
     let what = format!("spawn rule {}", e.name);
     let name = e.text(s::ENTITY).unwrap_or_default();
-    let Some(&entity) = g.entity_names.get(name) else {
+    let Some(&entity) = entity_names.get(name) else {
         errors.push(format!("{what}: unknown entity {name:?}"));
         return None;
     };
@@ -1876,12 +1895,11 @@ pub const MODIFIERS: &str = "core:modifiers";
 /// Timers set with `Host::entity_after`, saved with their entity.
 pub const TIMERS: &str = "core:timers";
 /// Engine fields clients show, kept as synced components (`Dim::mirror_fields`): health and
-/// max health (`[f32; 2]`, max only for players), on fire (`u8`), worn items (`u32` each), own
-/// size and look (`[f32; 3]` with width 0 for the kind's, `u32` kind with `u32::MAX` for its own),
-/// a player's item in hand (`u32`, 0 for none).
+/// Built-in entity fields use the named wire records in `net`.
 pub const HEALTH: &str = "core:health";
 pub const BURNING: &str = "core:burning";
 pub const WORN: &str = "core:worn";
+pub const GROUND: &str = "core:ground";
 pub const SHAPE: &str = "core:shape";
 pub const HELD: &str = "core:held";
 pub const OFF_HELD: &str = "core:off_held";
@@ -1890,15 +1908,13 @@ pub const SWAPS: &str = "core:swaps";
 pub const LOOPING_ACTION: &str = "core:looping_action";
 /// The shader effect on it: effect id, strength (`f32`), the tick it ends (`u64`).
 pub const EFFECT: &str = "core:effect";
-/// A pose a mod holds it in (`u32` pose id, `f32` yaw or NaN), empty: as it moves.
+/// A pose a mod holds it in; empty: as it moves.
 pub const FORCED_POSE: &str = "core:forced_pose";
-/// What it rides (`u64` id) and its seat (`u32`), empty: nothing. Saved, and seen by everyone.
+/// What it rides and its seat; empty: nothing. Saved, and seen by everyone.
 pub const RIDING: &str = "core:riding";
-/// A projectile stuck in an entity: that entity (`u64`), where in its box (`[f32; 3]`, turned
-/// with its body) and its own yaw there (`f32`); empty while it isn't. Clients hold it on the
-/// bone of the model it went into.
+/// A projectile attached to an entity, placed on its model by the client.
 pub const STUCK: &str = "core:stuck";
-/// Entity component (`[u32]`, synced to watchers): the items in its kind's `SHOWN_SLOTS`, 0 empty.
+/// Entity component (stack list wire codec, synced to watchers): its kind's `SHOWN_SLOTS`.
 pub const SHOWN: &str = "core:shown";
 use abi::comp::{ATTRIBUTES, GAME_MODE, PERMISSION};
 /// Entity component (`ItemStack`, not saved): what a player last put in its trash
@@ -1928,6 +1944,7 @@ pub struct FieldComps {
     pub permission: u32,
     pub attributes: u32,
     pub shown: u32,
+    pub ground: u32,
     pub trash: u32,
 }
 
@@ -2016,12 +2033,12 @@ pub fn freeze(
         g.chat_format = r.chat_format.or(g.chat_format);
     }
     g.entities = entities.kinds;
-    g.entity_names = entities.names;
-    g.player_kind = g.entity_names[PLAYER];
-    g.item_kind = g.entity_names[ITEM];
-    g.falling_kind = g.entity_names[FALLING];
-    g.moving_kind = g.entity_names[MOVING];
-    g.platform_kind = g.entity_names[PLATFORM];
+    let entity_names = tables.1.set_ids(ek::ENTITY, entities.names);
+    g.player_kind = tables.1.ids(ek::ENTITY)[PLAYER];
+    g.item_kind = tables.1.ids(ek::ENTITY)[ITEM];
+    g.falling_kind = tables.1.ids(ek::ENTITY)[FALLING];
+    g.moving_kind = tables.1.ids(ek::ENTITY)[MOVING];
+    g.platform_kind = tables.1.ids(ek::ENTITY)[PLATFORM];
     g.client_frames.sort_by_key(|h| order(h.0));
     let configs = take_kind(&mut entries, ek::CONFIG);
     let mut kind = |kind: u32| {
@@ -2030,9 +2047,9 @@ pub fn freeze(
         all
     };
     // Ids by name.
-    let (particles, names) = tables.bake_by(kind(ek::PARTICLE), ek::PARTICLE, mod_name, errors, |e| e.name.clone(), |e, _| e.clone());
-    g.particle_names = names;
-    freeze_particles(&mut g, &particles, errors);
+    let (particles, _) = tables.bake_by(kind(ek::PARTICLE), ek::PARTICLE, mod_name, errors, |e| e.name.clone(), |e, _| e.clone());
+
+    freeze_particles(&mut g, &particles, &tables.1, errors);
     let (sky, _) = tables.bake(kind(ek::SKY), ek::SKY, mod_name, errors, |e, errors| bake_sky(e, dim_names, errors));
     g.sky = (0..dim_names.len()).map(|_| Vec::new()).collect();
     for (dim, s) in sky.into_iter().flatten() {
@@ -2075,7 +2092,7 @@ pub fn freeze(
     (g.sound_categories, _) = tables.bake(kind(ek::SOUND_CATEGORY), ek::SOUND_CATEGORY, mod_name, errors, |e, _| {
         SoundCategory::new(&e.name, e.has(abi::comp::SOUND_CATEGORY_WORLD))
     });
-    (g.sounds, g.sound_names) = tables.bake_by(
+    let (sounds, sound_names) = tables.bake_by(
         kind(ek::SOUND),
         ek::SOUND,
         mod_name,
@@ -2083,6 +2100,7 @@ pub fn freeze(
         |e| e.name.clone(),
         |e, errors| bake_sound(e, &g.sound_categories, errors),
     );
+    g.sounds = sounds;
     (g.keys, _) = tables.bake(kind(ek::KEY), ek::KEY, mod_name, errors, |e, errors| {
         let key = e.text(abi::comp::KEY_DEFAULT).unwrap_or_default();
         let slots = crate::input::Binding::parse_slots(key).unwrap_or_else(|| {
@@ -2091,7 +2109,7 @@ pub fn freeze(
         });
         KeyDef { name: e.name.clone(), default: slots, contexts: e.flags(crate::input::context::TAGS) }
     });
-    (g.attributes, g.attr_names) = tables.bake(kind(ek::ATTRIBUTE), ek::ATTRIBUTE, mod_name, errors, |e, _| {
+    (g.attributes, _) = tables.bake(kind(ek::ATTRIBUTE), ek::ATTRIBUTE, mod_name, errors, |e, _| {
         let [min, max] = e.or(abi::comp::attribute::RANGE, [f64::NEG_INFINITY, f64::INFINITY]);
         let default = e.or(abi::comp::attribute::DEFAULT, 0.0);
         AttrDef {
@@ -2104,12 +2122,11 @@ pub fn freeze(
             rule: e.has(abi::comp::attribute::RULE),
         }
     });
-    (g.damage_causes, g.damage_cause_names) =
-        tables.bake(kind(ek::DAMAGE_CAUSE), ek::DAMAGE_CAUSE, mod_name, errors, |e, _| bake_damage_cause(e));
+    (g.damage_causes, _) = tables.bake(kind(ek::DAMAGE_CAUSE), ek::DAMAGE_CAUSE, mod_name, errors, |e, _| bake_damage_cause(e));
     let (phases, _) = tables.bake(kind(ek::PHASE), ek::PHASE, mod_name, errors, |e, _| e.clone());
     let phases = crate::steps::order_phases(&phases, errors);
     let (steps, _) = tables.bake(kind(ek::STEP), ek::STEP, mod_name, errors, |e, _| e.clone());
-    g.steps = crate::steps::freeze(phases, &steps, step_order, errors);
+    g.steps = crate::steps::freeze(&mut tables.1, phases, &steps, step_order, errors);
     g.steps.attributes = g
         .attributes
         .iter()
@@ -2154,23 +2171,23 @@ pub fn freeze(
     );
     all.extend(configs);
     // By name: a mod's settings come together on its screen.
-    (g.configs, g.config_names) = tables.bake_by(all, ek::CONFIG, mod_name, errors, |e| e.name.clone(), crate::config::bake);
+    (g.configs, _) = tables.bake_by(all, ek::CONFIG, mod_name, errors, |e| e.name.clone(), crate::config::bake);
     g.attr_rules = g
         .attributes
         .iter()
-        .map(|a| a.rule.then(|| g.config_names[&a.name]))
+        .map(|a| a.rule.then(|| tables.1.ids(ek::CONFIG)[&a.name]))
         .collect();
     g.damage_rules = g
         .damage_causes
         .iter()
-        .map(|d| damage_rule(d).map(|name| g.config_names[&name]))
+        .map(|d| damage_rule(d).map(|name| tables.1.ids(ek::CONFIG)[&name]))
         .collect();
-    g.lives = g.config_names["core:lives"];
-    g.rules_locked = g.config_names["core:rules_locked"];
-    g.mob_spawning = g.config_names["core:mob_spawning"];
-    g.keep_inventory = g.config_names["core:keep_inventory"];
-    g.max_cramming = g.config_names["core:max_entity_cramming"];
-    g.simulation_distance = g.config_names["core:simulation_distance"];
+    g.lives = tables.1.ids(ek::CONFIG)["core:lives"];
+    g.rules_locked = tables.1.ids(ek::CONFIG)["core:rules_locked"];
+    g.mob_spawning = tables.1.ids(ek::CONFIG)["core:mob_spawning"];
+    g.keep_inventory = tables.1.ids(ek::CONFIG)["core:keep_inventory"];
+    g.max_cramming = tables.1.ids(ek::CONFIG)["core:max_entity_cramming"];
+    g.simulation_distance = tables.1.ids(ek::CONFIG)["core:simulation_distance"];
     (g.categories, _) = tables.bake(kind(ek::ENTITY_CATEGORY), ek::ENTITY_CATEGORY, mod_name, errors, |e, _| bake_category(e));
     for k in g
         .entities
@@ -2182,8 +2199,8 @@ pub fn freeze(
             None => errors.push(format!("entity {}: no category {}", k.name, k.category_name)),
         }
     }
-    (g.cameras, g.camera_names) = tables.bake(kind(ek::CAMERA), ek::CAMERA, mod_name, errors, |e, _| bake_camera(e, conds));
-    let (recipe_kinds, names) = tables.bake(kind(ek::RECIPE_KIND), ek::RECIPE_KIND, mod_name, errors, |e, _| {
+    (g.cameras, _) = tables.bake(kind(ek::CAMERA), ek::CAMERA, mod_name, errors, |e, _| bake_camera(e, conds));
+    let (recipe_kinds, _) = tables.bake(kind(ek::RECIPE_KIND), ek::RECIPE_KIND, mod_name, errors, |e, _| {
         use abi::comp::recipe_kind as r;
         let layout = e.callback(r::LAYOUT);
         let def = RecipeKindDef {
@@ -2199,7 +2216,7 @@ pub fn freeze(
         };
         (e.name.clone(), def)
     });
-    (g.recipe_kind_defs, g.recipe_kinds) = (recipe_kinds.into_iter().collect(), names);
+    g.recipe_kind_defs = recipe_kinds.into_iter().collect();
     // The other hand numbered last, as the player's layout has it.
     let off_last = |e: &Entry| e.name == abi::OFF_HAND_SLOT;
     let (equipment, _) = tables.bake_by(kind(ek::EQUIPMENT_SLOT), ek::EQUIPMENT_SLOT, mod_name, errors, off_last, |e, _| {
@@ -2210,44 +2227,37 @@ pub fn freeze(
             .to_string();
         EquipmentSlot { name: e.name.clone(), roles: crate::model::roles_of(&bones), bones, background }
     });
-    (g.game_modes, g.game_mode_names) = tables.bake(kind(ek::GAME_MODE), ek::GAME_MODE, mod_name, errors, |e, _| bake_game_mode(e));
-    (g.poses, g.pose_names) = tables.bake(kind(ek::POSE), ek::POSE, mod_name, errors, |e, _| bake_pose(e, conds));
-    (g.precipitations, g.precipitation_names) =
-        tables.bake(kind(ek::PRECIPITATION), ek::PRECIPITATION, mod_name, errors, |e, _| bake_precipitation(e));
-    (g.text_places, g.text_place_names) =
-        tables.bake(kind(ek::TEXT_PLACE), ek::TEXT_PLACE, mod_name, errors, |e, _| crate::hud::Place::bake(e));
-    (g.entity_effects, g.entity_effect_names) =
-        tables.bake(kind(ek::ENTITY_EFFECT), ek::ENTITY_EFFECT, mod_name, errors, |e, _| EntityEffectDef {
-            name: e.name.clone(),
-            shader: e
-                .text(abi::comp::ENTITY_EFFECT_SHADER)
-                .unwrap_or(&e.name)
-                .to_string(),
-            shader_given: e.text(abi::comp::ENTITY_EFFECT_SHADER).is_some(),
-            icon: e
-                .text(abi::comp::ENTITY_EFFECT_ICON)
-                .unwrap_or_default()
-                .to_string(),
-            color: e.get::<u32>(abi::comp::ENTITY_EFFECT_COLOR),
-            kind: if e.has(abi::comp::ENTITY_EFFECT_HARMFUL) {
-                effect_kind::HARMFUL
-            } else if e.has(abi::comp::ENTITY_EFFECT_BENEFICIAL) {
-                effect_kind::BENEFICIAL
-            } else {
-                effect_kind::NEUTRAL
-            },
-            instant: e.has(abi::comp::ENTITY_EFFECT_INSTANT),
-            screen: e
-                .text(abi::comp::ENTITY_EFFECT_SCREEN)
-                .unwrap_or_default()
-                .to_string(),
-            hides: e.has(abi::comp::ENTITY_EFFECT_HIDES),
-            raw_hazards: e.or(abi::comp::ENTITY_EFFECT_HAZARDS, Vec::new()),
-            hazards: Vec::new(),
-            on_tick: e.callback(abi::comp::ENTITY_EFFECT_ON_TICK),
-            light: e.or(abi::comp::LIGHT, [0; 3]),
-        });
-    (g.conditions, g.condition_names) = tables.bake(kind(ek::CONDITION), ek::CONDITION, mod_name, errors, |e, _| ConditionDef {
+    (g.game_modes, _) = tables.bake(kind(ek::GAME_MODE), ek::GAME_MODE, mod_name, errors, |e, _| bake_game_mode(e));
+    (g.poses, _) = tables.bake(kind(ek::POSE), ek::POSE, mod_name, errors, |e, _| bake_pose(e, conds));
+    (g.precipitations, _) = tables.bake(kind(ek::PRECIPITATION), ek::PRECIPITATION, mod_name, errors, |e, _| bake_precipitation(e));
+    (g.text_places, _) = tables.bake(kind(ek::TEXT_PLACE), ek::TEXT_PLACE, mod_name, errors, |e, _| crate::hud::Place::bake(e));
+    (g.entity_effects, _) = tables.bake(kind(ek::ENTITY_EFFECT), ek::ENTITY_EFFECT, mod_name, errors, |e, _| EntityEffectDef {
+        name: e.name.clone(),
+        shader: e
+            .text(abi::comp::ENTITY_EFFECT_SHADER)
+            .unwrap_or(&e.name)
+            .to_string(),
+        shader_given: e.text(abi::comp::ENTITY_EFFECT_SHADER).is_some(),
+        icon: e
+            .text(abi::comp::ENTITY_EFFECT_ICON)
+            .unwrap_or_default()
+            .to_string(),
+        color: e.get::<u32>(abi::comp::ENTITY_EFFECT_COLOR),
+        kind: if e.has(abi::comp::ENTITY_EFFECT_HARMFUL) {
+            effect_kind::HARMFUL
+        } else if e.has(abi::comp::ENTITY_EFFECT_BENEFICIAL) {
+            effect_kind::BENEFICIAL
+        } else {
+            effect_kind::NEUTRAL
+        },
+        instant: e.has(abi::comp::ENTITY_EFFECT_INSTANT),
+        hides: e.has(abi::comp::ENTITY_EFFECT_HIDES),
+        raw_hazards: e.or(abi::comp::ENTITY_EFFECT_HAZARDS, Vec::new()),
+        hazards: Vec::new(),
+        on_tick: e.callback(abi::comp::ENTITY_EFFECT_ON_TICK),
+        light: e.or(abi::comp::LIGHT, [0; 3]),
+    });
+    (g.conditions, _) = tables.bake(kind(ek::CONDITION), ek::CONDITION, mod_name, errors, |e, _| ConditionDef {
         name: e.name.clone(),
         answer: e
             .callback(abi::comp::CONDITION_CALL)
@@ -2255,15 +2265,16 @@ pub fn freeze(
     });
     // Every game mode is a condition of its name too.
     for (i, m) in g.game_modes.iter().enumerate() {
-        if g.condition_names.contains_key(&m.name) {
+        if g.conditions.iter().any(|c| c.name == m.name) {
             errors.push(format!("condition {} is a game mode's name", m.name));
             continue;
         }
-        g.condition_names
-            .insert(m.name.clone(), g.conditions.len() as u32);
         g.conditions
             .push(ConditionDef { name: m.name.clone(), answer: Answer::Mode(crate::world::GameMode(i as u16)) });
     }
+    tables
+        .1
+        .set(ek::CONDITION, g.conditions.iter().map(|d| d.name.as_str()));
     (g.music, _) = tables.bake(kind(ek::MUSIC), ek::MUSIC, mod_name, errors, |e, errors| {
         use abi::comp::music as m;
         let dimension = e
@@ -2279,10 +2290,10 @@ pub fn freeze(
         let when = conds.all(&e.or::<Vec<String>>(m::WHEN, Vec::new()));
         MusicDef { name: e.name.clone(), tracks: e.or(m::TRACKS, Vec::new()), dimension, when }
     });
-    (g.weathers, g.weather_names) = tables.bake(kind(ek::WEATHER), ek::WEATHER, mod_name, errors, |e, errors| {
+    (g.weathers, _) = tables.bake(kind(ek::WEATHER), ek::WEATHER, mod_name, errors, |e, errors| {
         let mut d = bake_weather(e);
         if !d.sound_name.is_empty() {
-            d.sound = g.sound_names.get(&d.sound_name).copied();
+            d.sound = sound_names.get(&d.sound_name).copied();
             if d.sound.is_none() {
                 errors.push(format!("weather {}: no sound {}", d.name, d.sound_name));
             }
@@ -2293,7 +2304,7 @@ pub fn freeze(
         let names = g.poses[i].fallback_names.clone();
         g.poses[i].fallback = names
             .split_whitespace()
-            .filter_map(|n| match g.pose_names.get(n) {
+            .filter_map(|n| match tables.1.ids(ek::POSE).get(n) {
                 Some(&p) => Some(crate::world::Pose(p as u16)),
                 None => {
                     errors.push(format!("pose {}: no pose {n} to fall back to", g.poses[i].name));
@@ -2306,8 +2317,9 @@ pub fn freeze(
     g.pose_order = (0..g.poses.len() as u16).map(crate::world::Pose).collect();
     g.pose_order
         .sort_by_key(|p| std::cmp::Reverse(g.poses[p.0 as usize].priority));
-    let (spawns, _) =
-        tables.bake(kind(ek::SPAWN), ek::SPAWN, mod_name, errors, |e, errors| bake_spawn(e, &g, c, conds, dim_names, biome_names, errors));
+    let (spawns, _) = tables.bake(kind(ek::SPAWN), ek::SPAWN, mod_name, errors, |e, errors| {
+        bake_spawn(e, &g, &entity_names, c, conds, dim_names, biome_names, errors)
+    });
     g.spawns = spawns.into_iter().flatten().collect();
     link_handlers(&mut g, event_handlers, packets, order, errors);
 
@@ -2316,10 +2328,10 @@ pub fn freeze(
     world_ticks.sort_by_key(|h: &(ModId, Callback)| order(h.0));
     g.world_ticks = world_ticks;
 
-    (g.menus, g.menu_names) = tables.bake_by(kind(ek::MENU), ek::MENU, mod_name, errors, |e| e.name.clone(), |e, _| bake_menu(e));
+    (g.menus, _) = tables.bake_by(kind(ek::MENU), ek::MENU, mod_name, errors, |e| e.name.clone(), |e, _| bake_menu(e));
     lay_out_slots(&mut g, entities.player_groups, equipment, c, errors);
     g.player_menu = entities.player_menu.and_then(|n| {
-        let m = g.menu_names.get(&n).copied();
+        let m = tables.1.ids(ek::MENU).get(&n).copied();
         if m.is_none() {
             errors.push(format!("player menu {n} is not registered"));
         }
@@ -2340,6 +2352,7 @@ pub fn freeze(
         }
     }
 
+    g.catalog = std::mem::take(&mut tables.1);
     freeze_recipes(&mut g, recipes, items, item_names, c, conds, errors);
     g
 }
@@ -2373,8 +2386,9 @@ fn link_handlers(
     g.block_tick = g.event_names[abi::event::BLOCK_TICK];
     g.events = events;
     packets.sort_by(|a, b| a.1.cmp(&b.1).then(a.3.cmp(&b.3)));
+    let mut names = FxHashMap::default();
     for (owner, name, schema, side, cb) in packets {
-        let id = *g.packet_names.entry(name.clone()).or_insert_with(|| {
+        let id = *names.entry(name.clone()).or_insert_with(|| {
             g.packets
                 .push(PacketDef { schema: schema.clone(), ..Default::default() });
             g.packets.len() as u32 - 1
@@ -2389,6 +2403,7 @@ fn link_handlers(
         }
         *slot = Some((owner, cb));
     }
+    g.packet_names = names;
 }
 
 /// Entity storage, indexed by component id like everything else: the components' definitions,
@@ -2412,18 +2427,11 @@ fn freeze_entity_storage(
             g.components[id as usize] = def.clone();
         }
     }
-    g.component_names = g
-        .components
-        .iter()
-        .enumerate()
-        .filter(|(_, d)| d.runtime)
-        .map(|(i, d)| (d.name.clone(), i as u32))
-        .collect();
-    g.energy = g.component_names[abi::comp::ENERGY];
-    g.modifiers_comp = g.component_names[MODIFIERS];
-    g.timers_comp = g.component_names[TIMERS];
-    g.name_comp = g.component_names[abi::comp::NAME];
-    g.persistent_comp = g.component_names[abi::comp::PERSISTENT];
+    g.energy = c.id(abi::comp::ENERGY).unwrap();
+    g.modifiers_comp = c.id(MODIFIERS).unwrap();
+    g.timers_comp = c.id(TIMERS).unwrap();
+    g.name_comp = c.id(abi::comp::NAME).unwrap();
+    g.persistent_comp = c.id(abi::comp::PERSISTENT).unwrap();
     g.carried = g
         .components
         .iter()
@@ -2431,7 +2439,7 @@ fn freeze_entity_storage(
         .filter(|(_, d)| d.runtime && d.flags & weft_abi::component_flags::CARRIED != 0)
         .map(|(i, _)| i as u32)
         .collect();
-    let id = |n: &str| g.component_names[n];
+    let id = |n: &str| c.id(n).unwrap();
     g.fields = FieldComps {
         health: id(HEALTH),
         burning: id(BURNING),
@@ -2450,9 +2458,10 @@ fn freeze_entity_storage(
         permission: id(PERMISSION),
         attributes: id(ATTRIBUTES),
         shown: id(SHOWN),
+        ground: id(GROUND),
         trash: id(TRASH),
     };
-    g.simulated_comp = g.component_names[SIMULATED];
+    g.simulated_comp = c.id(SIMULATED).unwrap();
     let with_flag = |f: u32| {
         g.components
             .iter()
@@ -2471,16 +2480,19 @@ fn freeze_entity_storage(
         .collect();
     systems.sort_by_key(|s| order(s.0));
     for (owner, name, schema, cb) in systems {
-        match g.component_names.get(&name) {
-            Some(&id) if c.schemas[id as usize] == schema || schema.is_empty() => g.systems.push((owner, id, cb)),
-            Some(&id) => errors.push(format!("system over {name}: it is '{}', the system takes '{schema}'", c.schemas[id as usize])),
+        match c.id(&name).filter(|&id| g.components[id as usize].runtime) {
+            Some(id) if c.schemas[id as usize] == schema || schema.is_empty() => g.systems.push((owner, id, cb)),
+            Some(id) => errors.push(format!("system over {name}: it is '{}', the system takes '{schema}'", c.schemas[id as usize])),
             None => errors.push(format!("system over {name}: no entity component of that name")),
         }
     }
     for (k, list) in attach.into_iter().enumerate() {
         let kind = &mut g.entities[k];
         for mut a in list {
-            let Some(&cid) = g.component_names.get(&a.name) else {
+            let Some(cid) = c
+                .id(&a.name)
+                .filter(|&id| g.components[id as usize].runtime)
+            else {
                 errors.push(format!("entity {}: attaches {}, which is no entity component", kind.name, a.name));
                 continue;
             };
@@ -2642,7 +2654,7 @@ fn freeze_recipes(
     };
     let recipes = expanded;
     for r in recipes {
-        if !g.recipe_kinds.contains_key(&r.kind) {
+        if !g.catalog.ids(ek::RECIPE_KIND).contains_key(&r.kind) {
             errors.push(format!("recipe for {}: no recipe kind {}", r.output, r.kind));
             continue;
         }
@@ -2764,10 +2776,6 @@ impl Game {
         self.block_entities.values().any(|&k| k == kind)
     }
 
-    pub fn component(&self, name: &str) -> Option<u32> {
-        self.component_names.get(name).copied()
-    }
-
     /// Bytes read back for a component, cut or filled to its size as it is now (0: variable, like
     /// attribute modifiers).
     pub fn fit_component(&self, id: u32, mut bytes: Vec<u8>) -> Box<[u8]> {
@@ -2778,35 +2786,35 @@ impl Game {
         bytes.into_boxed_slice()
     }
 
-    /// Finds the recipe whose pattern fits the grid (any position, mirrored allowed) or whose
-    /// shapeless inputs match the grid contents exactly.
-    pub fn match_grid(&self, kind: &str, grid: &[u32], w: u32, h: u32, tags: &Components) -> Option<&Recipe> {
-        self.match_cells(kind, grid, w, h, tags).map(|m| m.0)
-    }
-
-    /// `match_grid`, and per grid slot the recipe's ingredient there (its cell of a shaped one,
-    /// its input of another), what says how the slot is used up.
-    pub fn match_cells(&self, kind: &str, grid: &[u32], w: u32, h: u32, tags: &Components) -> Option<(&Recipe, Vec<Option<usize>>)> {
+    /// The first recipe matching the grid, optionally mapping its ingredients to grid slots.
+    pub fn match_grid(
+        &self,
+        kind: &str,
+        grid: &[u32],
+        w: u32,
+        h: u32,
+        tags: &Components,
+        mapping: Option<&mut Vec<Option<usize>>>,
+    ) -> Option<&Recipe> {
         let list = self.recipes.get(kind)?;
-        // Trim the grid to the bounding box of its items.
+        let filled: Vec<usize> = (0..grid.len()).filter(|&i| grid[i] != 0).collect();
         let (mut x0, mut y0, mut x1, mut y1) = (w, h, 0, 0);
-        for y in 0..h {
-            for x in 0..w {
-                if grid[(y * w + x) as usize] != 0 {
-                    x0 = x0.min(x);
-                    y0 = y0.min(y);
-                    x1 = x1.max(x + 1);
-                    y1 = y1.max(y + 1);
-                }
-            }
+        for &i in &filled {
+            let (x, y) = (i as u32 % w, i as u32 / w);
+            x0 = x0.min(x);
+            y0 = y0.min(y);
+            x1 = x1.max(x + 1);
+            y1 = y1.max(y + 1);
         }
-        if x1 == 0 {
+        if filled.is_empty() {
             return None;
         }
         let (bw, bh) = (x1 - x0, y1 - y0);
         let at = |x: u32, y: u32| grid[((y0 + y) * w + x0 + x) as usize];
+        let mapped = mapping.is_some();
+        let mut scratch = Vec::new();
+        let cells = mapping.unwrap_or(&mut scratch);
         list.iter().find_map(|r| {
-            let mut cells = vec![None; grid.len()];
             match &r.shaped {
                 Some((rw, rh, pattern)) => {
                     if *rw != bw || *rh != bh {
@@ -2820,25 +2828,24 @@ impl Game {
                             })
                         })
                     };
-                    let mirror = if fits(false) {
-                        false
-                    } else if fits(true) {
-                        true
-                    } else {
-                        return None;
-                    };
-                    for y in 0..bh {
-                        for x in 0..bw {
-                            let cx = if mirror { bw - 1 - x } else { x };
-                            cells[((y0 + y) * w + x0 + x) as usize] = (at(x, y) != 0).then_some((y * rw + cx) as usize);
+                    let mirror = [false, true].into_iter().find(|&m| fits(m))?;
+                    if mapped {
+                        cells.clear();
+                        cells.resize(grid.len(), None);
+                        for y in 0..bh {
+                            for x in 0..bw {
+                                let cx = if mirror { bw - 1 - x } else { x };
+                                cells[((y0 + y) * w + x0 + x) as usize] = (at(x, y) != 0).then_some((y * rw + cx) as usize);
+                            }
                         }
                     }
                 }
                 None => {
-                    let filled: Vec<usize> = (0..grid.len()).filter(|&i| grid[i] != 0).collect();
                     if r.inputs.len() != filled.len() {
                         return None;
                     }
+                    cells.clear();
+                    cells.resize(grid.len(), None);
                     for (k, ing) in r.inputs.iter().enumerate() {
                         let i = filled
                             .iter()
@@ -2848,7 +2855,7 @@ impl Game {
                     }
                 }
             }
-            Some((r, cells))
+            Some(r)
         })
     }
 
@@ -2971,8 +2978,8 @@ fn engine_particles() -> Vec<RawEntry> {
     ]
 }
 
-/// Particle kinds from their entries, in id order (`Game::particle_names` set).
-fn freeze_particles(g: &mut Game, entries: &[Entry], errors: &mut Vec<String>) {
+/// Particle kinds from their entries, in id order.
+fn freeze_particles(g: &mut Game, entries: &[Entry], catalog: &crate::entries::Catalog, errors: &mut Vec<String>) {
     use abi::comp::particle as p;
     use abi::{particle_event as pe, particle_then as pt, particle_when as pw};
     let mut tex_ids: FxHashMap<String, u32> = FxHashMap::default();
@@ -2991,7 +2998,7 @@ fn freeze_particles(g: &mut Game, entries: &[Entry], errors: &mut Vec<String>) {
         let mut rules = Vec::new();
         for r in e.or::<Vec<abi::ParticleRule>>(p::RULES, Vec::new()) {
             let into = match r.then {
-                pt::BECOME | pt::BECOME_STILL => match g.particle_names.get(&r.into) {
+                pt::BECOME | pt::BECOME_STILL => match catalog.ids(ek::PARTICLE).get(&r.into) {
                     Some(&id) => id,
                     None => {
                         errors.push(format!("particle {name} turns into {}, which no one registers", r.into));
@@ -3228,11 +3235,17 @@ mod tests {
                                 }
                             }
                         }
-                        let (_, cells) = game.match_cells("crafting", &grid, 3, 3, &tags).unwrap();
+                        let mut cells = Vec::new();
+                        game.match_grid("crafting", &grid, 3, 3, &tags, Some(&mut cells))
+                            .unwrap();
                         assert_eq!(cells, expected, "mask {mask}, mirror {mirror}, at {left},{top}");
                         let slot = grid.iter().position(|&item| item != 0).unwrap();
                         grid[slot] = 100;
-                        assert!(game.match_cells("crafting", &grid, 3, 3, &tags).is_none(), "wrong ingredient in slot {slot}");
+                        assert!(
+                            game.match_grid("crafting", &grid, 3, 3, &tags, None)
+                                .is_none(),
+                            "wrong ingredient in slot {slot}"
+                        );
                     }
                 }
             }
@@ -3280,9 +3293,9 @@ mod sky_tests {
         let mut errors = Vec::new();
         let (dim, m) = bake_sky(&moon, &dims, &mut errors).unwrap();
         assert!(errors.is_empty(), "{errors:?}");
-        assert_eq!((dim, m.name.as_str(), m.size, m.phase), (1, "a:moons/1", 40f32.to_radians(), 0.5));
+        assert_eq!((dim, m.name.as_str(), m.size, m.phase), (1, "a:e/a:moons/1", 40f32.to_radians(), 0.5));
         assert!(m.orbit.is_infinite(), "nobody set an orbit, so it follows the day");
-        assert!(bake_sky(&e("a:d/x/stars"), &dims, &mut errors).is_some_and(|(d, s)| d == 0 && s.name == "stars"));
+        assert!(bake_sky(&e("a:d/x/stars"), &dims, &mut errors).is_some_and(|(d, s)| d == 0 && s.name == "a:d/x/stars"));
         assert!(bake_sky(&e("a:f/sun"), &dims, &mut errors).is_none());
     }
 }

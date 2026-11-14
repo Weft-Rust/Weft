@@ -277,6 +277,7 @@ The rest is split by what you are making. Each page starts with the common case 
 **Client side**
 
 - [Client](client.md): keys, packets, settings, frame hooks
+- [Environment](environment.md): fog, sky lighting, overlays, post effects and acoustics from content or live code
 - [UI](ui.md), [camera modes](details/camera.md), [models and animations](models.md), [shaders](shaders.md)
 
 **Assets and systems**
