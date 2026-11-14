@@ -71,6 +71,8 @@ pub static BUSH_LEAVES: Block = Block::named("bush_leaves");
 pub static FERN: Block = Block::named("fern");
 pub static LAVENDER: Block = Block::named("lavender");
 pub static BLUEGRASS: Block = Block::named("bluegrass");
+pub static INULA: Block = Block::named("inula");
+pub static VERBASCUM: Block = Block::named("verbascum");
 
 static TILLABLE: Tag = Tag::named("tillable");
 
@@ -473,6 +475,18 @@ pub fn register(r: &mut Registry) {
         let name = format!("tulip_{color}");
         plant(r, Block::generated(name.clone()), name.as_str());
     }
+    r.block(&INULA)
+        .sound_group("grass")
+        .tall_plant("inula_bottom", "inula_top")
+        .replaceable()
+        .needs_below("#plant_soil")
+        .tab(&crate::tabs::NATURAL);
+    r.block(&VERBASCUM)
+        .sound_group("grass")
+        .tall_plant("verbascum_bottom", "verbascum_top")
+        .replaceable()
+        .needs_below("#plant_soil")
+        .tab(&crate::tabs::NATURAL);
     r.block(&LAVENDER)
         .sound_group("grass")
         .tall_plant("lavender_bottom", "lavender_top")
