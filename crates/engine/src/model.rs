@@ -119,6 +119,61 @@ pub fn assign_roles(parts: &mut [Part]) {
     }
 }
 
+/// The arms of a humanoid with slim skin: 4-pixel boxes become 3 wide, the inner edge stays by the body.
+pub fn slim_arms(parts: &mut [Part]) {
+    let wide = |c: &Cuboid| c.size[0] == 4.0 && c.faces.is_none();
+    for p in parts
+        .iter_mut()
+        .filter(|p| (p.role == role::ARM_LEFT || p.role == role::ARM_RIGHT) && p.cuboids.iter().any(wide))
+    {
+        // The shoulder moves a pixel toward the body, what hangs on it stays where it was.
+        let outward = p.pivot[0].signum();
+        p.pivot[0] -= outward;
+        for c in &mut p.cuboids {
+            c.origin[0] += outward;
+            if wide(c) {
+                c.size[0] = 3.0;
+                // At -x the outer edge is the low one.
+                if outward < 0.0 {
+                    c.origin[0] += 1.0;
+                }
+            }
+        }
+    }
+}
+
+pub fn skin_layers(parts: &mut [Part]) {
+    for p in parts.iter_mut() {
+        // The skin's left limbs are at -x.
+        let left = p.pivot[0] < 0.0;
+        // The classic box and its picture, the layer's picture, the left limb's own, how far the layer stands off.
+        let (size, uv, layer, own, inflate) = match p.role {
+            role::HEAD => ([8.0, 8.0, 8.0], [0.0, 0.0], [32.0, 0.0], None, 0.5),
+            role::ARM_LEFT | role::ARM_RIGHT => {
+                ([4.0, 12.0, 4.0], [40.0, 16.0], if left { [48.0, 48.0] } else { [40.0, 32.0] }, left.then_some([32.0, 48.0]), 0.25)
+            }
+            role::LEG_LEFT | role::LEG_RIGHT => {
+                ([4.0, 12.0, 4.0], [0.0, 16.0], if left { [0.0, 48.0] } else { [0.0, 32.0] }, left.then_some([16.0, 48.0]), 0.25)
+            }
+            _ if p.name.eq_ignore_ascii_case("body") => ([8.0, 12.0, 4.0], [16.0, 16.0], [16.0, 32.0], None, 0.25),
+            _ => continue,
+        };
+        let Some(base) = p
+            .cuboids
+            .iter_mut()
+            .find(|c| c.size == size && c.uv == uv && c.inflate == 0.0 && c.faces.is_none())
+        else {
+            continue;
+        };
+        let top = Cuboid { uv: layer, inflate, mirror: false, ..base.clone() };
+        if let Some(uv) = own {
+            (base.uv, base.mirror) = (uv, false);
+        }
+        // Armor fits the last of the biggest boxes, so the layer goes before the base.
+        p.cuboids.insert(0, top);
+    }
+}
+
 /// The bone of this name, however its case and underscores go.
 pub fn bone_named(parts: &[Part], name: &str) -> Option<usize> {
     fn plain(s: &str) -> impl Iterator<Item = u8> + '_ {
@@ -960,6 +1015,90 @@ mod tests {
             [role::LEG_RIGHT, role::LEG_LEFT, role::LEG_FRONT_RIGHT, role::LEG_FRONT_LEFT]
         );
         assert_eq!(role_of("leg3", 8), role::LEG_SWEEP);
+    }
+
+    #[test]
+    fn slim_arms_keep_their_inner_edge_and_their_sleeves() {
+        // World x of a box: (from, to).
+        let span = |p: &Part, c: &Cuboid| (p.pivot[0] + c.origin[0], p.pivot[0] + c.origin[0] + c.size[0]);
+        for sleeves in [false, true] {
+            let mut parts = classic();
+            if sleeves {
+                skin_layers(&mut parts);
+            }
+            slim_arms(&mut parts);
+            // The shoulder moves a pixel toward the body, the inner edge stays at 4.
+            for (arm, shoulder, edges) in [(&parts[2], -5.0, (-7.0, -4.0)), (&parts[3], 5.0, (4.0, 7.0))] {
+                assert_eq!(arm.pivot[0], shoulder, "{} shoulder, sleeves: {sleeves}", arm.name);
+                assert_eq!(arm.cuboids.len(), if sleeves { 2 } else { 1 }, "{}", arm.name);
+                for c in &arm.cuboids {
+                    assert_eq!(span(arm, c), edges, "{}, sleeves: {sleeves}", arm.name);
+                }
+            }
+            // Not arms: the body keeps its width.
+            for c in &parts[1].cuboids {
+                assert_eq!(span(&parts[1], c), (-4.0, 4.0), "body, sleeves: {sleeves}");
+            }
+        }
+    }
+
+    /// The classic humanoid: head, body, then the arms and legs at -x (mirrored) and +x.
+    fn classic() -> Vec<Part> {
+        let part = |name: &str, x: f32, y: f32, origin: [f32; 3], size: [f32; 3], uv: [f32; 2], mirror: bool| Part {
+            role: role_of(name, 0),
+            name: name.into(),
+            parent: None,
+            pivot: [x, y, 0.0],
+            rest: [0.0; 3],
+            cuboids: vec![Cuboid { origin, size, uv, inflate: 0.0, mirror, faces: None }],
+            mesh: Vec::new(),
+        };
+        let (arm, leg) = ([-2.0, -10.0, -2.0], [-2.0, -12.0, -2.0]);
+        vec![
+            part("head", 0.0, 24.0, [-4.0, 0.0, -4.0], [8.0; 3], [0.0, 0.0], false),
+            part("body", 0.0, 24.0, [-4.0, -12.0, -2.0], [8.0, 12.0, 4.0], [16.0, 16.0], false),
+            part("rightArm", -6.0, 22.0, arm, [4.0, 12.0, 4.0], [40.0, 16.0], true),
+            part("leftArm", 6.0, 22.0, arm, [4.0, 12.0, 4.0], [40.0, 16.0], false),
+            part("rightLeg", -2.0, 12.0, leg, [4.0, 12.0, 4.0], [0.0, 16.0], true),
+            part("leftLeg", 2.0, 12.0, leg, [4.0, 12.0, 4.0], [0.0, 16.0], false),
+        ]
+    }
+
+    #[test]
+    fn skin_layers_put_a_box_over_each_part() {
+        let mut parts = classic();
+        skin_layers(&mut parts);
+        // Per box, the layer first: (picture, inflate, mirrored).
+        let boxes = |p: &Part| {
+            p.cuboids
+                .iter()
+                .map(|c| (c.uv, c.inflate, c.mirror))
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(boxes(&parts[0]), [([32.0, 0.0], 0.5, false), ([0.0, 0.0], 0.0, false)], "head");
+        assert_eq!(boxes(&parts[1]), [([16.0, 32.0], 0.25, false), ([16.0, 16.0], 0.0, false)], "body");
+        assert_eq!(boxes(&parts[2]), [([48.0, 48.0], 0.25, false), ([32.0, 48.0], 0.0, false)], "arm at -x");
+        assert_eq!(boxes(&parts[3]), [([40.0, 32.0], 0.25, false), ([40.0, 16.0], 0.0, false)], "arm at +x");
+        assert_eq!(boxes(&parts[4]), [([0.0, 48.0], 0.25, false), ([16.0, 48.0], 0.0, false)], "leg at -x");
+        assert_eq!(boxes(&parts[5]), [([0.0, 32.0], 0.25, false), ([0.0, 16.0], 0.0, false)], "leg at +x");
+        // On a skin of 64 x 64 every face is inside it.
+        for c in parts.iter().flat_map(|p| &p.cuboids) {
+            for [x, y, w, h] in c.face_rects() {
+                assert!(x.min(x + w) >= 0.0 && x.max(x + w) <= 64.0 && y.min(y + h) >= 0.0 && y.max(y + h) <= 64.0, "{c:?}");
+            }
+        }
+    }
+
+    #[test]
+    fn skin_layers_leave_other_boxes_alone() {
+        let mut parts = classic();
+        // A thinner arm, a box with its own faces and a part that is no limb.
+        parts[2].cuboids[0].size[0] = 3.0;
+        parts[4].cuboids[0].faces = Some([[0.0; 4]; 6]);
+        parts[5].role = role::STATIC;
+        skin_layers(&mut parts);
+        assert_eq!(parts.iter().map(|p| p.cuboids.len()).collect::<Vec<_>>(), [2, 2, 1, 2, 1, 1]);
+        assert_eq!(parts[2].cuboids[0].uv, [40.0, 16.0]);
     }
 
     #[test]
