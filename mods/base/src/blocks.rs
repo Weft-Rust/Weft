@@ -152,6 +152,7 @@ pub fn register(r: &mut Registry) {
             "base:oak_planks",
             "base:birch_planks",
             "base:spruce_planks",
+            "base:palm_planks",
         ],
     );
     r.stairs("#has_shapes").tab(&crate::tabs::BUILDING);
@@ -318,9 +319,11 @@ pub fn register(r: &mut Registry) {
     log(r, &OAK_LOG, "oak", false);
     log(r, &BIRCH_LOG, "birch", false);
     log(r, &SPRUCE_LOG, "spruce", false);
+    log(r, &PALM_LOG, "palm", false);
     log(r, &OAK_WOOD, "oak", true);
     log(r, &BIRCH_WOOD, "birch", true);
     log(r, &SPRUCE_WOOD, "spruce", true);
+    log(r, &PALM_WOOD, "palm", true);
     r.shapes_of("hollow_log", "#logs", "_hollow")
         .sound_group("wood")
         .model_file("hollow_log")
@@ -341,7 +344,7 @@ pub fn register(r: &mut Registry) {
         .signal_blocker()
         .mined_by("shears", tool_tier::HAND)
         .tab(&crate::tabs::NATURAL);
-    for (h, wood) in [(&OAK_PLANKS, "oak"), (&BIRCH_PLANKS, "birch"), (&SPRUCE_PLANKS, "spruce")] {
+    for (h, wood) in [(&OAK_PLANKS, "oak"), (&BIRCH_PLANKS, "birch"), (&SPRUCE_PLANKS, "spruce"), (&PALM_PLANKS, "palm")] {
         r.block(h)
             .sound_group("wood")
             .texture(&format!("planks_{wood}"))
@@ -357,6 +360,7 @@ pub fn register(r: &mut Registry) {
     leaves(r, &OAK_LEAVES, "leaves_oak", true);
     leaves(r, &BIRCH_LEAVES, "leaves_birch", true);
     leaves(r, &SPRUCE_LEAVES, "leaves_spruce", true);
+    leaves(r, &PALM_LEAVES, "leaves_palm", true);
     leaves(r, &BUSH_LEAVES, "raspberry_leaves", false);
     berry_leaves(r, &RASPBERRY_LEAVES, "raspberry_leaves", "raspberry_leaves_berried", &crate::items::RASPBERRY);
     berry_leaves(r, &SNOWBERRY_LEAVES, "raspberry_leaves", "snowberry_leaves_berried", &crate::items::SNOWBERRY);

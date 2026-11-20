@@ -70,6 +70,10 @@ pub static VERBASCUM: Block = Block::named("base:verbascum");
 pub static CLOVER: Block = Block::named("base:clover");
 pub static MUSIC_PLAYER: Block = Block::named("base:music_player");
 pub static BED: Block = Block::named("base:bed");
+pub static PALM_LOG: Block = Block::named("palm_log");
+pub static PALM_WOOD: Block = Block::named("palm_wood");
+pub static PALM_LEAVES: Block = Block::named("palm_leaves");
+pub static PALM_PLANKS: Block = Block::named("palm_planks");
 
 pub static REDSTONE: Block = Block::named("base:redstone");
 pub static REDSTONE_ORE: Block = Block::named("base:redstone_ore");
