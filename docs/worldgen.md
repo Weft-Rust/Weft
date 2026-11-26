@@ -156,8 +156,8 @@ r.natural_spawn(&SHEEP).biome("#animals").ground("#animal_spawn").light(7, 15).p
 A biome says once what it is: the climate it likes, its ground, its colors, plus whatever data and tags you attach.
 
 ```rust
-static DESERT: Biome = Biome::named("desert");
-r.biome(&DESERT).temperature(0.35..).humidity(..0.0).surface("sand", "sand", 3).under("sandstone", 1).tint(&tints::GRASS, 0xbfb755).tag("dry");
+static DUNES: Biome = Biome::named("dunes");
+r.biome(&DUNES).temperature(0.35..).humidity(..0.0).surface("sand", "sand", 3).under("sandstone", 1).tint(&tints::GRASS, 0xbfb755).tag("dry");
 ```
 - `temperature(..)`, `humidity(..)`: where the climate fits it, as ranges like `0.35..` or `..-0.45` (the fields run about -1.4 to 1.4). Without them it fits anywhere.
 - `surface(top, filler, depth)`: a top block, `depth` blocks of filler, then the terrain's stone
@@ -265,7 +265,7 @@ A field is a named value over the whole terrain. `temperature`, `humidity` and `
 The name is used as written, so give yours your mod's prefix. A field can only use fields declared before it. Declaring one that exists, `temperature` included, replaces it for everything that uses it, which is how a mod gives the whole overworld another climate.
 
 ### Biome rules
-A rule puts a biome into a terrain. It starts from the biome's climate and surface, so `BiomeRule::new("desert")` is a whole rule. Rules are tried in order and the **first one that fits wins**, so specific ones go first and a plain catch-all goes last. What a rule adds is where else it must hold:
+A rule puts a biome into a terrain. It starts from the biome's climate and surface, so `BiomeRule::new("dunes")` is a whole rule. Rules are tried in order and the **first one that fits wins**, so specific ones go first and a plain catch-all goes last. What a rule adds is where else it must hold:
 - `height(..)`: the surface height, like `..=SEA + 1`
 - `field(name, range)`: where a field is in a range like `0.45..` (from inclusive, to exclusive); `temperature(..)`, `humidity(..)` and `continent(..)` are the same for those three
 
@@ -326,7 +326,7 @@ r.edit(OVERWORLD.terrain())
     .landform(Landform::new(needle).named("needle"));
 r.decoration(boulders).dimension(&OVERWORLD);
 ```
-Because rules are tried in order, a new biome goes in next to the rule it takes space from: `rule_before` takes the place where both would fit, `rule_after` only what the other leaves. A biome's climate and surface are its own, wherever it goes: `r.edit(&DESERT).temperature(0.5..)` changes them in every dimension (each is a component, `comps::biome`, and a range of a field given again replaces the old one). The rest of the edits:
+Because rules are tried in order, a new biome goes in next to the rule it takes space from: `rule_before` takes the place where both would fit, `rule_after` only what the other leaves. A biome's climate and surface are its own, wherever it goes: `r.edit(&DUNES).temperature(0.5..)` changes them in every dimension (each is a component, `comps::biome`, and a range of a field given again replaces the old one). The rest of the edits:
 
 | call | what it does |
 |---|---|

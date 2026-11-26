@@ -5,7 +5,7 @@ pub use base_api::items::*;
 
 pub use base_api::{
     attributes::{ARMOR, ARMOR_TOUGHNESS},
-    components::{FLAMMABLE, FOOD, FUEL, Food},
+    components::{FLAMMABLE, FOOD, FUEL, Food, HUNGER},
     tags::ARMOR_PIECE,
 };
 /// Tags of armor pieces, head to feet; `<tag>/<material>` picks the recipe (see recipes.rs).
@@ -132,6 +132,37 @@ pub fn register(r: &mut Registry) {
     r.item(&DRYADS_SADDLE)
         .tag("mushrooms")
         .tab(&crate::tabs::INGREDIENTS);
+    r.item(&COCONUT_HALF)
+        .food(Food { hunger: 3, saturation: 1.5 })
+        .on_use(|u| {
+            let stack = u.stack();
+            let Some(food) = FOOD.on_stack(&stack) else { return false };
+            let w = u.world();
+            let Some(h) = w.component_mut(u.entity(), &HUNGER) else { return false };
+            if h.food >= 20.0 {
+                return false;
+            }
+            let (food_before, saturation_before) = (h.food, h.saturation);
+            if w.inventory(u.entity()).insert(COCONUT_SHELL.stack(1)).count > 0 {
+                return false;
+            }
+            let h = w.component_mut(u.entity(), &HUNGER).expect("checked above");
+            h.food = (food_before + food.hunger as f32).min(20.0);
+            h.saturation = (saturation_before + food.saturation).min(h.food);
+            u.set_stack(stack.shrink(1));
+            true
+        })
+        .remainder(&COCONUT_SHELL)
+        .tab(&crate::tabs::FOOD);
+    r.edit(&PRICKLY_PEAR_ITEM)
+        .texture("opuntia")
+        .food(Food { hunger: 2, saturation: 1.5 })
+        .on_use(base_api::components::eat);
+    r.item(&COCONUT_SHELL)
+        .tab(&crate::tabs::INGREDIENTS);
+    r.edit(&COCONUT_ITEM)
+        .max_stack(16)
+        .texture("coconut");
     r.item(Item::generated("leather".into()))
         .tag("materials/leather")
         .tab(&crate::tabs::INGREDIENTS);
@@ -155,6 +186,7 @@ pub fn register(r: &mut Registry) {
                 .attack_damage(damage)
                 .attack_speed(speed)
                 .tag(&format!("{kind}s/{}", m.name))
+                .tag(kind)
                 // Vanilla: weapons wear by one per hit, tools (made for blocks) by two.
                 .set(&WEAR_PER_HIT, if kind == "sword" { 1 } else { 2 })
                 .tab(if kind == "sword" { &crate::tabs::COMBAT } else { &crate::tabs::TOOLS });

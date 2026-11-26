@@ -53,7 +53,7 @@ fn snow_bands() -> Vec<(f64, f64, i32)> {
 
 /// What a biome grows, as data any mod can set on any biome: trees per 5x5 cell (0..1), share of
 /// grass on plantable soil, which trees and flowers (block lists the engine checks), and tags `frozen` (nothing grows, set by
-/// `.frozen(..)`), `dry` (cacti).
+/// `.frozen(..)`).
 
 pub fn register(r: &mut Registry) {
     // Tags say what a biome is (spawning, decoration and mods ask these, not names).
@@ -137,6 +137,7 @@ pub fn register(r: &mut Registry) {
         .set(&COARSE_DIRT_COVER, 0.4)
         // .set_text(&FLOWERS, "base:rose base:dandelion base:fern base:fern")
         // .set(&FLOWER_COVER, 0.02)
+        .set(&FLOWER_COVER, 0.02)
         .set(&TREE_KINDS, TreeKinds::from([("base:oak", 4), ("base:birch", 1)]));
     r.biome(&BIRCH_FOREST)
         .temperature(..0.1)
@@ -180,13 +181,51 @@ pub fn register(r: &mut Registry) {
         .set(&TREES, 0.03)
         .set(&TREE_KINDS, TreeKinds::from([("base:spruce", 1)]));
     r.biome(&DESERT)
-        .temperature(0.25..)
+        .temperature(0.15..)
         .humidity(..0.1)
         .surface("sand", "sand", 3)
         .under("sandstone", 1)
         .tint(grass, 0xbfb755)
         .tint(foliage, 0xaea42a)
-        .tag("dry")
+        .set(&GLOBULAR_CACTI_COVER, 0.01)
+        .set(&COLUMNAR_CACTI_COVER, 0.005)
+        .set(&SHORT_GRASS_COVER, 0.05)
+        .set(&SHORT_DRYGRASS_COVER, 0.2)
+        .set(&DRY_FERN_COVER, 0.21)
+        .tag("hot");
+    r.biome(&GRASSY_DESERT)
+        .temperature(0.1..)
+        .humidity(..0.1)
+        .surface("sand", "sand", 3)
+        .under("sandstone", 1)
+        .tint(grass, 0xbfb755)
+        .tint(foliage, 0xaea42a)
+        .set(&GLOBULAR_CACTI_COVER, 0.01)
+        .set(&COLUMNAR_CACTI_COVER, 0.005)
+        .set(&DRYGRASS_COVER, 0.3)
+        .set(&TALL_GRASS_COVER, 0.375)
+        .set(&DRY_FERN_COVER, 0.21)
+        .tag("hot");
+    r.biome(&DUNES)
+        .temperature(0.33..)
+        .humidity(..0.1)
+        .surface("sand", "sand", 3)
+        .under("sandstone", 1)
+        .tint(grass, 0xbfb755)
+        .tint(foliage, 0xaea42a)
+        .tag("hot");
+    r.biome(&SEMIDESERT)
+        .temperature(0.1..)
+        .humidity(..0.1)
+        .surface("coarse_dirt", "coarse_dirt", 4)
+        .under("dirt", 1)
+        .tint(grass, 0xbfb755)
+        .tint(foliage, 0xaea42a)
+        .set(&GLOBULAR_CACTI_COVER, 0.01)
+        .set(&COLUMNAR_CACTI_COVER, 0.005)
+        .set(&TALL_GRASS_COVER, 0.375)
+        .set(&TREES, 0.025)
+        .set(&TREE_KINDS, TreeKinds::from([("base:oak", 1), ("base:acacia", 3)]))
         .tag("hot");
     r.biome(&MOUNTAINS)
         .surface("grass", "dirt", 3)
@@ -209,7 +248,12 @@ pub fn register(r: &mut Registry) {
         .surface("sand", "sand", 3)
         .deep_top("gravel", SEA - 8)
         .tag("ocean");
-    r.biome(&BEACH).surface("sand", "sand", 3).tag("beach");
+    r.biome(&BEACH)
+        .surface("sand", "sand", 3)
+        .set(&SHORT_DRYGRASS_COVER, 0.2)
+        .set(&TREES, 0.1)
+        .set(&TREE_KINDS, TreeKinds::from([("base:palm", 1)]))
+        .tag("beach");
     // Underground (3D): whole cubes deep under the surface; spiders like it there.
     r.biome(&DEEP_CAVES).tag("cave").tag("dark");
 
@@ -292,9 +336,9 @@ pub fn register(r: &mut Registry) {
                 .mask(Expr::temperature().ramp(-0.35, -0.6).not() * (Expr::value(1.0) - Expr::field("base:plains") * Expr::value(0.86))),
         )
         .landform(
-            preset::dunes(4.0, 26.0).mask(
+            preset::dunes(5.0, 30.0).mask(
                 Expr::temperature()
-                    .ramp(0.25, 0.45)
+                    .ramp(0.25, 0.55)
                     .and(Expr::humidity().ramp(0.1, -0.05)),
             ),
         )
@@ -415,11 +459,31 @@ pub fn register(r: &mut Registry) {
                 .field("base:surface_temperature", ..-0.15),
         )
         .rule(
+            BiomeRule::new("dunes")
+                .temperature(..)
+                .humidity(..)
+                .field("base:surface_temperature", 0.28..)
+                .field("base:surface_humidity", ..0.1),
+        )
+        .rule(
             BiomeRule::new("desert")
                 .temperature(..)
                 .humidity(..)
-                .field("base:surface_temperature", 0.25..)
+                .field("base:surface_temperature", 0.15..)
                 .field("base:surface_humidity", ..0.1),
+        )
+        .rule(
+            BiomeRule::new("grassy_desert")
+                .temperature(..)
+                .humidity(..)
+                .field("base:surface_temperature", 0.15..)
+                .field("base:surface_humidity", ..0.2)
+                .field("base:weirdness", ..0.6),
+        )
+        .rule(
+            BiomeRule::new("semidesert")
+                .field("base:surface_temperature", 0.0..)
+                .field("base:surface_humidity", ..0.3)
         )
         .rule(
             BiomeRule::new("plains")
@@ -458,11 +522,11 @@ pub fn register(r: &mut Registry) {
         .spacing(5)
         .reach(20)
         .density(&TREES)
-        .ground("#plant_soil")
+        .ground("#tree_soil")
         .plan(|s| {
-            if COARSE_DIRT.is(s.read(s.pos().below())) {
-                return;
-            }
+            // if COARSE_DIRT.is(s.read(s.pos().below())) {
+            //     return;
+            // }
             let kinds = TREE_KINDS.on_biome(s.biome());
             let mut rng = Rng(s.random());
             // Biomes that ask for trees without naming kinds grow oaks, as they always did.

@@ -14,6 +14,11 @@ pub static BLUEGRASS_COVER: Component<f32> = Component::named("bluegrass");
 pub static SHORT_GRASS_COVER: Component<f32> = Component::named("short_grass");
 pub static CLOVER_COVER: Component<f32> = Component::named("clover");
 pub static COARSE_DIRT_COVER: Component<f32> = Component::named("coarse_dirt");
+pub static DRYGRASS_COVER: Component<f32> = Component::named("drygrass");
+pub static SHORT_DRYGRASS_COVER: Component<f32> = Component::named("short_drygrass");
+pub static GLOBULAR_CACTI_COVER: Component<f32> = Component::named("globular_cacti_cover");
+pub static COLUMNAR_CACTI_COVER: Component<f32> = Component::named("columnar_cacti_cover");
+pub static DRY_FERN_COVER: Component<f32> = Component::named("dry_fern");
 /// Flowers a biome grows, picked evenly (`"base:dandelion base:rose"` where unset).
 pub static FLOWERS: Component<BlockList> = Component::named("flowers");
 pub static FROZEN: Tag = Tag::named("frozen");
@@ -34,7 +39,11 @@ pub static SNOWY_PEAKS: Biome = Biome::named("snowy_peaks");
 pub static OCEAN: Biome = Biome::named("ocean");
 pub static BEACH: Biome = Biome::named("beach");
 pub static DEEP_CAVES: Biome = Biome::named("deep_caves");
+pub static DUNES: Biome = Biome::named("dunes");
+pub static GRASSY_DESERT: Biome = Biome::named("grassy_desert");
+pub static SEMIDESERT: Biome = Biome::named("semidesert");
 
 pub static PLANT_SOIL: Tag = Tag::named("plant_soil");
 pub static CACTUS_SOIL: Tag = Tag::named("cactus_soil");
 pub static SUGAR_CANE_SOIL: Tag = Tag::named("sugar_cane_soil");
+pub static GENERAL_SOIL: Tag = Tag::named("general_soil");

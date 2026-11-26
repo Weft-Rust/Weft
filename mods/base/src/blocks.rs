@@ -155,6 +155,8 @@ pub fn register(r: &mut Registry) {
             "base:oak_planks",
             "base:birch_planks",
             "base:spruce_planks",
+            "base:palm_planks",
+            "base:acacia_planks",
         ],
     );
     r.stairs("#has_shapes").tab(&crate::tabs::BUILDING);
@@ -321,9 +323,13 @@ pub fn register(r: &mut Registry) {
     log(r, &OAK_LOG, "oak", false);
     log(r, &BIRCH_LOG, "birch", false);
     log(r, &SPRUCE_LOG, "spruce", false);
+    log(r, &PALM_LOG, "palm", false);
+    log(r, &ACACIA_LOG, "acacia", false);
     log(r, &OAK_WOOD, "oak", true);
     log(r, &BIRCH_WOOD, "birch", true);
     log(r, &SPRUCE_WOOD, "spruce", true);
+    log(r, &PALM_WOOD, "palm", true);
+    log(r, &ACACIA_WOOD, "acacia", true);
     r.shapes_of("hollow_log", "#logs", "_hollow")
         .sound_group("wood")
         .model_file("hollow_log")
@@ -344,7 +350,7 @@ pub fn register(r: &mut Registry) {
         .signal_blocker()
         .mined_by("shears", tool_tier::HAND)
         .tab(&crate::tabs::NATURAL);
-    for (h, wood) in [(&OAK_PLANKS, "oak"), (&BIRCH_PLANKS, "birch"), (&SPRUCE_PLANKS, "spruce")] {
+    for (h, wood) in [(&OAK_PLANKS, "oak"), (&BIRCH_PLANKS, "birch"), (&SPRUCE_PLANKS, "spruce"), (&PALM_PLANKS, "palm"), (&ACACIA_PLANKS, "acacia")] {
         r.block(h)
             .sound_group("wood")
             .texture(&format!("planks_{wood}"))
@@ -363,7 +369,9 @@ pub fn register(r: &mut Registry) {
     leaves(r, &OAK_LEAVES, "leaves_oak", true);
     leaves(r, &BIRCH_LEAVES, "leaves_birch", true);
     leaves(r, &SPRUCE_LEAVES, "leaves_spruce", true);
+    leaves(r, &PALM_LEAVES, "leaves_palm", true);
     leaves(r, &BUSH_LEAVES, "raspberry_leaves", false);
+    leaves(r, &ACACIA_LEAVES, "leaves_acacia", true);
     berry_leaves(r, &RASPBERRY_LEAVES, "raspberry_leaves", "raspberry_leaves_berried", &crate::items::RASPBERRY);
     berry_leaves(r, &SNOWBERRY_LEAVES, "raspberry_leaves", "snowberry_leaves_berried", &crate::items::SNOWBERRY);
     // Vanilla numbers: water steps every 5 ticks and reaches 7 blocks, lava every 30 and 3.
@@ -413,7 +421,7 @@ pub fn register(r: &mut Registry) {
         .random_height_scale(0.85, 1.15)
         .random_yaw(0.0, 90.0)
         .replaceable()
-        .needs_below("#plant_soil")
+        .needs_below("#general_soil")
         .tint_kind(&tints::GRASS)
         .tab(&crate::tabs::NATURAL);
     r.block(&SHORT_GRASS)
@@ -424,7 +432,7 @@ pub fn register(r: &mut Registry) {
         .random_height_scale(0.85, 1.15)
         .random_yaw(0.0, 90.0)
         .replaceable()
-        .needs_below("#plant_soil")
+        .needs_below("#general_soil")
         .tint_kind(&tints::GRASS)
         .tab(&crate::tabs::NATURAL);
     r.block(&TALL_TALL_GRASS)
@@ -435,6 +443,7 @@ pub fn register(r: &mut Registry) {
         // .two_part("half", ["lower", "upper"], |_| Dir::Up)
         // .state_where("half=upper", |s| s.texture("tall_tallgrass_top"))
         // .state_where("half=lower", |s| s.needs_below("#plant_6oil"))
+        .needs_below("#general_soil")
         .tint_kind(&tints::GRASS)
         .tab(&crate::tabs::NATURAL);
     r.block(&BLUEGRASS)
@@ -447,6 +456,29 @@ pub fn register(r: &mut Registry) {
         .needs_below("#plant_soil")
         .tint_kind(&tints::GRASS)
         .tab(&crate::tabs::NATURAL);
+    r.block(&DRYGRASS)
+        .sound_group("grass")
+        .plant()
+        .random_offset(0.25)
+        .random_height_scale(0.85, 1.15)
+        .random_yaw(0.0, 90.0)
+        .replaceable()
+        .needs_below("#general_soil")
+        .tab(&crate::tabs::NATURAL);
+    r.block(&SHORT_DRYGRASS)
+        .sound_group("grass")
+        .plant()
+        .random_offset(0.25)
+        .random_height_scale(0.85, 1.15)
+        .random_yaw(0.0, 90.0)
+        .replaceable()
+        .needs_below("#general_soil")
+        .tab(&crate::tabs::NATURAL);
+    r.loot(&SHORT_DRYGRASS).pool(
+        Pool::new()
+            .when(Cond::tool("#tools/shears"))
+            .item(SHORT_DRYGRASS.name()),
+    );
     plant(r, &DANDELION, "flower_dandelion");
     plant(r, &ROSE, "flower_rose");
     for color in ["orange", "pink", "purple", "red", "white", "yellow"] {
@@ -488,6 +520,20 @@ pub fn register(r: &mut Registry) {
         Pool::new()
             .when(Cond::tool("#tools/shears"))
             .item(LAVENDER.name()),
+    );
+    r.block(&CACTUS_FLOWER)
+        .grid_placement()
+        .sound_group("grass")
+        .shares_cell_with("#water")
+        .hardness(0.1)
+        .needs_below("cactus")
+        .tab(&crate::tabs::NATURAL)
+        .not_solid()
+        .hitbox([2.0, 0.0, 2.0], [14.0, 16.0, 14.0]);
+    r.loot(&CACTUS_FLOWER).pool(
+        Pool::new()
+            .when(Cond::tool("#tools/shears"))
+            .item(CACTUS_FLOWER.name()),
     );
     r.block(&CLOVER)
         .sound_group("grass")
@@ -786,9 +832,58 @@ pub fn register(r: &mut Registry) {
         .tab(&crate::tabs::NATURAL)
         .not_solid()
         .hitbox([2.0, 0.0, 2.0], [14.0, 16.0, 14.0]);
+    fn coconut_box(d: Dir) -> ([f32; 3], [f32; 3]) {
+        match d {
+            Dir::Up => ([2.0, 0.0, 2.0], [14.0, 12.0, 14.0]),
+            Dir::Down => ([2.0, 4.0, 2.0], [14.0, 16.0, 14.0]),
+            Dir::East => ([0.0, 2.0, 2.0], [12.0, 14.0, 14.0]),
+            Dir::West => ([4.0, 2.0, 2.0], [16.0, 14.0, 14.0]),
+            Dir::North => ([2.0, 2.0, 4.0], [14.0, 14.0, 16.0]),
+            Dir::South => ([2.0, 2.0, 0.0], [14.0, 14.0, 12.0]),
+        }
+    }
+    r.block(&COCONUT)
+        .sound_group("wood")
+        .texture("coconut_side")
+        .top("coconut_top")
+        .bottom("coconut_bottom")
+        .facing(Facings::ALL, Toward::Face)
+        .default_facing(Dir::Up)
+        .states(|p, s| {
+            let d = p.facing();
+            let (lo, hi) = coconut_box(d);
+            let uv = [2.0, 2.0, 14.0, 14.0];
+            let faces = [("", uv); 6];
+            s.orientation(Orientation::NONE)
+                .needs(d.opposite(), "")
+                .model_box_faces(lo, hi, faces)
+                .hitbox(lo, hi)
+        })
+        .hardness(0.2)
+        .tab(&crate::tabs::NATURAL);
+    r.block(&PRICKLY_PEAR)
+        .sound_group("cloth")
+        .model_box_faces(
+            [4.0, 0.0, 4.0],
+            [12.0, 11.0, 12.0],
+            [
+                ("opuntia", [0.0, 0.0, 8.0, 10.0]),
+                ("opuntia", [0.0, 0.0, 8.0, 10.0]),
+                ("opuntia", [8.0, 0.0, 16.0, 8.0]),
+                ("opuntia", [8.0, 8.0, 16.0, 16.0]),
+                ("opuntia", [0.0, 0.0, 8.0, 10.0]),
+                ("opuntia", [0.0, 0.0, 8.0, 10.0]),
+            ])
+        .hitbox(
+            [4.0, 0.0, 4.0],
+            [12.0, 11.0, 12.0],
+        )
+        .needs_below("")
+        .hardness(0.2)
+        .tab(&crate::tabs::FOOD);
     let shears = Cond::tool("#tools/shears");
     for (grass, chance) in
-        [(&TALL_GRASS, 0.125), (&SHORT_GRASS, 0.125), (&BLUEGRASS, 0.125), (&CLOVER, 0.125), (&FERN, 0.125), (&TALL_TALL_GRASS, 0.25)]
+        [(&TALL_GRASS, 0.125), (&SHORT_GRASS, 0.125), (&BLUEGRASS, 0.125), (&CLOVER, 0.125), (&FERN, 0.125), (&TALL_TALL_GRASS, 0.25), (&DRYGRASS, 0.062)]
     {
         r.loot(grass)
             .pool(Pool::new().when(shears.clone()).item(grass.name()))
@@ -803,6 +898,9 @@ pub fn register(r: &mut Registry) {
     // What may grow or stand where, from the common `dirt` and `sand` tags like modern vanilla:
     // a mod's sand tagged `sand` gets cactus and sugar cane, in the world and from players.
     r.tag("plant_soil", &["#dirt"]);
+    // Trees stand on sand too (palms on beaches), but ordinary plants do not.
+    r.tag("tree_soil", &["#plant_soil"]);
+    r.tag("tree_soil", &["#sand"]);
     r.tag("dyes/red", &["rose"]);
     r.tag("dyes/green", &["cactus"]);
     r.tag("torches", &["torch"]);
@@ -814,10 +912,11 @@ pub fn register(r: &mut Registry) {
     r.tag("sugar_cane_soil", &["#sand"]);
     r.tag("sugar_cane_soil", &["sugar_cane"]);
     r.tag("cactus_soil", &["#sand"]);
-    r.tag("cactus_soil", &["cactus"]);
+    r.tag("cactus_soil", &["cactus", "coarse_dirt"]);
     r.tag("crop_soil", &["farmland"]);
     r.tag("grass_spreads_to", &["dirt"]);
     r.tag("animal_spawn", &["grass"]);
+    r.tag("general_soil", &["#plant_soil", "sand"]);
 
     // A hoe's own use, as vanilla's, any mod's hoe: the soil stays a block nothing happens to
     // when clicked, so a block placed on it shows at once.

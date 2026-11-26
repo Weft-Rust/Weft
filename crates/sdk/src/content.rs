@@ -3068,7 +3068,7 @@ pub struct BiomeBuilder<'a> {
 }
 
 /// A biome's climate and surface (`comps::biome`). Terrain rules placing it start from these
-/// (`BiomeRule::new("desert")` needs nothing else) and may change them there.
+/// (`BiomeRule::new("dunes")` needs nothing else) and may change them there.
 impl BiomeBuilder<'_> {
     /// Where field `name` of the terrain fits it; given again, the new range replaces the old.
     fn range(self, name: &str, range: impl std::ops::RangeBounds<f64>) -> Self {

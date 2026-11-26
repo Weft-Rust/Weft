@@ -16,7 +16,7 @@ pub(super) fn plant_at(seed: u64, surface: BlockPos, biome: u32, ground: u32) ->
 }
 
 fn soil_plant(seed: u64, x: i32, z: i32, b: u32, h: u64, roll: f64) -> u32 {
-    if roll < FLOWER_COVER.on_biome(b).unwrap_or(0.012) as f64 {
+    if roll < FLOWER_COVER.on_biome(b).unwrap_or(0.0) as f64 {
         FLOWERS
             .on_biome(b)
             .map_or_else(|| [DANDELION.id(), ROSE.id()][(h >> 32) as usize % 2], |l| l.pick(h >> 32).unwrap_or(0))
@@ -29,10 +29,16 @@ fn soil_plant(seed: u64, x: i32, z: i32, b: u32, h: u64, roll: f64) -> u32 {
         if wave < 0 { BLUEGRASS.id() } else { 0 }
     } else if roll < SHORT_GRASS_COVER.on_biome(b).unwrap_or(0.0) as f64 {
         SHORT_GRASS.id()
+    } else if roll < SHORT_DRYGRASS_COVER.on_biome(b).unwrap_or(0.0) as f64 {
+        SHORT_DRYGRASS.id()
+    } else if roll < DRYGRASS_COVER.on_biome(b).unwrap_or(0.0) as f64 {
+        DRYGRASS.id()
     } else if roll < TALL_GRASS_COVER.on_biome(b).unwrap_or(0.0) as f64 {
         TALL_TALL_GRASS.id()
-    } else if roll < GRASS_COVER.on_biome(b).unwrap_or(0.05) as f64 {
+    } else if roll < GRASS_COVER.on_biome(b).unwrap_or(0.0) as f64 {
         TALL_GRASS.id()
+    } else if roll < DRY_FERN_COVER.on_biome(b).unwrap_or(0.0) as f64 {
+        BUSH_STEM.id()
     } else {
         0
     }
@@ -95,17 +101,34 @@ pub fn decorate(g: &mut Gen) {
                     g.set(x, y - 1, z, COARSE_DIRT.id());
                 }
             }
-            if PLANT_SOIL.on_block(below) {
+            if CACTUS_SOIL.on_block(below) {
+                let cactus_cover = GLOBULAR_CACTI_COVER.on_biome(b).unwrap_or(0.0) as f64;
+                let columnar_cactus_cover = COLUMNAR_CACTI_COVER.on_biome(b).unwrap_or(0.0) as f64;
+                if roll < columnar_cactus_cover && y + 3 < 16 {
+                    let n = 2 + (h >> 40) % 3;
+                    let mut dy = 0;
+                    for _ in 0..n as usize {
+                        g.set(x, y + dy, z, CACTUS.id());
+                        dy += 1;
+                    }
+                    if dy >= 4 && (h >> 50) % 6 == 1 && y + dy < 16 {
+                        g.set(x, y + dy, z, PRICKLY_PEAR.id());
+                    }
+                    continue;
+                } else if roll < cactus_cover {
+                    g.set(x, y, z, CACTUS.id());
+                    if y + 1 < 16 && (h >> 50) % 4 == 1 {
+                        g.set(x, y + 1, z, CACTUS_FLOWER.id());
+                    }
+                    continue;
+                }
+            }
+            if GENERAL_SOIL.on_block(below) {
                 let plant = soil_plant(seed, wx, wz, b, h, roll);
                 if TALL_TALL_GRASS.is(plant) {
                     place_tall_grass(g, x, y, z);
                 } else if plant != 0 {
                     g.set(x, y, z, plant);
-                }
-            } else if CACTUS_SOIL.on_block(below) && DRY.on_biome(b) && roll < 0.006 && y + 2 < 16 {
-                let n = 1 + (h >> 40) % 3;
-                for k in 0..n as usize {
-                    g.set(x, y + k, z, CACTUS.id());
                 }
             } else if SUGAR_CANE_SOIL.on_block(below)
                 && col.height == SEA
