@@ -1,0 +1,5 @@
+cow/
+    ambient0: (CC0) https://freesound.org/people/Zozzy/sounds/59245/
+    ambient1 - ambient5: (CC0) https://freesound.org/people/JosephSardin/sounds/177253/
+    ambient6: (CC0) https://freesound.org/people/JarredGibb/sounds/233138/
+    death0: (CC BY-NC 4.0) https://freesound.org/people/Kyster/sounds/96652/
