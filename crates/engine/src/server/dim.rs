@@ -1897,7 +1897,13 @@ impl Dim {
         let under = self
             .get(space_id, (pos - DVec3::Y * 0.2).floor().as_ivec3())
             .unwrap_or(AIR);
-        let kind = c.states[under as usize].effects[crate::content::block_event::LAND].particle;
+        let land = c.states[under as usize].effects[crate::content::block_event::LAND];
+
+        if fell.is_some() && under != AIR {
+            self.sound(space_id, land.sound, pos, 0.5, 0.0);
+        }
+
+        let kind = land.particle;
         if let Some(drop) = fell.filter(|_| hurts && under != AIR && kind != u32::MAX) {
             // Vanilla's `checkFallDamage`, and what its particles make of no speed of their own.
             let count = (150.0 * (0.2 + (drop - safe).ceil() / 15.0).min(2.5)) as u32;
